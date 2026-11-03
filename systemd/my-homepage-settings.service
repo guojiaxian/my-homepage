@@ -1,0 +1,13 @@
+[Unit]
+Description=my-homepage 设置 API（首页设置面板后端）
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/node /root/applications/my-homepage/scripts/settings-server.mjs
+Restart=always
+RestartSec=3
+SyslogIdentifier=my-homepage-settings
+
+[Install]
+WantedBy=multi-user.target

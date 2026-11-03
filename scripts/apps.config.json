@@ -1,0 +1,211 @@
+{
+  "apps": [
+    {
+      "id": "cloud-monitor",
+      "directory": "/root/applications/cloud-monitor",
+      "expectedPort": 18001,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/cloud-monitor",
+      "tags": [
+        "监控",
+        "大屏",
+        "Python"
+      ],
+      "icon": "📊",
+      "name": "云计算监控大屏",
+      "description": "面向中控大屏的统一监控系统：汇聚高性能计算（HPC）集群、虚拟化集群、存储集群三类底层资源的运行状态，采用定时拉取 + 页面解析 + 同步上屏方式。含大屏展示与管理后台。"
+    },
+    {
+      "id": "storage-monitor",
+      "directory": "/root/applications/storage-monitor",
+      "expectedPort": 18002,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/storage-monitor",
+      "tags": [
+        "监控",
+        "大屏",
+        "存储"
+      ],
+      "icon": "💾",
+      "name": "存储集群监控大屏",
+      "description": "面向存储集群资源的大屏展示：4 个存储集群的架构参数、节点数量、容量水位与分区占比图形化呈现，支持编辑模式与界面文案配置（SSE 实时生效）。零运行时依赖。"
+    },
+    {
+      "id": "study-log",
+      "directory": "/root/applications/study-log",
+      "expectedPort": 3000,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/Study-log",
+      "tags": [
+        "Vue",
+        "Fastify",
+        "AI"
+      ],
+      "icon": "📚",
+      "name": "StudyLog 成绩记录",
+      "description": "家庭自用的初中生学习成绩管理系统：录入考试分数后自动计算得分率、排名进退与目标院校差距，提供趋势图表与 AI 学情分析。"
+    },
+    {
+      "id": "tv-show",
+      "directory": "/root/applications/tv-show",
+      "expectedPort": 18000,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/tv-show",
+      "tags": [
+        "Android TV",
+        "大屏",
+        "Node"
+      ],
+      "icon": "📺",
+      "name": "数智中心大屏聚合平台",
+      "description": "TV Show Center：面向小米电视等安卓大屏的聚合应用，服务端聚合多个大屏入口，支持轮询播放、2×2 分屏与多设备互控控制台。"
+    },
+    {
+      "id": "expense-assistant",
+      "directory": "/root/applications/expense-assistant",
+      "expectedPort": 19000,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "",
+      "tags": [
+        "FastAPI",
+        "大模型",
+        "办公"
+      ],
+      "icon": "🧾",
+      "name": "财务报销附件助手",
+      "description": "报销前一键重命名附件的内部 Web 服务：上传发票/凭证等材料，识别类别与要素，生成合规文件名，确认后打包 ZIP 下载。"
+    },
+    {
+      "id": "wedding-plan",
+      "directory": "/root/applications/wedding-plan",
+      "expectedPort": 19002,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/wedding-plan",
+      "tags": [
+        "Vue",
+        "Express",
+        "生活"
+      ],
+      "icon": "💒",
+      "name": "备婚计划",
+      "description": "新人的专属备婚工具网站：婚礼倒计时、预算规划、物品清单、筹备任务、当天流程、座位排布与宾客礼金管理，电脑 / 手机 / 平板均可使用。"
+    },
+    {
+      "id": "network-monitor",
+      "directory": "/root/applications/network-monitor",
+      "expectedPort": 18003,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/network-monitor",
+      "tags": [
+        "Go",
+        "网络",
+        "告警"
+      ],
+      "icon": "🌐",
+      "name": "NetWatch 网络监控",
+      "description": "单位多出口宽带网络监控系统：面向 12 条联通宽带 × 12 个楼层子网的分流场景，监测出口线路连通性 / 网速并告警，同时覆盖外网视角的官网可达性监控。"
+    },
+    {
+      "id": "jianji-ledger",
+      "directory": "/root/applications/jianji-ledger",
+      "expectedPort": null,
+      "kinds": [
+        "app"
+      ],
+      "env": "lan",
+      "github": "",
+      "tags": [
+        "记账"
+      ],
+      "icon": "📒",
+      "name": "简记 · 账本",
+      "description": "记账 Web 应用（含 Capacitor 打包的安卓 APK）。"
+    },
+    {
+      "id": "time-logger",
+      "directory": "/root/applications/time-logger",
+      "expectedPort": 19001,
+      "kinds": [
+        "web",
+        "app"
+      ],
+      "env": "lan",
+      "https": true,
+      "github": "https://github.com/guojiaxian/Time-Logger",
+      "tags": [
+        "Web Audio",
+        "Node"
+      ],
+      "icon": "⏱️",
+      "name": "时间记录器 Time Logger",
+      "description": "地震密集台阵设备一致性检测的锤击时刻记录工具：Web Audio API 自动检测敲击并记录高精度北京时间，含 Web 前端与安卓离线 APK。"
+    },
+    {
+      "id": "my-homepage",
+      "directory": "/root/applications/my-homepage",
+      "expectedPort": 80,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "",
+      "tags": [
+        "Vue",
+        "导航",
+        "本站"
+      ],
+      "icon": "🏠",
+      "name": "我的应用导航（本站）",
+      "description": "本页自身：个人应用展示主页。定时探测各应用端口与运行状态、源码同步情况，并提供首页设置面板维护应用信息。"
+    }
+  ],
+  "remoteApps": [
+    {
+      "id": "study-log-cloud",
+      "healthUrl": "http://47.95.140.199:3000/api/v1/health",
+      "kinds": [
+        "web"
+      ],
+      "env": "public",
+      "github": "https://github.com/guojiaxian/Study-log",
+      "tags": [
+        "公网",
+        "Fastify",
+        "云服务器"
+      ],
+      "icon": "☁️",
+      "location": "阿里云",
+      "host": "47.95.140.199",
+      "url": "http://47.95.140.199:3000",
+      "name": "StudyLog 公网版",
+      "description": "部署在阿里云服务器上的公网版 StudyLog 学习成绩记录系统，面向外网提供访问，数据与内网版本相互独立。"
+    }
+  ],
+  "page": {
+    "siteName": "我的应用导航",
+    "heroTitle": "我的应用",
+    "heroSubtitle": "部署在这台服务器上的个人项目，端口与运行状态由服务端每 5 分钟自动探测。"
+  },
+  "$comment": "应用元数据（手工维护）。probe-apps.mjs 会探测每个应用的实际监听端口、运行状态与 git 同步状态，并与本文件合并生成前端使用的 apps.json。新增应用：先在 /root/applications 建目录并启动服务，再在此追加一条记录（id 必须与目录名一致）；漏配的应用若在监听也会被自动发现，标记为「待补充」。可选：顶层加 order 字段（id 数组）定义全局默认显示顺序，未列出的排后面。另顶层可加 remoteApps 数组：部署在云服务器等外部主机的应用，通过 healthUrl 健康接口探查在线状态与版本号（不做 git 检查）。条目用 \"kinds\": [\"web\",\"app\",\"miniapp\"] 定义应用分类（可多选）；不含 web 时视为线下应用（纯 APP / 小程序），主页显示灰色「线下应用」，不做端口探测；含 web 则照常探测。另可加 \"env\": \"lan\"/\"public\" 定义部署位置（内网/公网，本机缺省 lan、远程缺省 public）；本机应用可加 \"https\": true 让访问链接使用 https://。"
+}

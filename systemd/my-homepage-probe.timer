@@ -1,0 +1,11 @@
+[Unit]
+Description=my-homepage 应用端口探测定时器（每 5 分钟）
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=10s
+Unit=my-homepage-probe.service
+
+[Install]
+WantedBy=timers.target

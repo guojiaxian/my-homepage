@@ -1,0 +1,591 @@
+#!/usr/bin/env node
+/**
+ * 端口探测器：生成前端使用的 apps.json
+ *
+ * 原理：
+ *   1. 解析 `ss -tlnp`，得到所有 TCP LISTEN 端口及其进程 PID；
+ *   2. 读取 /proc/<pid>/cwd（cmdline 兜底），进程工作目录落在 /root/applications/<目录>
+ *      内即认为该端口归属对应应用；
+ *   3. 未通过进程匹配到端口的应用，退回用 net.connect 探测 expectedPort 连通性；
+ *   4. 监听进程位于 /root/applications/* 但未登记在 apps.config.json 的，
+ *      自动生成「待补充」条目（新应用放入目录即可被自动发现）；
+ *   5. 与手工维护的元数据合并，写入 public/apps.json 与线上 webroot。
+ *
+ * 用法：node scripts/probe-apps.mjs
+ * 退出码：0 正常；1 探测失败（如 ss 不可用、配置非法）
+ */
+import { execFileSync } from 'node:child_process'
+import { readFileSync, readlinkSync, writeFileSync, existsSync } from 'node:fs'
+import net from 'node:net'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = path.resolve(__dirname, '..')
+const APPS_ROOT = '/root/applications'
+const CONFIG_FILE = path.join(__dirname, 'apps.config.json')
+// 生成结果同时写入仓库（下次构建的输入）与线上 webroot（免重建即时生效）
+const OUTPUT_FILES = [
+  path.join(REPO_ROOT, 'public/apps.json'),
+  '/root/applications/my-homepage/www/apps.json',
+]
+const TCP_TIMEOUT_MS = 1500
+const REMOTE_TIMEOUT_MS = 6000
+
+// 应用分类：web / APP / 小程序，可多选
+const APP_KINDS = new Set(['web', 'app', 'miniapp'])
+const normKinds = (value, fallback) => {
+  const list = (Array.isArray(value) ? value : []).filter((k) => APP_KINDS.has(k))
+  const uniq = [...new Set(list)]
+  return uniq.length ? uniq : fallback
+}
+
+/* ---------------- 远程应用健康探查（云服务器等外部主机） ---------------- */
+
+/**
+ * 请求 healthUrl 并解析健康信息。在线判定：HTTP 2xx 且（若有 status 字段）值为 ok。
+ * 返回 apps.json 的条目，remoteInfo 携带版本号、延迟、运行时长等明细。
+ */
+async function probeRemote(meta, now) {
+  let base = meta.healthUrl
+  let host = ''
+  let port = null
+  try {
+    const u = new URL(meta.healthUrl)
+    host = u.hostname
+    port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80)
+    base = `${u.protocol}//${u.host}`
+  } catch {
+    /* healthUrl 非法时按原样使用 */
+  }
+
+  const info = {
+    online: false,
+    httpStatus: null,
+    responseMs: null,
+    version: null,
+    dbReady: null,
+    rssMb: null,
+    uptimeSec: null,
+    error: '',
+    checkedAt: now,
+  }
+  const started = Date.now()
+  try {
+    const res = await fetch(meta.healthUrl, {
+      headers: { accept: 'application/json' },
+      signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS),
+    })
+    info.responseMs = Date.now() - started
+    info.httpStatus = res.status
+    let body = null
+    try {
+      body = await res.json()
+    } catch {
+      /* 非 JSON 响应按无 body 处理 */
+    }
+    info.version = body?.version ?? body?.data?.version ?? null
+    info.dbReady = body?.dbReady ?? null
+    info.rssMb = body?.rssMb ?? null
+    info.uptimeSec = body?.uptimeSec ?? null
+    info.online = res.ok && (!body?.status || body.status === 'ok')
+    if (!res.ok) info.error = `HTTP ${res.status}`
+    else if (body?.status && body.status !== 'ok') info.error = `status=${body.status}`
+  } catch (err) {
+    info.responseMs = Date.now() - started
+    info.error = err?.name === 'TimeoutError' ? `超时（>${REMOTE_TIMEOUT_MS / 1000}s）` : String(err?.cause?.message ?? err.message ?? err).slice(0, 120)
+  }
+
+  return {
+    id: meta.id,
+    name: meta.name || meta.id,
+    description: meta.description || '',
+    directory: null,
+    port,
+    expectedPort: null,
+    extraPorts: [],
+    external: true,
+    status: info.online ? 'running' : 'down',
+    kinds: normKinds(meta.kinds, ['web']),
+    env: meta.env === 'lan' ? 'lan' : 'public',
+    github: meta.github || '',
+    tags: meta.tags || [],
+    icon: meta.icon || '☁️',
+    pending: false,
+    remote: true,
+    url: meta.url || base,
+    location: meta.location || '远程',
+    host: meta.host || host,
+    remoteInfo: info,
+  }
+}
+
+/* ---------------- git 源码同步检测 ---------------- */
+
+const GIT_TIMEOUT_MS = 10_000
+const FETCH_TIMEOUT_MS = 20_000
+// BatchMode 禁止交互输密码（无密钥时快速失败）；ConnectTimeout 限制 TCP 连接时长
+const GIT_ENV = {
+  ...process.env,
+  GIT_TERMINAL_PROMPT: '0',
+  GIT_SSH_COMMAND:
+    'ssh -oBatchMode=yes -oConnectTimeout=8 -oStrictHostKeyChecking=accept-new',
+}
+
+function git(args, dir, timeout = GIT_TIMEOUT_MS) {
+  return execFileSync('git', ['-C', dir, '--no-optional-locks', ...args], {
+    encoding: 'utf8',
+    timeout,
+    env: GIT_ENV,
+  })
+}
+
+/** git@github.com:owner/repo.git → github.com/owner/repo */
+function normalizeRepo(url) {
+  const ssh = url.match(/^(?:git@|ssh:\/\/git@)([^:]+):(.+?)(?:\.git)?$/)
+  if (ssh) return `${ssh[1]}/${ssh[2]}`
+  const https = url.match(/^https?:\/\/([^/]+)\/(.+?)(?:\.git)?$/)
+  if (https) return `${https[1]}/${https[2]}`
+  return url
+}
+
+async function fetchRepo(dir) {
+  try {
+    // gc.auto=0 禁止 fetch 触发自动 GC：除远端快照 refs/FETCH_HEAD 外不产生任何仓库整理动作
+    git(['-c', 'gc.auto=0', 'fetch', '--quiet', '--all', '--no-recurse-submodules'], dir, FETCH_TIMEOUT_MS)
+    return true
+  } catch {
+    return false
+  }
+}
+
+const GIT_SHORT_ERR = (err) =>
+  (err.message.split('\n').find((l) => /fatal|error|失败/i.test(l)) ?? err.message)
+    .trim()
+    .slice(0, 120)
+
+/**
+ * 检查单个应用目录的源码同步状态。
+ * status 含义：
+ *   synced      工作区干净且与远端一致
+ *   dirty       有未提交的已跟踪文件修改（源码未进 git）
+ *   ahead       本地有未推送提交
+ *   behind      落后远端（未拉取）
+ *   untracked   有未跟踪文件（未加入版本控制）
+ *   no-repo     目录不是 git 仓库
+ *   no-upstream 当前分支未关联远端分支，推送状态无法核对
+ *   error       git 命令执行失败
+ */
+function gitSyncInfo(dir, remoteOk, now) {
+  const info = {
+    status: 'error',
+    repo: '',
+    branch: '',
+    uncommitted: 0,
+    untracked: 0,
+    ahead: 0,
+    behind: 0,
+    remoteOk,
+    checkedAt: now,
+    message: '',
+  }
+  try {
+    if (!existsSync(path.join(dir, '.git'))) {
+      info.status = 'no-repo'
+      return info
+    }
+  } catch {
+    return info
+  }
+
+  try {
+    const url = git(['config', '--get', 'remote.origin.url'], dir).trim()
+    info.repo = url ? normalizeRepo(url) : ''
+    info.branch = git(['branch', '--show-current'], dir).trim()
+    for (const line of git(['status', '--porcelain=v1'], dir).split('\n')) {
+      if (!line) continue
+      if (line.startsWith('?? ')) info.untracked++
+      else info.uncommitted++
+    }
+  } catch (err) {
+    info.message = GIT_SHORT_ERR(err)
+    return info
+  }
+
+  // ahead/behind：优先分支上游，退回 origin/HEAD（克隆时自动生成）
+  let hasUpstream = false
+  for (const ref of ['@{upstream}', 'origin/HEAD']) {
+    try {
+      const [behind, ahead] = git(['rev-list', '--left-right', '--count', `${ref}...HEAD`], dir)
+        .trim()
+        .split(/\s+/)
+      info.behind = Number(behind) || 0
+      info.ahead = Number(ahead) || 0
+      hasUpstream = true
+      break
+    } catch {
+      /* 尝试下一个引用 */
+    }
+  }
+
+  if (info.uncommitted > 0) info.status = 'dirty'
+  else if (info.ahead > 0) info.status = 'ahead'
+  else if (info.behind > 0) info.status = 'behind'
+  else if (info.untracked > 0) info.status = 'untracked'
+  else if (!hasUpstream) info.status = 'no-upstream'
+  else info.status = 'synced'
+  return info
+}
+
+/* ---------------- ss 解析 ---------------- */
+
+function parseSsListen() {
+  let out
+  try {
+    out = execFileSync('ss', ['-tlnp'], { encoding: 'utf8' })
+  } catch (err) {
+    throw new Error(`无法执行 ss -tlnp：${err.message}`)
+  }
+
+  // 形如：LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=1596614,fd=21))
+  const listeners = []
+  for (const line of out.split('\n')) {
+    if (!line.startsWith('LISTEN')) continue
+    const cols = line.trim().split(/\s+/)
+    const local = cols[3]
+    if (!local) continue
+    const portStr = local.slice(local.lastIndexOf(':') + 1)
+    const port = Number(portStr)
+    if (!Number.isInteger(port) || port <= 0) continue
+
+    const addr = local.slice(0, local.lastIndexOf(':'))
+    // 0.0.0.0 / [::] / * 均为对外监听；127.0.0.1、::1 为仅本机
+    const external = addr === '0.0.0.0' || addr === '[::]' || addr === '*' || addr === '::'
+
+    const pids = [...line.matchAll(/pid=(\d+)/g)].map((m) => Number(m[1]))
+    listeners.push({ port, external, pids })
+  }
+  return listeners
+}
+
+/* ---------------- 进程归属 ---------------- */
+
+function procCwd(pid) {
+  try {
+    // 必须用 readlink：/proc/<pid>/cwd 是 magic symlink，readFileSync 会跟随它读目录内容而失败
+    return readlinkSync(`/proc/${pid}/cwd`)
+  } catch {
+    return null
+  }
+}
+
+function procCmdline(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, { encoding: 'utf8' }).replace(/\0/g, ' ')
+  } catch {
+    return ''
+  }
+}
+
+/** 进程是否属于 /root/applications 下的某个应用目录，返回目录名或 null */
+function procAppDir(pid) {
+  const cwd = procCwd(pid)
+  const candidates = [cwd]
+  const cmdline = procCmdline(pid)
+  if (cmdline) candidates.push(cmdline)
+  for (const cand of candidates) {
+    if (!cand || !cand.startsWith(APPS_ROOT + '/')) continue
+    const rest = cand.slice(APPS_ROOT.length + 1)
+    const seg = rest.split('/')[0]
+    if (seg) return seg
+  }
+  return null
+}
+
+/* ---------------- 端口连通性兜底 ---------------- */
+
+function tcpProbe(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host })
+    const done = (ok) => {
+      socket.destroy()
+      resolve(ok)
+    }
+    socket.setTimeout(TCP_TIMEOUT_MS)
+    socket.once('connect', () => done(true))
+    socket.once('timeout', () => done(false))
+    socket.once('error', () => done(false))
+  })
+}
+
+/* ---------------- 主流程 ---------------- */
+
+async function main() {
+  const config = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
+  const metaById = new Map()
+  for (const app of config.apps ?? []) {
+    if (!app.id || !app.directory) {
+      throw new Error(`apps.config.json 存在缺少 id/directory 的条目：${JSON.stringify(app)}`)
+    }
+    metaById.set(app.id, app)
+  }
+  // 标记 exclude 的应用不探测、不展示（如暂无可用 Web 服务的项目）
+  const excludedDirs = new Set(
+    (config.apps ?? []).filter((a) => a.exclude).map((a) => path.basename(a.directory)),
+  )
+
+  const listeners = parseSsListen()
+  // 端口 → 是否对外监听（含无进程归属的端口，如 nginx 直接托管的本站 80）
+  const listenerExternal = new Map()
+  for (const l of listeners) {
+    listenerExternal.set(l.port, (listenerExternal.get(l.port) ?? false) || l.external)
+  }
+
+  // 端口归属：port → { appDir, external }（同端口可能多 PID，取其一即可）
+  const portOwner = new Map() // port -> { appDir, external }
+  for (const l of listeners) {
+    let owner = portOwner.get(l.port)
+    for (const pid of l.pids) {
+      const dir = procAppDir(pid)
+      if (dir) {
+        owner = { appDir: dir, external: owner?.external || l.external }
+        break
+      }
+    }
+    if (owner && !l.external) {
+      // 全部命中进程但只有 loopback 监听时，保持 external=false
+      const anyExternal = listeners.some(
+        (x) => x.port === l.port && x.external,
+      )
+      if (!anyExternal) owner.external = false
+    }
+    if (owner && !portOwner.has(l.port)) portOwner.set(l.port, owner)
+  }
+
+  // 按应用聚合监听端口（保留每个端口自己的对外属性）
+  const foundByApp = new Map() // appId -> { ports: [{ port, external }] }
+  for (const [port, owner] of portOwner) {
+    const rec = foundByApp.get(owner.appDir) ?? { ports: [] }
+    rec.ports.push({ port, external: owner.external })
+    foundByApp.set(owner.appDir, rec)
+  }
+
+  /**
+   * 主端口选择：配置的 expectedPort 优先锚定（目录下可能有非 Web 的附属监听，
+   * 如仅本机的 sshmockd）；否则优先最小的对外端口；全为仅本机时取最小值。
+   */
+  function pickPrimary(ports, expectedPort) {
+    const sorted = [...ports].sort((a, b) => a.port - b.port)
+    const expected = Number(expectedPort)
+    const anchor = Number.isInteger(expected) ? sorted.find((p) => p.port === expected) : null
+    const primary = anchor ?? sorted.find((p) => p.external) ?? sorted[0]
+    return {
+      primary,
+      extraPorts: sorted.filter((p) => p !== primary).map((p) => p.port),
+    }
+  }
+
+  const now = new Date().toISOString()
+  const results = []
+  const discovered = new Set()
+
+  // 1) 已登记的应用
+  for (const meta of config.apps ?? []) {
+    if (meta.exclude) continue
+
+    const kinds = normKinds(meta.kinds, meta.type === 'app' ? ['app'] : ['web'])
+    const env = meta.env === 'public' ? 'public' : 'lan'
+
+    // 线下应用（纯 APP / 小程序，分类不含 web）：不做端口探测，
+    // 状态显示灰色「线下应用」，不产生访问链接；分类含 web 则照常探测
+    if (!kinds.includes('web')) {
+      results.push({
+        id: meta.id,
+        name: meta.name || meta.id,
+        description: meta.description || '',
+        directory: meta.directory,
+        port: null,
+        expectedPort: meta.expectedPort ?? null,
+        extraPorts: [],
+        external: false,
+        status: 'down',
+        kinds,
+        env,
+        https: Boolean(meta.https),
+        github: meta.github || '',
+        tags: meta.tags || [],
+        icon: meta.icon || '📱',
+        pending: false,
+        appOnly: true,
+      })
+      continue
+    }
+
+    const dirName = path.basename(meta.directory)
+    const found = foundByApp.get(dirName)
+
+    let port = null
+    let external = false
+    let status = 'down'
+    let extraPorts = []
+
+    if (found) {
+      status = 'running'
+      const { primary, extraPorts: rest } = pickPrimary(found.ports, meta.expectedPort)
+      port = primary.port
+      external = primary.external
+      extraPorts = rest
+    } else {
+      // 兜底：进程匹配不到（如 nginx 托管的本站、docker 部署、无权限读 /proc），
+      // 直接探 expectedPort；是否对外监听从 ss 端口表取，避免误标「仅本机」
+      const expected = Number(meta.expectedPort)
+      if (Number.isInteger(expected) && (await tcpProbe(expected))) {
+        status = 'running'
+        port = expected
+        external = listenerExternal.get(expected) ?? false
+      }
+    }
+
+    results.push({
+      id: meta.id,
+      name: meta.name || meta.id,
+      description: meta.description || '',
+      directory: meta.directory,
+      port,
+      expectedPort: meta.expectedPort ?? null,
+      extraPorts,
+      external,
+      status,
+      kinds,
+      env,
+      https: Boolean(meta.https),
+      github: meta.github || '',
+      tags: meta.tags || [],
+      icon: meta.icon || '📦',
+      pending: false,
+    })
+  }
+
+  // 2) 自动发现未登记的应用
+  const registeredDirs = new Set((config.apps ?? []).map((a) => path.basename(a.directory)))
+  for (const [dirName, found] of foundByApp) {
+    if (registeredDirs.has(dirName) || excludedDirs.has(dirName) || discovered.has(dirName)) continue
+    discovered.add(dirName)
+    const { primary, extraPorts: rest } = pickPrimary(found.ports, null)
+    results.push({
+      id: dirName,
+      name: dirName,
+      description: '（自动发现）该应用尚未在 scripts/apps.config.json 中登记，请补充名称、简介与 GitHub 地址。',
+      directory: `${APPS_ROOT}/${dirName}`,
+      port: primary.port,
+      expectedPort: null,
+      extraPorts: rest,
+      external: primary.external,
+      status: 'running',
+      kinds: ['web'],
+      env: 'lan',
+      https: false,
+      github: '',
+      tags: [],
+      icon: '🆕',
+      pending: true,
+    })
+  }
+
+  // 2.4) 远程应用（云服务器等）：HTTP 健康接口探查
+  for (const meta of config.remoteApps ?? []) {
+    if (!meta.id || !meta.healthUrl) {
+      throw new Error(`remoteApps 存在缺少 id/healthUrl 的条目：${JSON.stringify(meta)}`)
+    }
+    results.push(await probeRemote(meta, now))
+  }
+
+  // 2.5) 全局默认顺序：配置 order 数组（id 列表）时按其排列，未列出的应用按原相对顺序排在后面
+  if (Array.isArray(config.order) && config.order.length) {
+    const rank = new Map(config.order.map((id, i) => [id, i]))
+    results.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity))
+  }
+
+  // 3) git 源码同步检测：先逐个 fetch 校准远端快照（--no-fetch 跳过网络），再逐仓核对
+  //    注意：fetchRepo 内部用 execFileSync（同步阻塞），下面的 Promise.all 不会真正并发，
+  //    各仓库按数组顺序依次 fetch，单轮耗时约为各仓库 fetch 时间之和（最坏 N×20s）。
+  const NO_FETCH = process.argv.includes('--no-fetch')
+  const gitDirs = [...new Set(results.map((r) => r.directory).filter(Boolean))].filter((d) =>
+    existsSync(path.join(d, '.git')),
+  )
+  const remoteOkMap = new Map()
+  if (NO_FETCH) {
+    for (const d of gitDirs) remoteOkMap.set(d, null) // 未知，沿用上次远端快照
+  } else {
+    await Promise.all(
+      gitDirs.map(async (d) => remoteOkMap.set(d, await fetchRepo(d))),
+    )
+  }
+  for (const r of results) {
+    // 远程应用没有本地目录，不做 git 检查
+    r.git = r.directory ? gitSyncInfo(r.directory, remoteOkMap.get(r.directory) ?? null, now) : null
+    // 配置未填 github 时，用仓库远程地址兜底生成网页链接
+    if (!r.github && r.git?.repo?.startsWith('github.com/')) {
+      r.github = `https://${r.git.repo}`
+    }
+  }
+
+  // 4) 输出（已登记在前，自动发现的在后，各自保持稳定顺序）
+  // probedAt 取探测完成时刻而非开始时刻：前端「最后探测」显示的是数据真正就绪的时间
+  const finishedAt = new Date().toISOString()
+  const output = {
+    probedAt: finishedAt,
+    page: config.page ?? {},
+    apps: results,
+  }
+  const body = JSON.stringify(output, null, 2) + '\n'
+  let written = []
+  for (const file of OUTPUT_FILES) {
+    if (!existsSync(path.dirname(file))) continue
+    writeFileSync(file, body, { encoding: 'utf8', mode: 0o644 })
+    written.push(file)
+  }
+
+  const running = results.filter((a) => a.status === 'running').length
+  const gitCounted = results.filter((a) => a.git).length
+  const synced = results.filter((a) => a.git?.status === 'synced').length
+  console.log(
+    `[probe] ${finishedAt}  应用 ${results.length} 个（运行中 ${running}），git 同步 ${synced}/${gitCounted}，写入：${written.join(', ') || '（无，目标目录均不存在）'}`,
+  )
+  for (const r of results) {
+    if (r.remote) {
+      const info = r.remoteInfo ?? {}
+      const ver = info.version ? ` v${info.version}` : ''
+      const ms = info.responseMs != null ? ` ${info.responseMs}ms` : ''
+      const err = info.error ? `（${info.error}）` : ''
+      console.log(`  - ${r.status === 'running' ? '●' : '○'} ${r.id}  ${r.url}  ${r.status === 'running' ? '在线' : '离线'}${ver}${ms}${err}`)
+      continue
+    }
+    if (r.appOnly) {
+      console.log(`  - ○ ${r.id}  [线下应用]`)
+      continue
+    }
+    const ports = [r.port, ...(r.extraPorts ?? [])].filter(Boolean)
+    const suffix = r.status === 'running' && !r.external ? '（仅本机）' : ''
+    let gitTag = ''
+    if (r.git) {
+      const g = r.git
+      const n = g.uncommitted || g.ahead || g.behind || g.untracked
+      gitTag = ['dirty', 'ahead', 'behind', 'untracked'].includes(g.status)
+        ? `  [git 未同步·${g.status === 'dirty' ? '未提交' : g.status === 'ahead' ? '未推送' : g.status === 'behind' ? '未拉取' : '未跟踪'}×${n}]`
+        : `  [git ${g.status === 'synced' ? '已同步' : g.status === 'no-repo' ? '无仓库' : g.status === 'no-upstream' ? '未关联远端' : '检查失败'}]`
+    }
+    console.log(
+      `  - ${r.status === 'running' ? '●' : '○'} ${r.id}  ${ports.join(', ') || '未监听'}${suffix}${gitTag}${r.pending ? '  [待补充]' : ''}`,
+    )
+  }
+  if (written.length === 0) {
+    console.error('[probe] 警告：未写入任何文件（public/ 与 webroot 均不存在？）')
+    process.exitCode = 1
+  }
+}
+
+main().catch((err) => {
+  console.error('[probe] 失败：', err.message)
+  process.exit(1)
+})

@@ -1,0 +1,9 @@
+[Unit]
+Description=my-homepage 应用端口探测
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/node /root/applications/my-homepage/scripts/probe-apps.mjs
+SyslogIdentifier=my-homepage-probe

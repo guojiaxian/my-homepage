@@ -1,0 +1,21 @@
+{
+  "name": "gjx-homepage",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "个人应用展示主页：展示部署在本服务器上的自研应用",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "probe": "node scripts/probe-apps.mjs",
+    "deploy": "./deploy.sh"
+  },
+  "dependencies": {
+    "vue": "^3.4.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-vue": "^5.0.0",
+    "vite": "^5.2.0"
+  }
+}
