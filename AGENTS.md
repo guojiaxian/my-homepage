@@ -12,7 +12,7 @@
 核心设计目标：**应用信息与状态全自动维护**——端口、上下线、源码同步情况由服务端定时探测，增删应用/改信息通过首页设置面板完成，日常无需登录服务器改文件。
 
 - 线上地址：`http://<本机IP>/`（本机 `10.8.11.4`，nginx 80 端口，`default_server`）
-- 项目根目录：`/root/applications/my-homepage`（**不是 git 仓库**，无版本控制，改动请自行谨慎）
+- 项目根目录：`/root/applications/my-homepage`（已纳入 git，origin `github.com:guojiaxian/my-homepage`；改动请及时 commit/push）
 - 部署产物目录：`/root/applications/my-homepage/www`（项目内）
 - 旧路径 `/root/gjx-homepage`：为兼容保留的**软链接**，指向新目录；确认无人依赖后可 `rm /root/gjx-homepage`（若 shell 正停在该路径，先 `cd` 到别处）
 
@@ -480,7 +480,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | jianji-ledger | 简记 · 账本 | 线下应用（kinds: app） | — | no-repo |
 | time-logger | 时间记录器 | Web + APP（kinds: web, app） | 19001（https） | synced |
 | study-log-cloud | StudyLog 公网版 | 远程（阿里云） | http://47.95.140.199:3000 · v1.1.0 | — |
-| my-homepage | 我的应用导航（本站） | 本机（nginx 托管） | 80 | no-repo（本项目非 git 仓库） |
+| my-homepage | 我的应用导航（本站） | 本机（nginx 托管） | 80 | synced（已纳入 git） |
 
 > 状态会随时变化，以上仅为撰写时快照。以 `curl -s http://127.0.0.1/apps.json` 为准。
 
@@ -553,5 +553,5 @@ curl -s http://127.0.0.1/api/config | head -5      # 经 nginx（两处都要通
 - ❌ **不要用 `readFileSync` 读 `/proc/<pid>/cwd`**。
 - ⚠️ `apps.config.json` 的 `id` 必须与目录名一致，否则端口归属匹配不到（会退回 TCP 兜底，丢失附加端口信息）。
 - ⚠️ 改动前端后必须 `./deploy.sh`；只改配置/数据则 `npm run probe` 即可。
-- ⚠️ 本项目**不是 git 仓库**，改前建议先 `cp` 备份关键文件。
+- ⚠️ 本项目已纳入 git（origin `github.com:guojiaxian/my-homepage`），改完请 commit/push，保持主页「同步」列干净。
 - ⚠️ 本机 nginx 80 端口还承载其他历史代理路径，改 nginx 前务必 `nginx -t` 并保留 `.bak` 备份。
