@@ -14,11 +14,25 @@
  * 用法：node scripts/probe-apps.mjs
  * 退出码：0 正常；1 探测失败（如 ss 不可用、配置非法）
  */
-import { execFileSync } from 'node:child_process'
-import { readFileSync, readlinkSync, writeFileSync, existsSync } from 'node:fs'
+import { execFile, execFileSync } from 'node:child_process'
+import {
+  readFileSync,
+  readlinkSync,
+  writeFileSync,
+  existsSync,
+  openSync,
+  closeSync,
+  writeSync,
+  unlinkSync,
+  statSync,
+} from 'node:fs'
 import net from 'node:net'
+import os from 'node:os'
 import path from 'node:path'
+import { promisify } from 'node:util'
 import { fileURLToPath } from 'node:url'
+
+const execFileAsync = promisify(execFile)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, '..')
@@ -31,6 +45,10 @@ const OUTPUT_FILES = [
 ]
 const TCP_TIMEOUT_MS = 1500
 const REMOTE_TIMEOUT_MS = 6000
+const FETCH_CONCURRENCY = Math.max(1, Number(process.env.PROBE_FETCH_CONCURRENCY) || 6)
+// 定时器可能同时触发"完整探测"和"快速探测"，用临时锁避免两个进程同时写 apps.json
+const LOCK_FILE = path.join(os.tmpdir(), 'my-homepage-probe.lock')
+const LOCK_STALE_MS = 5 * 60_000
 
 // 应用分类：web / APP / 小程序，可多选
 const APP_KINDS = new Set(['web', 'app', 'miniapp'])
@@ -124,12 +142,14 @@ async function probeRemote(meta, now) {
 
 const GIT_TIMEOUT_MS = 10_000
 const FETCH_TIMEOUT_MS = 20_000
-// BatchMode 禁止交互输密码（无密钥时快速失败）；ConnectTimeout 限制 TCP 连接时长
+// BatchMode 禁止交互输密码（无密钥时快速失败）；ConnectTimeout 限制 TCP 连接时长；
+// ControlMaster 让多个仓库复用同一条 SSH 连接，省掉重复握手
 const GIT_ENV = {
   ...process.env,
   GIT_TERMINAL_PROMPT: '0',
   GIT_SSH_COMMAND:
-    'ssh -oBatchMode=yes -oConnectTimeout=8 -oStrictHostKeyChecking=accept-new',
+    'ssh -oBatchMode=yes -oConnectTimeout=8 -oStrictHostKeyChecking=accept-new ' +
+    '-oControlMaster=auto -oControlPersist=60 -oControlPath=/tmp/my-homepage-ssh-%C',
 }
 
 function git(args, dir, timeout = GIT_TIMEOUT_MS) {
@@ -149,10 +169,54 @@ function normalizeRepo(url) {
   return url
 }
 
+/** 并发池：最多 limit 个任务同时执行，保持结果顺序 */
+async function mapLimit(items, limit, worker) {
+  const results = new Array(items.length)
+  let next = 0
+  const runners = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const i = next++
+      if (i >= items.length) return
+      results[i] = await worker(items[i], i)
+    }
+  })
+  await Promise.all(runners)
+  return results
+}
+
 async function fetchRepo(dir) {
+  let remote = ''
+  try {
+    // 只 fetch 当前分支所属的远端（通常是 origin），不再用 --all 扫所有远端；
+    // --no-tags 跳过标签，ahead/behind 不依赖标签
+    const branch = git(['branch', '--show-current'], dir).trim()
+    if (branch) {
+      try {
+        remote = git(['config', '--get', `branch.${branch}.remote`], dir).trim()
+      } catch {
+        remote = ''
+      }
+    }
+    if (!remote || remote === '.') {
+      try {
+        git(['remote', 'get-url', 'origin'], dir)
+        remote = 'origin'
+      } catch {
+        remote = ''
+      }
+    }
+  } catch {
+    return false
+  }
+  if (!remote) return true // 没有远端，无需 fetch，仍算成功
+
   try {
     // gc.auto=0 禁止 fetch 触发自动 GC：除远端快照 refs/FETCH_HEAD 外不产生任何仓库整理动作
-    git(['-c', 'gc.auto=0', 'fetch', '--quiet', '--all', '--no-recurse-submodules'], dir, FETCH_TIMEOUT_MS)
+    await execFileAsync(
+      'git',
+      ['-C', dir, '--no-optional-locks', '-c', 'gc.auto=0', 'fetch', '--quiet', '--no-tags', '--no-recurse-submodules', remote],
+      { env: GIT_ENV, timeout: FETCH_TIMEOUT_MS, encoding: 'utf8' },
+    )
     return true
   } catch {
     return false
@@ -318,9 +382,96 @@ function tcpProbe(port, host = '127.0.0.1') {
   })
 }
 
+/* ---------------- 互斥锁：避免完整探测与快速探测同时写 apps.json ---------------- */
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch (err) {
+    return err.code === 'EPERM'
+  }
+}
+
+async function acquireLock(waitMs) {
+  const deadline = Date.now() + waitMs
+  while (true) {
+    let fd = null
+    try {
+      fd = openSync(LOCK_FILE, 'wx')
+      writeSync(fd, JSON.stringify({ pid: process.pid, startedAt: Date.now() }))
+      closeSync(fd)
+      fd = null
+      return true
+    } catch (err) {
+      if (fd !== null) {
+        try { closeSync(fd) } catch { /* ignore */ }
+        try { unlinkSync(LOCK_FILE) } catch { /* ignore */ }
+        throw err
+      }
+      if (err.code !== 'EEXIST') throw err
+
+      // 锁已存在：区分"正在运行"与"上次崩溃留下的陈旧锁"
+      let stale = false
+      try {
+        const info = JSON.parse(readFileSync(LOCK_FILE, 'utf8'))
+        stale = Date.now() - info.startedAt > LOCK_STALE_MS || !pidAlive(info.pid)
+      } catch {
+        try {
+          stale = Date.now() - statSync(LOCK_FILE).mtimeMs > LOCK_STALE_MS
+        } catch {
+          stale = true
+        }
+      }
+      if (stale) {
+        try { unlinkSync(LOCK_FILE) } catch { /* ignore */ }
+        continue
+      }
+      if (Date.now() >= deadline) return false
+      await sleep(150)
+    }
+  }
+}
+
+function releaseLock() {
+  try {
+    const info = JSON.parse(readFileSync(LOCK_FILE, 'utf8'))
+    if (info.pid === process.pid) unlinkSync(LOCK_FILE)
+  } catch {
+    /* 锁不存在或不是自己的，忽略 */
+  }
+}
+
+process.on('exit', releaseLock)
+for (const sig of ['SIGINT', 'SIGTERM']) {
+  process.on(sig, () => {
+    releaseLock()
+    process.exit(0)
+  })
+}
+
 /* ---------------- 主流程 ---------------- */
 
 async function main() {
+  const NO_FETCH = process.argv.includes('--no-fetch')
+  // 快速探测（--no-fetch）遇到锁直接跳过；完整探测最多等 60 秒
+  const acquired = await acquireLock(NO_FETCH ? 0 : 60_000)
+  if (!acquired) {
+    console.log(`[probe] 另一个探测正在运行，跳过本次${NO_FETCH ? '（--no-fetch）' : ''}`)
+    return
+  }
+
+  try {
+    await runProbe(NO_FETCH)
+  } finally {
+    releaseLock()
+  }
+}
+
+async function runProbe(NO_FETCH) {
   const config = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
   const metaById = new Map()
   for (const app of config.apps ?? []) {
@@ -506,10 +657,8 @@ async function main() {
     results.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity))
   }
 
-  // 3) git 源码同步检测：先逐个 fetch 校准远端快照（--no-fetch 跳过网络），再逐仓核对
-  //    注意：fetchRepo 内部用 execFileSync（同步阻塞），下面的 Promise.all 不会真正并发，
-  //    各仓库按数组顺序依次 fetch，单轮耗时约为各仓库 fetch 时间之和（最坏 N×20s）。
-  const NO_FETCH = process.argv.includes('--no-fetch')
+  // 3) git 源码同步检测：先并发 fetch 校准远端快照（--no-fetch 跳过网络），再逐仓核对
+  //    并发数可用 PROBE_FETCH_CONCURRENCY 覆盖（默认 6）；只 fetch 当前分支所属远端，不拉 tags
   const gitDirs = [...new Set(results.map((r) => r.directory).filter(Boolean))].filter((d) =>
     existsSync(path.join(d, '.git')),
   )
@@ -517,8 +666,12 @@ async function main() {
   if (NO_FETCH) {
     for (const d of gitDirs) remoteOkMap.set(d, null) // 未知，沿用上次远端快照
   } else {
-    await Promise.all(
-      gitDirs.map(async (d) => remoteOkMap.set(d, await fetchRepo(d))),
+    const started = Date.now()
+    const outcomes = await mapLimit(gitDirs, FETCH_CONCURRENCY, fetchRepo)
+    gitDirs.forEach((d, i) => remoteOkMap.set(d, outcomes[i]))
+    const failed = outcomes.filter((ok) => !ok).length
+    console.log(
+      `[probe] fetch ${gitDirs.length} 个仓库，并发 ${Math.min(FETCH_CONCURRENCY, gitDirs.length)}，用时 ${Date.now() - started}ms${failed ? `，失败 ${failed}` : ''}`,
     )
   }
   for (const r of results) {

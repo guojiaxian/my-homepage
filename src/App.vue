@@ -430,7 +430,7 @@ onBeforeUnmount(() => {
 
     <footer class="footer">
       <span>© {{ year }} {{ page.siteName }} · Powered by Vue</span>
-      <span v-if="probedTimeText">{{ probedTimeText }} · 每 5 分钟自动更新</span>
+      <span v-if="probedTimeText">{{ probedTimeText }} · 端口每 3 分钟 · git 每 5 分钟</span>
     </footer>
   </main>
 

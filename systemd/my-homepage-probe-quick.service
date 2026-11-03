@@ -1,0 +1,9 @@
+[Unit]
+Description=my-homepage 应用快速探测（--no-fetch）
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/node /root/applications/my-homepage/scripts/probe-apps.mjs --no-fetch
+SyslogIdentifier=my-homepage-probe-quick

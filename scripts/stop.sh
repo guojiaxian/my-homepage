@@ -4,8 +4,9 @@
 #
 # 说明：主页是静态文件，由共享的 nginx（80 端口）托管，且同一 nginx 还承载
 # 其他历史代理路径，因此本脚本不动 nginx——停的是本项目自己的后台服务：
-#   · my-homepage-settings  首页设置面板的读写 API
-#   · my-homepage-probe     端口/运行状态/git 同步的定时探测
+#   · my-homepage-settings      首页设置面板的读写 API
+#   · my-homepage-probe         完整探测（端口/运行状态/git 同步，每 5 分钟）
+#   · my-homepage-probe-quick   快速探测（端口/运行状态，每 3 分钟，不 fetch）
 # 停止后页面仍可打开，但数据不再更新、设置面板保存会失败。
 set -euo pipefail
 
@@ -16,17 +17,20 @@ warn() { printf '\033[1;33m[警告]\033[0m %s\n' "$*"; }
 
 say "停止定时器并取消开机自启"
 systemctl disable --now my-homepage-probe.timer
+systemctl disable --now my-homepage-probe-quick.timer
 
 say "停止设置 API 并取消开机自启"
 systemctl disable --now my-homepage-settings.service
 
 # 若探测正好在跑（oneshot），一并停掉
 systemctl stop my-homepage-probe.service 2>/dev/null || true
+systemctl stop my-homepage-probe-quick.service 2>/dev/null || true
 
 echo
 say "状态"
 printf '  %-34s %s / %s\n' my-homepage-settings.service "$(systemctl is-active my-homepage-settings.service)" "$(systemctl is-enabled my-homepage-settings.service 2>&1)"
 printf '  %-34s %s / %s\n' my-homepage-probe.timer "$(systemctl is-active my-homepage-probe.timer)" "$(systemctl is-enabled my-homepage-probe.timer 2>&1)"
+printf '  %-34s %s / %s\n' my-homepage-probe-quick.timer "$(systemctl is-active my-homepage-probe-quick.timer)" "$(systemctl is-enabled my-homepage-probe-quick.timer 2>&1)"
 
 echo
 warn "已永久关闭：重启服务器后不会自动启动。恢复请执行 ./scripts/start.sh"

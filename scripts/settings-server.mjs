@@ -130,9 +130,9 @@ function writeConfig(next) {
 
 /**
  * 后台运行探测：接口立即返回。
- * - 保存配置：用 --no-fetch（本地核对 1~2 秒完成），保证保存后页面快速生效；
+ * - 保存配置：用 --no-fetch（本地核对约 0.3 秒），保证保存后页面快速生效；
  *   远端 fetch 校准仍由 5 分钟定时探测负责。
- * - 手动「立刻同步」：完整探测（含 git fetch），耗时约为各仓库 fetch 时间之和。
+ * - 手动「立刻同步」：完整探测（含 git fetch），并发执行，通常约 6 秒。
  */
 function runProbe({ noFetch = false } = {}) {
   const args = [PROBE_SCRIPT]

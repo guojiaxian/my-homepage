@@ -15,8 +15,9 @@ say "启用并启动（开机自启）"
 systemctl daemon-reload
 systemctl enable --now my-homepage-settings.service
 systemctl enable --now my-homepage-probe.timer
+systemctl enable --now my-homepage-probe-quick.timer
 
-say "立即探测一次（--no-fetch，约 1~2 秒）"
+say "立即探测一次（--no-fetch，约 0.3 秒）"
 node "$PROJECT_DIR/scripts/probe-apps.mjs" --no-fetch \
   || warn "探测失败，定时器稍后会重试：journalctl -u my-homepage-probe -n 30"
 
@@ -28,6 +29,7 @@ echo
 say "状态"
 printf '  %-34s %s / %s\n' my-homepage-settings.service "$(systemctl is-active my-homepage-settings.service)" "$(systemctl is-enabled my-homepage-settings.service 2>&1)"
 printf '  %-34s %s / %s\n' my-homepage-probe.timer "$(systemctl is-active my-homepage-probe.timer)" "$(systemctl is-enabled my-homepage-probe.timer 2>&1)"
+printf '  %-34s %s / %s\n' my-homepage-probe-quick.timer "$(systemctl is-active my-homepage-probe-quick.timer)" "$(systemctl is-enabled my-homepage-probe-quick.timer 2>&1)"
 printf '  %-34s %s / %s\n' nginx.service "$(systemctl is-active nginx.service)" "$(systemctl is-enabled nginx.service 2>&1)"
 
 echo

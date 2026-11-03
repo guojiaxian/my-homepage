@@ -86,8 +86,8 @@ cat <<EOF
   部署目录：  $OLD_WEBROOT
            →  ${NEW_WEBROOT:-（保持不变）}
   涉及的绝对路径引用：
-    · $TARGET/systemd/my-homepage-{probe,settings}.service  (ExecStart)
-    · /etc/systemd/system/my-homepage-{probe,settings}.service
+    · $TARGET/systemd/my-homepage-{probe,probe-quick,settings}.service  (ExecStart)
+    · /etc/systemd/system/my-homepage-{probe,probe-quick,settings}.service
     · AGENTS.md / README.md / .verify/*.cjs 中的路径说明
 $( [[ -n "$NEW_WEBROOT" ]] && printf '    · %s/deploy.sh、scripts/probe-apps.mjs（输出路径）\n    · /etc/nginx/conf.d/default.conf、/etc/nginx/nginx.conf（root）\n' "$TARGET" )
   迁移期间主页约 3~10 秒不可用（服务重启），随后自动恢复。
@@ -100,7 +100,9 @@ cd /   # 避免脚本自身目录被移动后 cwd 失效
 # ---------- 1. 暂停服务 ----------
 say "1/7 暂停探测定时器与设置服务"
 run systemctl stop my-homepage-probe.timer || true
+run systemctl stop my-homepage-probe-quick.timer || true
 run systemctl stop my-homepage-probe.service 2>/dev/null || true
+run systemctl stop my-homepage-probe-quick.service 2>/dev/null || true
 run systemctl stop my-homepage-settings.service 2>/dev/null || true
 
 # ---------- 2. 迁移项目目录 ----------
@@ -113,7 +115,7 @@ run mv "$SOURCE" "$TARGET"
 
 # ---------- 3. 重写 systemd 单元 ----------
 say "3/7 更新 systemd 单元路径"
-for unit in my-homepage-probe.service my-homepage-settings.service; do
+for unit in my-homepage-probe.service my-homepage-probe-quick.service my-homepage-settings.service; do
   f="$TARGET/systemd/$unit"
   [[ $DRY_RUN -eq 1 || -f "$f" ]] || die "缺少单元文件：$f"
   run sed -i "s|$SOURCE|$TARGET|g" "$f"
@@ -121,6 +123,7 @@ for unit in my-homepage-probe.service my-homepage-settings.service; do
   run cp -f "$f" "/etc/systemd/system/$unit"
 done
 run cp -f "$TARGET/systemd/my-homepage-probe.timer" /etc/systemd/system/
+run cp -f "$TARGET/systemd/my-homepage-probe-quick.timer" /etc/systemd/system/
 run systemctl daemon-reload
 
 # ---------- 4. 可选：迁移部署目录 ----------
@@ -174,6 +177,7 @@ run node "$TARGET/scripts/probe-apps.mjs" --no-fetch || warn "探测未成功，
 say "7/7 恢复服务并验证"
 run systemctl daemon-reload
 run systemctl enable --now my-homepage-probe.timer
+run systemctl enable --now my-homepage-probe-quick.timer
 run systemctl restart my-homepage-settings.service
 sleep 1
 
@@ -192,7 +196,7 @@ if [[ $DRY_RUN -eq 0 ]]; then
   设置API：/api/config       （HTTP $api_code）
   服务：
     systemctl status my-homepage-settings
-    systemctl list-timers my-homepage-probe.timer
+    systemctl list-timers my-homepage-probe.timer my-homepage-probe-quick.timer
 
   后续操作都在新目录进行：
     cd $TARGET && ./deploy.sh

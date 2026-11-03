@@ -1,0 +1,11 @@
+[Unit]
+Description=my-homepage 应用快速探测定时器（每 3 分钟，不 fetch git）
+
+[Timer]
+OnBootSec=30s
+OnUnitActiveSec=3min
+AccuracySec=10s
+Unit=my-homepage-probe-quick.service
+
+[Install]
+WantedBy=timers.target

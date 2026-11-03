@@ -1,6 +1,6 @@
 # my-homepage · 我的应用导航
 
-部署在这台服务器上的个人应用展示主页：以**表格 / 卡片**两种视图列出 `/root/applications` 下所有自研应用与**云服务器上的公网应用**的名称、简介、**实际访问端口/地址**、部署位置与 GitHub 地址，支持**手动排序**（拖拽 / 上下移动）以及按名称 / 端口 / 运行状态 / 同步状态排序。端口与运行状态、**源码是否已同步至 GitHub** 由服务端**每 5 分钟自动探测**，页面每 60 秒轮询刷新，应用换端口、上下线、源码有未提交/未推送改动都会自动反映到主页，无需改前端代码。
+部署在这台服务器上的个人应用展示主页：以**表格 / 卡片**两种视图列出 `/root/applications` 下所有自研应用与**云服务器上的公网应用**的名称、简介、**实际访问端口/地址**、部署位置与 GitHub 地址，支持**手动排序**（拖拽 / 上下移动）以及按名称 / 端口 / 运行状态 / 同步状态排序。端口与运行状态、**源码是否已同步至 GitHub** 由服务端定时探测：**端口/状态每 3 分钟、完整 git 同步每 5 分钟**，页面每 60 秒轮询刷新，应用换端口、上下线、源码有未提交/未推送改动都会自动反映到主页，无需改前端代码。
 
 - 技术栈：Vue 3 + Vite（构建产物为纯静态文件），零第三方运行时依赖
 - 线上地址：`http://<服务器IP>/`（nginx 80 端口托管）
@@ -22,7 +22,7 @@ my-homepage/
 ├── scripts/
 │   ├── apps.config.json      # ★ 应用元数据（手工维护，唯一需要编辑的文件）
 │   └── probe-apps.mjs        # ★ 端口探测器（生成 apps.json）
-├── systemd/                  # 探测定时器单元（每 5 分钟）
+├── systemd/                  # 探测定时器单元（快速 3 分钟 / 完整 5 分钟）
 ├── deploy.sh                 # 一键发布
 └── public/                   # favicon、apps.json（构建时随 dist 拷贝）
 ```
@@ -38,18 +38,19 @@ npm run deploy       # 一键发布：构建 → 探测 → 同步 /root/applica
 
 ## 服务管理（systemd 开机自启）
 
-项目已配置为**开机自启**，由两个 systemd 单元组成：
+项目已配置为**开机自启**，由以下 systemd 单元组成：
 
 | 单元 | 作用 |
 |---|---|
 | `my-homepage-settings.service` | 首页设置面板的后端 API（127.0.0.1:8300） |
-| `my-homepage-probe.timer` | 每 5 分钟探测端口 / 运行状态 / git 同步 |
+| `my-homepage-probe-quick.timer` | 每 3 分钟探测端口 / 运行状态（不 fetch git，约 0.3 秒） |
+| `my-homepage-probe.timer` | 每 5 分钟完整探测，含 git fetch（约 6 秒） |
 
 手动控制脚本（需 root）：
 
 ```bash
 ./scripts/start.sh      # 启用开机自启并立即启动，随后跑一次探测
-./scripts/restart.sh    # 重启两个服务（不改变自启状态）并立即探测一次
+./scripts/restart.sh    # 重启全部服务（不改变自启状态）并立即探测一次
 ./scripts/stop.sh       # 停止并取消开机自启 = 永久关闭（重启服务器也不会起来）
 ```
 
@@ -88,9 +89,9 @@ npm run deploy       # 一键发布：构建 → 探测 → 同步 /root/applica
 定时器安装（root）：
 
 ```bash
-cp systemd/my-homepage-probe.{service,timer} /etc/systemd/system/
+cp systemd/my-homepage-probe{,-quick}.{service,timer} /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now my-homepage-probe.timer
+systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer
 ```
 
 ## 设置页面（免改配置文件）
@@ -107,7 +108,7 @@ systemctl enable --now my-homepage-probe.timer
 
 ## 立刻同步
 
-工具栏右侧的「立刻同步」按钮会调用 `POST /api/probe`，在后台立即执行一次**完整探测**（端口 + git fetch + 远程健康接口）。探测期间按钮显示「同步中…」并禁用，完成后页面自动刷新。它与 5 分钟定时探测共用同一个脚本，耗时同样约为各仓库 fetch 时间之和。
+工具栏右侧的「立刻同步」按钮会调用 `POST /api/probe`，在后台立即执行一次**完整探测**（端口 + git fetch + 远程健康接口）。探测期间按钮显示「同步中…」并禁用，完成后页面自动刷新。它与完整定时探测共用同一个脚本，会并发 fetch 各仓库，通常约 6 秒完成。
 
 页脚「最后探测」固定按**北京时间**显示，取的是探测**完成**时刻（不是开始时刻）。
 
@@ -138,7 +139,7 @@ systemctl enable --now my-homepage-probe.timer
 
 探测器对每个应用目录（含自动发现的）执行 git 检查，结果随 `apps.json` 的 `git` 字段下发：
 
-1. **fetch 校准**：逐个执行 `git fetch --all`（SSH BatchMode，20s 超时，禁交互），保证 ahead/behind 基于最新远端快照；多个仓库依次 fetch（非并发，总耗时约为各仓库之和）。网络不通时回退上次快照并在悬停提示中标注「远端不可达」。手动运行 `node scripts/probe-apps.mjs --no-fetch` 可跳过网络步骤；
+1. **fetch 校准**：默认**并发 6 个仓库**执行（可用 `PROBE_FETCH_CONCURRENCY` 调整），只 fetch 当前分支所属远端（通常是 `origin`）、不拉 tags，SSH BatchMode + 连接复用，单仓 20s 超时；保证 ahead/behind 基于最新远端快照。网络不通时回退上次快照并在悬停提示中标注「远端不可达」。手动运行 `node scripts/probe-apps.mjs --no-fetch` 可跳过网络步骤；
 2. **工作区核对**：`git status --porcelain` 统计未提交（已跟踪文件改动）与未跟踪文件数；
 3. **推送核对**：`git rev-list --left-right --count @{upstream}...HEAD`（无分支上游时退回 `origin/HEAD`）得出未推送（ahead）/ 未拉取（behind）提交数。
 

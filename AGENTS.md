@@ -32,7 +32,7 @@
 | 前端栈 | Vue 3 + Vite 5，**无路由 / 无状态库 / 无 UI 组件库 / 零第三方运行时依赖** |
 | 构建产物体积 | gzip 后约 34KB（css ~2.5KB + js ~31KB） |
 | 设置 API | `127.0.0.1:8300`（仅回环监听，nginx 反代 `/api/`） |
-| 探测定时器 | `my-homepage-probe.timer`，每 5 分钟（`OnBootSec=1min`） |
+| 探测定时器 | `my-homepage-probe-quick.timer` 每 3 分钟（`--no-fetch`）；`my-homepage-probe.timer` 每 5 分钟（完整，含 fetch） |
 | 前端轮询 | 每 60 秒拉一次 `apps.json`；页面回到前台时立即刷新 |
 | 已登记应用 | 11 个（含 2 个线下应用（纯 APP）+ 1 个公网远程） |
 
@@ -40,7 +40,8 @@
 
 ```bash
 systemctl status my-homepage-settings.service   # 设置 API，常驻
-systemctl status my-homepage-probe.timer        # 每 5 分钟探测一次
+systemctl status my-homepage-probe.timer        # 每 5 分钟完整探测（含 fetch）
+systemctl status my-homepage-probe-quick.timer  # 每 3 分钟快速探测（--no-fetch）
 ```
 
 ---
@@ -80,7 +81,7 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
              ┌─────────────────────────┴──────────────────────────┐
              │                                                    │
    ┌─────────▼──────────┐                              ┌──────────▼───────────┐
-   │ probe-apps.mjs     │  每 5 分钟 systemd timer      │ settings-server.mjs  │
+   │ probe-apps.mjs     │  timer：完整5min/快速3min     │ settings-server.mjs  │
    │  · 端口探测(ss+proc)│                              │  GET  /api/config    │
    │  · git 同步检测     │                              │  POST /api/config    │
    │  · 远程健康探查     │                              │   → 写配置 + 后台探测 │
@@ -121,7 +122,8 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 │   ├── stop.sh                # 手动停止：disable --now = 永久关闭（重启不自启）
 │   └── move-project.sh        # 项目目录迁移（自动修正 systemd/文档/可选 webroot 路径）
 ├── systemd/
-│   ├── my-homepage-probe.service / .timer     # 每 5 分钟探测
+│   ├── my-homepage-probe.service / .timer     # 每 5 分钟完整探测（含 git fetch）
+│   ├── my-homepage-probe-quick.service / .timer  # 每 3 分钟快速探测（--no-fetch）
 │   └── my-homepage-settings.service           # 设置 API 常驻
 ├── public/
 │   ├── favicon.svg            # 四宫格蓝色图标（与顶栏 brand-mark 同源设计）
@@ -230,7 +232,7 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 ## 7. 探测机制详解（`scripts/probe-apps.mjs`）
 
-零依赖 Node 脚本，单次典型耗时：`--no-fetch` 约 1~2 秒；带 fetch 约 27 秒（7 个仓库访问 GitHub，网络差时更久，单仓 fetch 上限 20 秒）。
+零依赖 Node 脚本，单次典型耗时：`--no-fetch` 约 **0.3 秒**；完整 fetch 约 **6 秒**（10 个仓库、并发 6，实测 5.7 秒；网络差时更久，单仓 fetch 上限 20 秒）。
 
 ### 7.1 端口探测（本机应用）
 
@@ -245,7 +247,8 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 对每个含 `.git` 的目录：
 
-- **fetch 校准**：`git -c gc.auto=0 fetch --quiet --all --no-recurse-submodules`，`GIT_TERMINAL_PROMPT=0`、SSH `BatchMode` + `ConnectTimeout=8`、总超时 20 秒。**各仓库依次执行**（`execFileSync` 是同步阻塞调用，`Promise.all` 不会真正并发；单轮耗时约为各仓库 fetch 时间之和，最坏 N×20 秒）。`--no-fetch` 参数跳过此步（沿用上次远端快照）。
+- **fetch 校准**：**并发执行**，默认 6 个同时（`PROBE_FETCH_CONCURRENCY` 可覆盖）。只 fetch 当前分支所属的远端（通常是 `origin`），加 `--no-tags`，不再 `--all` 扫描所有远端；`GIT_TERMINAL_PROMPT=0`、SSH `BatchMode` + `ConnectTimeout=8` + `ControlMaster/ControlPersist=60`（多仓库复用 SSH 连接）、单仓超时 20 秒。`--no-fetch` 参数跳过此步（沿用上次远端快照）。
+- **互斥锁**：完整探测与快速探测通过 `/tmp/my-homepage-probe.lock` 互斥。快速探测（`--no-fetch`）遇到锁直接跳过；完整探测最多等 60 秒，避免两个进程同时写 `apps.json`。
 - **工作区核对**：`git status --porcelain=v1` → `??` 计未跟踪，其余计未提交。
 - **推送核对**：`git rev-list --left-right --count @{upstream}...HEAD`，无分支上游时退回 `origin/HEAD`。
 - 全程 `--no-optional-locks`（**不写 `.git/index`**）；除 fetch 写 `FETCH_HEAD`/`refs/remotes/*` 外**不触碰仓库**，更不改工作区代码。
@@ -347,7 +350,7 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 **安全边界**：只写配置文件本身，不执行 shell、不读取/不写 `/root/applications`。⚠️ 该写接口对局域网开放（与各应用自身「无登录」同等信任级别）。如需收紧，在 nginx `/api/` location 加 `allow/deny` 或 Basic Auth——注意 `conf.d/default.conf` 与 `nginx.conf` 的 paraportal 块**两处都要改**。
 
-**为什么要异步**：早期版本 POST 同步等探测跑完（含 GitHub fetch）才响应，实测卡 27 秒以上。现在改保存触发 `--no-fetch`（1~2 秒），`probedAt` 变化由前端轮询感知。
+**为什么要异步**：早期版本 POST 同步等探测跑完（含 GitHub fetch）才响应，实测卡 27 秒以上。现在改保存触发 `--no-fetch`（约 0.3 秒），`probedAt` 变化由前端轮询感知。
 
 ---
 
@@ -375,7 +378,7 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 ```bash
 cp systemd/*.service systemd/*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now my-homepage-probe.timer my-homepage-settings.service
+systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-homepage-settings.service
 ```
 
 服务文件里 `ExecStart` 用的是绝对路径 `/usr/local/bin/node`。
@@ -386,14 +389,14 @@ systemctl enable --now my-homepage-probe.timer my-homepage-settings.service
 
 | 脚本 | 对 systemd 的作用 | 语义 |
 |---|---|---|
-| `start.sh` | `enable --now` 两个单元 + 跑一次 `probe --no-fetch` | 恢复开机自启并立即运行 |
-| `restart.sh` | `restart` 两个单元 + 跑一次 `probe --no-fetch` | 重启，**不改自启状态**；若当前 disabled 会警告"重启后不会自启" |
-| `stop.sh` | `disable --now` 两个单元 + 停掉可能在跑的 probe oneshot | **永久关闭**：重启服务器也不自启 |
+| `start.sh` | `enable --now` 三个单元 + 跑一次 `probe --no-fetch` | 恢复开机自启并立即运行 |
+| `restart.sh` | `restart` 三个单元 + 跑一次 `probe --no-fetch` | 重启，**不改自启状态**；若当前 disabled 会警告"重启后不会自启" |
+| `stop.sh` | `disable --now` 三个单元 + 停掉可能在跑的 probe oneshot | **永久关闭**：重启服务器也不自启 |
 
 关键事实：
 
 - **主页是静态文件**，由共享 nginx（80 端口）托管，且同一 nginx 还承载 `/Platform` 等历史代理，因此 `stop.sh` **不动 nginx**。停止后页面仍能打开，但 `apps.json` 不再更新、设置面板保存失败（`/api/config` 返回 **502**）。
-- 当前三个服务（`my-homepage-settings`、`my-homepage-probe.timer`、`nginx`）均为 `enabled`，开机自启已生效。核对：`systemctl is-enabled <unit>`。
+- 当前四个服务（`my-homepage-settings`、`my-homepage-probe.timer`、`my-homepage-probe-quick.timer`、`nginx`）均为 `enabled`，开机自启已生效。核对：`systemctl is-enabled <unit>`。
 - 设置服务停机时 `/api/config` 应返回 **502**。早期曾返回 404，原因是 `nginx.conf` 的 paraportal 块里 `error_page ... /50x.html` 配了 `root html;`（解析为不存在的 `/etc/nginx/html/50x.html`），错误页取不到导致状态码被降级；已改为 `root /usr/share/nginx/html;`。
 
 ---
@@ -456,6 +459,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-settings.service
 | 远程应用独立 `remoteApps` 段 | 公网应用无本地目录，探端口/查 git 都不适用，改走健康接口 |
 | 设置面板 + 本机 API 服务 | 用户要求「在首页设置页修改，不进配置文件」。静态站点无法写文件，故加回环 API |
 | 保存异步 + `--no-fetch` | 同步等待 GitHub fetch 导致保存卡 27 秒 |
+| fetch 串行 → 并发 6 + 连接复用 | 实测 10 仓串行约 37 秒，并发后完整探测约 6 秒；加锁避免与 3 分钟快速探测同时写 `apps.json` |
 | 拖拽仅手柄触发 | 用户反馈点击卡片会触发拖拽 |
 | 内网蓝 / 公网橙 | 用户要求「内网和公网区分明显，可用颜色」 |
 | 3 行简介 + 固定行高 | 用户要求「简介过长换行、每行高度一致」；超 3 行截断（悬停看全文）是行高一致的必要代价 |
@@ -512,7 +516,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-settings.service
 脚本会自动：暂停并恢复服务 → `mv` 项目 → 改 `systemd/*.service` 的 `ExecStart` 并重装 →（可选）迁移 webroot 并同步 `deploy.sh` / `probe-apps.mjs` / 两处 nginx `root` → 更新本文档与 README 中的路径 → 跑一次探测 → 校验主页与 `/api/config` 均 200。**幂等**，要搬回去就用原路径再跑一次。
 
 > 当前部署目录由脚本从 `deploy.sh` 的 `WEBROOT=` 自动读取，不写死。
-> 只有 3 处绝对路径硬编码：两个 systemd 单元的 `ExecStart`、`probe-apps.mjs` 里的 webroot。其余代码全部基于 `__dirname` 相对定位，因此单纯 `mv` 后不重装单元会导致定时探测与设置服务失效。
+> 只有 3 处绝对路径硬编码：三个 systemd 单元（probe / probe-quick / settings）的 `ExecStart`、`probe-apps.mjs` 里的 webroot。其余代码全部基于 `__dirname` 相对定位，因此单纯 `mv` 后不重装单元会导致定时探测与设置服务失效。
 
 **迁移史**：
 - 2026-11-03 ① 从 `/root/gjx-homepage` + `/var/www/gjx-homepage` 迁至 `/root/applications/gjx-homepage` + `…/www`；
@@ -524,8 +528,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-settings.service
 **排查「页面没更新」**
 ```bash
 curl -s http://127.0.0.1/apps.json | head -5          # probedAt 是否在刷新
-systemctl status my-homepage-probe.timer
+systemctl status my-homepage-probe.timer my-homepage-probe-quick.timer
 journalctl -u my-homepage-probe.service -n 30 --no-pager
+journalctl -u my-homepage-probe-quick.service -n 30 --no-pager
 stat -c '%y %n' /root/applications/my-homepage/www/apps.json public/apps.json   # 两份应为同一时间
 ```
 
