@@ -137,6 +137,9 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 │       ├── AppTable.vue       # 表格视图（可排序表头 + 拖拽手柄列）
 │       ├── AppCard.vue        # 卡片视图（上移/下移按钮 + 拖拽手柄）
 │       └── SettingsPanel.vue  # ★ 设置面板（页面信息 + 应用增删改）
+├── glass/                     # ★ 独立毛玻璃页面（纯 HTML/CSS/JS，不参与 Vite 构建）
+│   ├── index.html
+│   └── assets/glass.css, glass.js
 ├── dist/                      # 构建输出（不手工编辑）
 ├── .verify/                   # 开发期截图与 Playwright 脚本（可删，不影响运行）
 └── node_modules/
@@ -356,6 +359,16 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 `Teleport` 到 body 的模态框。三区块：页面信息 / 本机应用（增删）/ 云服务器应用（增删）。每个应用条目可设 **应用形式**（`kinds` 多选：Web / APP / 小程序 / 电视 / CLI）、**主要语言 / 前端框架 / 后端框架**（逗号分隔数组）和 **部署位置**（`env`：内网 / 公网）；本机应用另有 **使用 HTTPS**、`exclude` 两个勾选。**是否探测由形式决定**：勾了 Web 就探测，不勾则视为离线应用（面板有提示）。本机应用的技术栈字段留空时，面板会从 `apps.json` 带入自动识别结果，保存后变为手动值；远程应用需手填。本机应用「期望端口」旁会显示 `apps.json` 中的**实际探测端口**，与配置不一致时点「采用」可写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；分类对旧 `type: "app"` 回退为 `["app"]`）。保存逻辑见 §8.1 `onSaved`，**保存后立即关闭，探测在后台跑**。
 
+### 8.5 独立毛玻璃页面（`glass/`，访问 `/glass/`）
+
+完全独立于 Vue 主站的静态页面，纯 HTML + CSS + JS，**不参与 Vite 构建、不读取 `apps.json`、不依赖任何第三方库**。
+
+- 入口 `glass/index.html`，样式 `glass/assets/glass.css`，脚本 `glass/assets/glass.js`；全部类名/变量/存储键使用 `fg-`、`--fg-`、`fluxglass:*` 命名空间。
+- 视觉：环境层径向渐变光斑 + 噪点颗粒，卡片用 `backdrop-filter: blur(22px) saturate(165%)`、半透明渐变、内高光、三层阴影；含浅色 / 深色主题（localStorage `fluxglass:theme`）。
+- 交互：清单勾选与进度、指标计数、圆环分段、30 天趋势图悬停、实时流模拟、搜索面板（`Ctrl/Cmd+K`）、主题切换。
+- 响应式：≤1180px 调整栅格，≤900px 主卡单列，≤480px 指标卡单列；≤760px 模糊半径降至 16px；`prefers-reduced-motion` 下关闭光斑漂移与入场动效；不支持 `backdrop-filter` 时降级为高不透明度背景。
+- 部署：`deploy.sh` 的 `rsync --delete` 只覆盖 `www/`，**不会删除 `glass/`**；nginx 在两处 server 块各加了 `/glass/` location（`root /root/applications/my-homepage` + `try_files … /glass/index.html`）。改完无需构建，刷新即生效。
+
 ---
 
 ## 9. 设置 API（`scripts/settings-server.mjs`）
@@ -388,13 +401,15 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 ### 10.2 nginx 配置（两处！）
 
-**A. `/etc/nginx/conf.d/default.conf`** — `listen 80 default_server`，root `/root/applications/my-homepage/www`，含 SPA 回退、`/api/` 反代、`/assets/` 长缓存、`apps.json` no-cache。
+**A. `/etc/nginx/conf.d/default.conf`** — `listen 80 default_server`，root `/root/applications/my-homepage/www`，含 SPA 回退、`/api/` 反代、`/assets/` 长缓存、`apps.json` no-cache，以及独立页面 `/glass/`（`root /root/applications/my-homepage`）。
 
 **B. `/etc/nginx/nginx.conf` 内的 `server { listen 80; server_name 127.0.0.1; }`** — 这是 paraportal 遗留配置块，携带 `/Platform`、`/visualization`、`/pushservice` 等到 `127.0.0.1:8080` 的代理。原始 `root` 指向**不存在的** `/opt/paratera/paraportal/gui/webapps/ROOT`。
 
-已做的最小改动：`root` 改为 `/root/applications/my-homepage/www`，并补上 `/api/` 反代。**不要删这个块**（会破坏 docker:8080 的代理路径）。
+已做的最小改动：`root` 改为 `/root/applications/my-homepage/www`，并补上 `/api/` 反代与 `/glass/` 独立页面 location。**不要删这个块**（会破坏 docker:8080 的代理路径）。
 
-备份：`/etc/nginx/conf.d/default.conf.bak`、`/etc/nginx/nginx.conf.bak`
+> `/glass/` 必须两处都配：`Host: 127.0.0.1` 走 `nginx.conf` 的块，局域网 IP 走 `default.conf`，否则会出现「一个入口能开、另一个 404」。两处都用 `root`（不是 `alias`）+ `try_files $uri $uri/ /glass/index.html`，`alias` 与 `try_files` 组合会导致静态资源 404。
+
+备份：`/etc/nginx/conf.d/default.conf.bak`、`/etc/nginx/nginx.conf.bak`（另有本次新增的 `*.bak-glass-20261104`）
 
 ### 10.3 systemd
 

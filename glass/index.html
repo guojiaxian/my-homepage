@@ -1,0 +1,419 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Flux 毛玻璃视觉实验页 — 独立运行的玻璃拟态仪表盘，与主站完全隔离。">
+  <meta name="theme-color" content="#eef0f9">
+  <title>Flux · 毛玻璃视觉仪表盘</title>
+  <link rel="stylesheet" href="./assets/glass.css">
+  <script>
+    /* 防止主题闪烁：仅读取带命名空间的存储键；无 JS 时内容仍然可见 */
+    (function () {
+      var el = document.documentElement;
+      el.classList.add('fg-js');
+      try {
+        var t = localStorage.getItem('fluxglass:theme');
+        if (t === 'dark' || t === 'light') el.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body class="fg-body">
+  <a class="fg-skip" href="#fg-main">跳到主要内容</a>
+
+  <!-- 环境层：所有色彩与模糊都在这里，卡片只负责折射 -->
+  <div class="fg-ambient" aria-hidden="true">
+    <div class="fg-ambient__wash"></div>
+    <div class="fg-blob fg-blob--amber"></div>
+    <div class="fg-blob fg-blob--rose"></div>
+    <div class="fg-blob fg-blob--blue"></div>
+    <div class="fg-blob fg-blob--lilac"></div>
+    <div class="fg-blob fg-blob--mint"></div>
+    <div class="fg-blob fg-blob--sun"></div>
+    <div class="fg-ambient__grain"></div>
+  </div>
+
+  <div class="fg-app">
+    <!-- ============ 顶栏 ============ -->
+    <header class="fg-topbar" id="fg-topbar">
+      <div class="fg-topbar__inner">
+        <a class="fg-brand" href="./" aria-label="Flux 首页">
+          <span class="fg-brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-spark"></use></svg>
+          </span>
+          <span class="fg-brand__name">Flux</span>
+        </a>
+
+        <nav class="fg-navpill" aria-label="视图切换">
+          <button type="button" class="fg-navpill__btn is-active" data-fg-toast="已切换到仪表盘视图">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-grid"></use></svg>
+            <span>仪表盘</span>
+          </button>
+        </nav>
+
+        <div class="fg-navicons" aria-label="快捷工具">
+          <button type="button" class="fg-iconbtn" data-fg-toast="任务中心" aria-label="任务中心">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-clipboard"></use></svg>
+          </button>
+          <button type="button" class="fg-iconbtn" data-fg-toast="日程安排" aria-label="日程安排">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-calendar"></use></svg>
+          </button>
+          <button type="button" class="fg-iconbtn" data-fg-toast="权限与安全" aria-label="权限与安全">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-shield"></use></svg>
+          </button>
+          <button type="button" class="fg-iconbtn" data-fg-toast="资源管理" aria-label="资源管理">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-cube"></use></svg>
+          </button>
+          <button type="button" class="fg-iconbtn" data-fg-toast="分享面板" aria-label="分享面板">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-share"></use></svg>
+          </button>
+          <button type="button" class="fg-iconbtn" data-fg-toast="报表中心" aria-label="报表中心">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-chart"></use></svg>
+          </button>
+          <button type="button" class="fg-iconbtn" data-fg-toast="系统设置" aria-label="系统设置">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-gear"></use></svg>
+          </button>
+          <button type="button" class="fg-iconbtn" data-fg-toast="退出登录" aria-label="退出登录">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-logout"></use></svg>
+          </button>
+        </div>
+
+        <div class="fg-topbar__right">
+          <button type="button" class="fg-iconbtn fg-searchbtn" id="fg-search-btn" aria-label="搜索（Ctrl+K）" aria-haspopup="dialog">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-search"></use></svg>
+          </button>
+          <button type="button" class="fg-iconbtn" id="fg-theme" aria-label="切换到深色主题" aria-pressed="false">
+            <svg viewBox="0 0 24 24" class="fg-i fg-i--sun"><use href="#fg-i-sun"></use></svg>
+            <svg viewBox="0 0 24 24" class="fg-i fg-i--moon"><use href="#fg-i-moon"></use></svg>
+          </button>
+          <button type="button" class="fg-lang" id="fg-lang" aria-label="切换语言" aria-pressed="false">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-globe"></use></svg>
+            <span id="fg-lang-label">英文</span>
+          </button>
+          <button type="button" class="fg-avatar" data-fg-toast="管理员 · 在线" aria-label="账户：管理员">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-user"></use></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- ============ 主内容 ============ -->
+    <main class="fg-main" id="fg-main">
+      <section class="fg-hero" data-reveal>
+        <div class="fg-hero__copy">
+          <h1>欢迎回来，管理员</h1>
+          <p class="fg-hero__meta">
+            <span class="fg-live-dot" aria-hidden="true"></span>
+            全部系统运行正常
+            <span class="fg-sep" aria-hidden="true"></span>
+            最后同步 3 分钟前
+          </p>
+        </div>
+        <div class="fg-actions" role="group" aria-label="快捷操作">
+          <button type="button" class="fg-pill" data-fg-toast="已创建新的任务草稿">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-clipboard"></use></svg>新任务
+          </button>
+          <button type="button" class="fg-pill" data-fg-toast="正在打开数据分析">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-chart"></use></svg>数据分析
+          </button>
+          <button type="button" class="fg-pill" data-fg-toast="正在生成报表分析">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-doc"></use></svg>报表分析
+          </button>
+          <button type="button" class="fg-pill" data-fg-toast="打开文件管理">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-folder"></use></svg>文件管理
+          </button>
+          <button type="button" class="fg-pill fg-pill--primary" data-fg-toast="视频管理已就绪">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-video"></use></svg>视频管理
+          </button>
+        </div>
+      </section>
+
+      <div class="fg-grid">
+        <!-- 入门指南 -->
+        <section class="fg-card fg-card--guide" data-reveal aria-labelledby="fg-guide-title">
+          <div class="fg-card__head">
+            <div>
+              <h2 class="fg-card__title" id="fg-guide-title">入门指南</h2>
+              <p class="fg-card__sub">以下列表列出了我们需要完成的详细信息</p>
+            </div>
+          </div>
+
+          <div class="fg-progress" role="progressbar" aria-labelledby="fg-guide-title" aria-valuemin="0" aria-valuemax="100" aria-valuenow="30" id="fg-progress">
+            <div class="fg-progress__track">
+              <span class="fg-progress__fill" id="fg-progress-fill" style="width:30%"></span>
+            </div>
+            <span class="fg-progress__num" id="fg-progress-num">30%</span>
+          </div>
+
+          <ul class="fg-checklist" id="fg-checklist">
+            <li>
+              <button type="button" class="fg-check" role="checkbox" aria-checked="true" data-id="workspace" data-weight="10">
+                <span class="fg-check__box" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-check"></use></svg>
+                </span>
+                <span class="fg-check__text">创建您的第一个工作区</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="fg-check" role="checkbox" aria-checked="true" data-id="agent" data-weight="20">
+                <span class="fg-check__box" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-check"></use></svg>
+                </span>
+                <span class="fg-check__text">部署流程代理</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="fg-check" role="checkbox" aria-checked="false" data-id="connector" data-weight="30">
+                <span class="fg-check__box" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-check"></use></svg>
+                </span>
+                <span class="fg-check__text">配置数据连接器</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="fg-check" role="checkbox" aria-checked="false" data-id="approval" data-weight="40">
+                <span class="fg-check__box" aria-hidden="true">
+                  <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-check"></use></svg>
+                </span>
+                <span class="fg-check__text">设置审批工作流</span>
+              </button>
+            </li>
+          </ul>
+
+          <div class="fg-guide__foot">
+            <span class="fg-guide__count" id="fg-guide-count">已完成 2 / 4 项</span>
+            <button type="button" class="fg-roundbtn" id="fg-guide-next" aria-label="继续配置下一步">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
+            </button>
+          </div>
+        </section>
+
+        <!-- 运营占比 -->
+        <section class="fg-card fg-card--gauge" data-reveal aria-labelledby="fg-gauge-title">
+          <div class="fg-card__head">
+            <h2 class="fg-card__title" id="fg-gauge-title">运营占比</h2>
+            <button type="button" class="fg-more" aria-label="运营占比更多操作" data-fg-toast="运营占比 · 更多设置">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-more"></use></svg>
+            </button>
+          </div>
+
+          <div class="fg-gauge">
+            <div class="fg-donut" id="fg-donut" role="img" aria-label="覆盖范围 94%，其中运输输出 40%、科技运营 34%、售后服务 26%">
+              <!-- 由 glass.js 绘制分段圆环 -->
+            </div>
+          </div>
+
+          <div class="fg-legend">
+            <div class="fg-legend__row">
+              <span class="fg-legend__name"><i class="fg-legend__dot fg-legend__dot--orange"></i>运输输出</span>
+              <span class="fg-badge fg-badge--online">活跃</span>
+            </div>
+            <div class="fg-legend__row">
+              <span class="fg-legend__name"><i class="fg-legend__dot fg-legend__dot--green"></i>科技运营</span>
+              <span class="fg-badge fg-badge--online">活跃</span>
+            </div>
+            <div class="fg-legend__row">
+              <span class="fg-legend__name"><i class="fg-legend__dot fg-legend__dot--blue"></i>售后服务</span>
+              <span class="fg-badge fg-badge--draft">草稿</span>
+            </div>
+          </div>
+        </section>
+
+        <!-- 四张指标卡 -->
+        <section class="fg-card fg-card--stat" data-reveal aria-labelledby="fg-stat-output">
+          <div class="fg-stat__top">
+            <h2 class="fg-stat__label" id="fg-stat-output">输出</h2>
+            <button type="button" class="fg-more" aria-label="输出指标更多操作" data-fg-toast="输出指标 · 详情">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-more"></use></svg>
+            </button>
+          </div>
+          <div class="fg-stat__value-row">
+            <span class="fg-stat__value" data-count-to="2.4" data-decimals="1" data-suffix="M">2.4M</span>
+            <span class="fg-delta fg-delta--up">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-trend-up"></use></svg>18%
+            </span>
+          </div>
+          <p class="fg-stat__caption">与过去 24 小时相比</p>
+          <div class="fg-spark" data-color="rose" aria-hidden="true"></div>
+        </section>
+
+        <section class="fg-card fg-card--stat" data-reveal aria-labelledby="fg-stat-input">
+          <div class="fg-stat__top">
+            <h2 class="fg-stat__label" id="fg-stat-input">输入</h2>
+            <button type="button" class="fg-more" aria-label="输入指标更多操作" data-fg-toast="输入指标 · 详情">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-more"></use></svg>
+            </button>
+          </div>
+          <div class="fg-stat__value-row">
+            <span class="fg-stat__value" data-count-to="127">127</span>
+            <span class="fg-delta fg-delta--up">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-trend-up"></use></svg>48%
+            </span>
+          </div>
+          <p class="fg-stat__caption">与过去 24 小时相比</p>
+          <div class="fg-spark" data-color="green" aria-hidden="true"></div>
+        </section>
+
+        <section class="fg-card fg-card--stat" data-reveal aria-labelledby="fg-stat-ops">
+          <div class="fg-stat__top">
+            <h2 class="fg-stat__label" id="fg-stat-ops">运营占比</h2>
+            <button type="button" class="fg-more" aria-label="运营占比指标更多操作" data-fg-toast="运营占比指标 · 详情">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-more"></use></svg>
+            </button>
+          </div>
+          <div class="fg-stat__value-row">
+            <span class="fg-stat__value" data-count-to="97.3" data-decimals="1" data-suffix="%">97.3%</span>
+            <span class="fg-delta fg-delta--up">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-trend-up"></use></svg>24%
+            </span>
+          </div>
+          <p class="fg-stat__caption">与过去 24 小时相比</p>
+          <div class="fg-spark" data-color="amber" aria-hidden="true"></div>
+        </section>
+
+        <section class="fg-card fg-card--stat" data-reveal aria-labelledby="fg-stat-config">
+          <div class="fg-stat__top">
+            <h2 class="fg-stat__label" id="fg-stat-config">配置管理</h2>
+            <button type="button" class="fg-more" aria-label="配置管理指标更多操作" data-fg-toast="配置管理指标 · 详情">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-more"></use></svg>
+            </button>
+          </div>
+          <div class="fg-stat__value-row">
+            <span class="fg-stat__value" data-count-to="234" data-suffix="ms">234ms</span>
+            <span class="fg-delta fg-delta--down">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-trend-down"></use></svg>0%
+            </span>
+          </div>
+          <p class="fg-stat__caption">与过去 24 小时相比</p>
+          <div class="fg-spark" data-color="red" aria-hidden="true"></div>
+        </section>
+
+        <!-- 趋势 -->
+        <section class="fg-card fg-card--trend" data-reveal aria-labelledby="fg-trend-title">
+          <div class="fg-card__head">
+            <h2 class="fg-card__title" id="fg-trend-title">30 天运营趋势</h2>
+            <button type="button" class="fg-more" aria-label="运营趋势更多操作" data-fg-toast="运营趋势 · 导出报告">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-more"></use></svg>
+            </button>
+          </div>
+          <div class="fg-trend__headline">
+            <span class="fg-trend__value" data-count-to="3890" data-format="group">3,890</span>
+            <span class="fg-delta fg-delta--up">
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-trend-up"></use></svg>12%
+            </span>
+          </div>
+          <p class="fg-stat__caption">预计未来 30 天将继续增长约 2,240</p>
+          <div class="fg-chart" id="fg-trend-chart">
+            <svg class="fg-chart__svg" id="fg-trend-svg" viewBox="0 0 720 220" preserveAspectRatio="none" aria-hidden="true"></svg>
+            <div class="fg-chart__axis" id="fg-trend-axis" aria-hidden="true"></div>
+            <div class="fg-tip" id="fg-trend-tip" hidden>
+              <span class="fg-tip__date"></span>
+              <strong class="fg-tip__val"></strong>
+            </div>
+          </div>
+        </section>
+
+        <!-- 实时运行流 -->
+        <section class="fg-card fg-card--live" data-reveal aria-labelledby="fg-live-title">
+          <div class="fg-card__head">
+            <h2 class="fg-card__title" id="fg-live-title">
+              <span class="fg-live-dot" aria-hidden="true"></span>实时运行流
+            </h2>
+            <button type="button" class="fg-linkbtn" data-fg-toast="正在打开完整运行日志">
+              查看更多
+              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
+            </button>
+          </div>
+
+          <div class="fg-table" role="table" aria-label="实时运行流">
+            <div class="fg-table__head" role="row">
+              <span role="columnheader">名称</span>
+              <span role="columnheader">时间</span>
+              <span role="columnheader">延迟</span>
+              <span role="columnheader">状态</span>
+            </div>
+            <div class="fg-table__body" id="fg-live-body">
+              <div class="fg-table__row" role="row">
+                <span class="fg-table__name" role="cell"><i class="fg-table__dot"></i>设备检查器</span>
+                <span role="cell">2 分钟前</span>
+                <span role="cell" data-latency>2.5s</span>
+                <span role="cell"><span class="fg-badge fg-badge--online">在线</span></span>
+              </div>
+              <div class="fg-table__row" role="row">
+                <span class="fg-table__name" role="cell"><i class="fg-table__dot"></i>数据同步代理</span>
+                <span role="cell">5 分钟前</span>
+                <span role="cell" data-latency>1.2s</span>
+                <span role="cell"><span class="fg-badge fg-badge--online">在线</span></span>
+              </div>
+              <div class="fg-table__row" role="row">
+                <span class="fg-table__name" role="cell"><i class="fg-table__dot fg-table__dot--amber"></i>报表生成器</span>
+                <span role="cell">8 分钟前</span>
+                <span role="cell" data-latency>4.8s</span>
+                <span role="cell"><span class="fg-badge fg-badge--draft">排队</span></span>
+              </div>
+              <div class="fg-table__row" role="row">
+                <span class="fg-table__name" role="cell"><i class="fg-table__dot"></i>凭证刷新器</span>
+                <span role="cell">12 分钟前</span>
+                <span role="cell" data-latency>0.8s</span>
+                <span role="cell"><span class="fg-badge fg-badge--online">在线</span></span>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <footer class="fg-foot">
+        <span>Flux Glass · 毛玻璃视觉实验页</span>
+        <span class="fg-sep" aria-hidden="true"></span>
+        <span>独立页面，与主站完全隔离</span>
+      </footer>
+    </main>
+  </div>
+
+  <!-- 搜索面板 -->
+  <div class="fg-search" id="fg-search" hidden>
+    <div class="fg-search__scrim" data-fg-close></div>
+    <div class="fg-search__dialog fg-glass" role="dialog" aria-modal="true" aria-label="全局搜索">
+      <div class="fg-search__field">
+        <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-search"></use></svg>
+        <input id="fg-search-input" type="search" placeholder="搜索页面、卡片或操作…" autocomplete="off" spellcheck="false" aria-label="搜索内容">
+        <kbd>ESC</kbd>
+      </div>
+      <ul class="fg-search__list" id="fg-search-list"></ul>
+      <p class="fg-search__hint">↑ ↓ 选择 · Enter 打开</p>
+    </div>
+  </div>
+
+  <div class="fg-toast" id="fg-toast" role="status" aria-live="polite"></div>
+
+  <!-- 图标精灵（统一命名空间，不污染外部页面） -->
+  <svg width="0" height="0" class="fg-sprite" aria-hidden="true" focusable="false">
+    <symbol id="fg-i-spark"><g fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.6c.9 5.3 4.2 8.6 9.4 9.4-5.2.9-8.5 4.2-9.4 9.4-.9-5.2-4.2-8.5-9.4-9.4C7.8 11.2 11.1 7.9 12 2.6Z"/></g></symbol>
+    <symbol id="fg-i-grid"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></g></symbol>
+    <symbol id="fg-i-clipboard"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="4" width="14" height="17" rx="4"/><path d="M9 4.2h6v2.8H9zM9 11.5h6M9 15.5h4"/></g></symbol>
+    <symbol id="fg-i-calendar"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="5" width="17" height="15" rx="4"/><path d="M8 3.5v3M16 3.5v3M4 10h16"/></g></symbol>
+    <symbol id="fg-i-shield"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 5 6v6c0 4.2 3 7.3 7 8.5 4-1.2 7-4.3 7-8.5V6l-7-2.5Z"/><path d="m9.2 11.8 1.9 1.9 3.7-3.9"/></g></symbol>
+    <symbol id="fg-i-cube"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3.8 7 3.9v8.6L12 20.2 5 16.3v-8.6L12 3.8Z"/><path d="m5.2 7.9 6.8 3.8 6.8-3.8M12 11.7v8.3"/></g></symbol>
+    <symbol id="fg-i-share"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="12" r="2.3"/><circle cx="17.6" cy="6" r="2.3"/><circle cx="17.6" cy="18" r="2.3"/><path d="m8.2 10.9 7.2-3.6M8.2 13.1l7.2 3.6"/></g></symbol>
+    <symbol id="fg-i-chart"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5h16"/><rect x="6" y="11" width="3.2" height="6" rx="1"/><rect x="11.2" y="6.5" width="3.2" height="10.5" rx="1"/><rect x="16.4" y="3.8" width="3.2" height="13.2" rx="1"/></g></symbol>
+    <symbol id="fg-i-gear"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.2v2.3M12 18.5v2.3M3.2 12h2.3M18.5 12h2.3M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6"/></g></symbol>
+    <symbol id="fg-i-logout"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 4.5H7.5A2.5 2.5 0 0 0 5 7v10a2.5 2.5 0 0 0 2.5 2.5H14"/><path d="M11 12h9m-3.5-3.5L20 12l-3.5 3.5"/></g></symbol>
+    <symbol id="fg-i-search"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.3"/><path d="m15.8 15.8 4.2 4.2"/></g></symbol>
+    <symbol id="fg-i-sun"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.6"/><path d="M12 3v2.2M12 18.8v2.2M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></g></symbol>
+    <symbol id="fg-i-moon"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z"/></g></symbol>
+    <symbol id="fg-i-globe"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c2.4 2.3 3.6 5 3.6 8s-1.2 5.7-3.6 8c-2.4-2.3-3.6-5-3.6-8s1.2-5.7 3.6-8Z"/></g></symbol>
+    <symbol id="fg-i-video"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="6" width="12.5" height="12" rx="3.5"/><path d="m16 10.5 4.5-2.6v8.2L16 13.5"/></g></symbol>
+    <symbol id="fg-i-doc"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 3.5h8l4 4v13H6z"/><path d="M14 3.5v4h4M9 12h6M9 16h4"/></g></symbol>
+    <symbol id="fg-i-folder"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 8a2 2 0 0 1 2-2h4l2 2.5h7a2 2 0 0 1 2 2v7.5a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2V8Z"/></g></symbol>
+    <symbol id="fg-i-check"><g fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.5 4.5 4.5L19 7"/></g></symbol>
+    <symbol id="fg-i-more"><g fill="currentColor"><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></g></symbol>
+    <symbol id="fg-i-trend-up"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 16 6-6 4 4 6-7"/><path d="M14 7h6v6"/></g></symbol>
+    <symbol id="fg-i-trend-down"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 8 6 6 4-4 6 7"/><path d="M14 17h6v-6"/></g></symbol>
+    <symbol id="fg-i-arrow-right"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16m-6-6 6 6-6 6"/></g></symbol>
+    <symbol id="fg-i-user"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8.2" r="3.6"/><path d="M4.8 20c.9-3.6 3.7-5.6 7.2-5.6s6.3 2 7.2 5.6"/></g></symbol>
+  </svg>
+
+  <script src="./assets/glass.js" defer></script>
+</body>
+</html>
