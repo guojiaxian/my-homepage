@@ -141,7 +141,7 @@ async function copyDir(app) {
         <span
           v-for="k in kindList(app)"
           :key="k.value"
-          class="kind-chip"
+          :class="['kind-chip', k.value]"
           :title="`应用形式：${k.label}`"
         >{{ k.label }}</span>
       </footer>

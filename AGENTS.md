@@ -344,7 +344,7 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 - 设计变量集中在 `src/style.css`：浅色为默认，`html[data-theme=dark]` 为 GitHub Dark 配色；主题存 localStorage `theme`，支持 `auto` 跟随系统
 - **内网 = 蓝（`--accent`） / 公网 = 橙（`--amber`）**，四种呈现同时生效：名称旁 `env-chip` 标签、表格行 `td:first-child` 左边色条、卡片左边框、应用图标底色（`icon-net`）。判定以 `app.env` 为准，旧数据缺 `env` 时回退 `app.remote`
-- **应用形式 chip**：`kind-chip`（Web / APP / 小程序 / 电视 / CLI，可多选），表格显示在名称下方标签行，卡片显示在底部标签行
+- **应用形式 chip**：`kind-chip`（Web / APP / 小程序 / 电视 / CLI，可多选），按类型配色：Web 蓝、APP 绿、小程序青、电视紫、CLI 灰；表格显示在名称下方标签行，卡片显示在底部标签行
 - **技术栈文本**：表格在应用形式 chip 后显示最多两行 `语言 · 前端 · 后端`，在应用列固定宽度内垂直居中，超出两行省略、悬停看完整；卡片有独立「技术栈」行
 - **业务标签 `tags`**：仍保存在配置与设置页中，但当前不在首页表格/卡片展示（避免与形式/技术栈重复）
 - 状态徽标：**运行中（绿）/ 未运行（红）/ 线下应用（灰）**；远程应用同样统一为运行中/未运行，线下应用为纯 APP / 小程序 / 电视 / CLI、不做探测

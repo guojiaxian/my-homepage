@@ -132,7 +132,7 @@ async function copyDir(app) {
                   <span
                     v-for="k in kindList(app)"
                     :key="k.value"
-                    class="kind-chip"
+                    :class="['kind-chip', k.value]"
                     :title="`应用形式：${k.label}`"
                   >{{ k.label }}</span>
                   <span v-if="stackText(app)" class="stack-text" :title="stackTitle(app)">{{ stackText(app) }}</span>
@@ -289,7 +289,7 @@ tr.dragging {
 
 .app-cell {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 10px;
   width: 340px;
   min-width: 340px;

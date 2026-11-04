@@ -16,6 +16,10 @@
   --gray: #8c959f;
   --amber: #b45309;
   --amber-soft: #fef3e2;
+  --teal: #0f766e;
+  --teal-soft: #e6f7f4;
+  --purple: #8250df;
+  --purple-soft: #f3eeff;
   --shadow: 0 1px 3px rgb(16 24 40 / 0.06), 0 1px 2px rgb(16 24 40 / 0.04);
   --shadow-hover: 0 8px 24px rgb(16 24 40 / 0.1);
   --mono: ui-monospace, 'SF Mono', 'Cascadia Code', Menlo, Consolas, monospace;
@@ -38,6 +42,10 @@ html[data-theme='dark'] {
   --gray: #6e7681;
   --amber: #d29922;
   --amber-soft: #2d2413;
+  --teal: #2dd4bf;
+  --teal-soft: #0d2a27;
+  --purple: #bc8cff;
+  --purple-soft: #241a3a;
   --shadow: 0 1px 3px rgb(0 0 0 / 0.3);
   --shadow-hover: 0 8px 24px rgb(0 0 0 / 0.45);
 }
@@ -303,11 +311,37 @@ button {
   display: inline-block;
   padding: 1px 8px;
   border-radius: 6px;
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   font-size: 12px;
   background: var(--bg-hover);
   color: var(--text-2);
   white-space: nowrap;
+}
+
+/* 形式配色：Web 蓝 / APP 绿 / 小程序青 / 电视紫 / CLI 灰 */
+.kind-chip.web {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.kind-chip.app {
+  background: var(--green-soft);
+  color: var(--green);
+}
+
+.kind-chip.miniapp {
+  background: var(--teal-soft);
+  color: var(--teal);
+}
+
+.kind-chip.tv {
+  background: var(--purple-soft);
+  color: var(--purple);
+}
+
+.kind-chip.cli {
+  background: var(--bg-hover);
+  color: var(--text-2);
 }
 
 .tag.warn {
