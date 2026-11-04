@@ -137,14 +137,13 @@ async function copyDir(app) {
         </div>
       </div>
 
-      <footer v-if="kindList(app).length || app.tags.length" class="card-tags">
+      <footer v-if="kindList(app).length" class="card-tags">
         <span
           v-for="k in kindList(app)"
           :key="k.value"
           class="kind-chip"
           :title="`应用形式：${k.label}`"
         >{{ k.label }}</span>
-        <span v-for="tag in app.tags" :key="tag" class="tag">{{ tag }}</span>
       </footer>
     </article>
   </div>

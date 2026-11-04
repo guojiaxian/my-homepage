@@ -166,6 +166,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer
 
 - **应用形式** `kinds`：`web`（Web）、`app`（APP）、`miniapp`（小程序）、`tv`（电视）、`cli`（CLI），**可多选**。首页显示为灰色 chip。是否探测由它决定：含 `web` 就探测，不含则视为线下应用。
 - **技术栈**：`languages`（主要语言）、`frontend`（前端框架）、`backend`（后端框架），均为数组。本机应用由探测器从 `package.json` / `requirements.txt` / `pyproject.toml` / `go.mod` / `build.gradle` / `app.json` / README 等自动识别；设置页可手动覆盖。远程应用不在本机目录，需在设置页手动填写。
+- **业务标签** `tags`：仍可在设置页维护，但当前不在首页表格/卡片展示。
 - **部署位置** `env`：`lan`（内网，蓝色）或 `public`（公网，橙色）。本机应用默认 `lan`，云服务器应用默认 `public`。
 - **HTTPS** `https`：本机应用可在设置面板勾选「使用 HTTPS」，首页访问链接会拼成 `https://<当前主机名>:<端口>`；配置对应 `"https": true`，缺省为 `false`（http）。远程应用直接使用配置的 `url`，不需要该字段。
 

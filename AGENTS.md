@@ -345,10 +345,11 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 - 设计变量集中在 `src/style.css`：浅色为默认，`html[data-theme=dark]` 为 GitHub Dark 配色；主题存 localStorage `theme`，支持 `auto` 跟随系统
 - **内网 = 蓝（`--accent`） / 公网 = 橙（`--amber`）**，四种呈现同时生效：名称旁 `env-chip` 标签、表格行 `td:first-child` 左边色条、卡片左边框、应用图标底色（`icon-net`）。判定以 `app.env` 为准，旧数据缺 `env` 时回退 `app.remote`
 - **应用形式 chip**：`kind-chip`（Web / APP / 小程序 / 电视 / CLI，可多选），表格显示在名称下方标签行，卡片显示在底部标签行
-- **技术栈文本**：表格在应用形式 chip 后显示一行 `语言 · 前端 · 后端`，过长时省略、悬停看完整；卡片有独立「技术栈」行
+- **技术栈文本**：表格在应用形式 chip 后显示最多两行 `语言 · 前端 · 后端`，在应用列固定宽度内垂直居中，超出两行省略、悬停看完整；卡片有独立「技术栈」行
+- **业务标签 `tags`**：仍保存在配置与设置页中，但当前不在首页表格/卡片展示（避免与形式/技术栈重复）
 - 状态徽标：**运行中（绿）/ 未运行（红）/ 线下应用（灰）**；远程应用同样统一为运行中/未运行，线下应用为纯 APP / 小程序 / 电视 / CLI、不做探测
 - git 同步 chip：已同步绿、未提交红、未推送/未拉取/未跟踪橙、无仓库等灰
-- 表格布局：容器 `max-width: 1440px`；行内容 **`vertical-align: middle`**，表头 **`text-align: center`**；名称列 `min-width: 300px` 且 `nowrap`；简介列 `-webkit-line-clamp: 3` + 固定 `height: 63px`；`.app-meta` 同为 63px → **每行高度严格一致**（约 92px）
+- 表格布局：容器 `max-width: 1440px`；行内容 **`vertical-align: middle`**，表头 **`text-align: center`**；应用列固定 `width/min-width: 340px`；简介列 `-webkit-line-clamp: 3` + 固定 `height: 63px`；`.app-meta` 同为 63px（名称行 + 两行技术栈约 60px）→ **每行高度严格一致**（约 92px）
 - 移动端 `≤640px` 单列，`≤900px` 表格压缩列宽并横向滚动
 
 ### 8.4 设置面板（`src/components/SettingsPanel.vue`）

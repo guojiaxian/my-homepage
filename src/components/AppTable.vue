@@ -136,7 +136,6 @@ async function copyDir(app) {
                     :title="`应用形式：${k.label}`"
                   >{{ k.label }}</span>
                   <span v-if="stackText(app)" class="stack-text" :title="stackTitle(app)">{{ stackText(app) }}</span>
-                  <span v-for="tag in app.tags" :key="tag" class="tag">{{ tag }}</span>
                 </span>
               </div>
             </div>
@@ -292,7 +291,8 @@ tr.dragging {
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  min-width: 300px;
+  width: 340px;
+  min-width: 340px;
 }
 
 .app-icon.icon-net {
@@ -339,22 +339,27 @@ tbody tr.net td:first-child {
 .app-tags {
   display: flex;
   flex-wrap: nowrap;
+  align-items: center;
   gap: 4px;
+  min-height: 32px;
   overflow: hidden;
 }
 
-.app-tags .tag,
 .app-tags .kind-chip {
   flex: none;
 }
 
 .stack-text {
+  flex: 1;
   min-width: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
   color: var(--text-2);
   font-size: 12px;
+  line-height: 16px;
 }
 
 .desc {
