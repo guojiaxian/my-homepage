@@ -25,6 +25,7 @@ import {
   writeSync,
   unlinkSync,
   statSync,
+  readdirSync,
 } from 'node:fs'
 import net from 'node:net'
 import os from 'node:os'
@@ -50,12 +51,182 @@ const FETCH_CONCURRENCY = Math.max(1, Number(process.env.PROBE_FETCH_CONCURRENCY
 const LOCK_FILE = path.join(os.tmpdir(), 'my-homepage-probe.lock')
 const LOCK_STALE_MS = 5 * 60_000
 
-// 应用分类：web / APP / 小程序，可多选
-const APP_KINDS = new Set(['web', 'app', 'miniapp'])
+// 应用形式：web / APP / 小程序 / 电视 / CLI，可多选
+const APP_KINDS = new Set(['web', 'app', 'miniapp', 'tv', 'cli'])
 const normKinds = (value, fallback) => {
   const list = (Array.isArray(value) ? value : []).filter((k) => APP_KINDS.has(k))
   const uniq = [...new Set(list)]
   return uniq.length ? uniq : fallback
+}
+const normList = (value) => {
+  const list = Array.isArray(value) ? value : typeof value === 'string' ? value.split(/[,，]/) : []
+  return [...new Set(list.map((x) => String(x).trim()).filter(Boolean))]
+}
+const pickList = (configured, detected) => {
+  const list = normList(configured)
+  return list.length ? list : detected
+}
+
+/* ---------------- 技术栈自动识别（仅本机目录） ---------------- */
+
+const STACK_SKIP_DIRS = new Set([
+  'node_modules', '.git', 'dist', 'build', 'data', 'logs', 'backups',
+  '.venv', 'venv', '__pycache__', 'vendor',
+])
+
+function collectFiles(dir, exts, depth = 2, out = []) {
+  if (depth < 0) return out
+  let entries
+  try {
+    entries = readdirSync(dir, { withFileTypes: true })
+  } catch {
+    return out
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name)
+    if (entry.isDirectory()) {
+      if (!STACK_SKIP_DIRS.has(entry.name)) collectFiles(full, exts, depth - 1, out)
+    } else if (exts.some((ext) => entry.name.endsWith(ext))) {
+      out.push(full)
+    }
+  }
+  return out
+}
+
+function readText(file) {
+  try {
+    return readFileSync(file, 'utf8')
+  } catch {
+    return ''
+  }
+}
+
+function readJson(file) {
+  try {
+    return JSON.parse(readText(file))
+  } catch {
+    return null
+  }
+}
+
+function readMany(files, limit = 30) {
+  return files.slice(0, limit).map(readText).join('\n')
+}
+
+/** 从依赖清单与 README 推断应用形式 / 语言 / 前端 / 后端；识别不到的部分返回「无」 */
+function detectStack(dir) {
+  const pkgFiles = collectFiles(dir, ['package.json'], 2)
+  const deps = {}
+  for (const file of pkgFiles) {
+    const pkg = readJson(file)
+    if (pkg) Object.assign(deps, pkg.dependencies ?? {}, pkg.devDependencies ?? {})
+  }
+  const req = readText(path.join(dir, 'requirements.txt'))
+  const pyproject = readText(path.join(dir, 'pyproject.toml'))
+  const goMod = readText(path.join(dir, 'go.mod'))
+  const gradle = ['build.gradle.kts', 'build.gradle', 'app/build.gradle.kts', 'app/build.gradle']
+    .map((f) => readText(path.join(dir, f)))
+    .join('\n')
+  const appJson = readJson(path.join(dir, 'app.json'))
+  const projectCfg = readText(path.join(dir, 'project.config.json'))
+  const readme = readText(path.join(dir, 'README.md')).toLowerCase()
+  const htmlFiles = collectFiles(dir, ['.html'], 2)
+  const html = readMany(htmlFiles, 10).toLowerCase()
+  const pyFiles = collectFiles(dir, ['.py'], 2)
+  const pySourceFiles = pyFiles.filter((file) => {
+    const rel = path.relative(dir, file).split(path.sep)
+    const base = path.basename(file)
+    return !rel.includes('tests')
+      && !base.startsWith('test_')
+      && !/^(lextab|yacctab|parsetab)\.py$/i.test(base)
+      && !rel.some((seg) => seg.startsWith('dist'))
+  })
+  const pyText = readMany(pyFiles, 30).toLowerCase()
+  const jsFiles = collectFiles(dir, ['.js', '.mjs'], 2)
+  const serverFiles = [
+    'server.js', 'server.mjs', 'server.ts', 'server/index.js', 'server/server.js',
+    'server/main.py', 'run.py', 'main.py', 'app/main.py', 'app/api.py',
+  ]
+    .map((f) => path.join(dir, f))
+    .filter(existsSync)
+  const serverText = readMany(serverFiles, 10).toLowerCase()
+  const hasDep = (name) => Object.prototype.hasOwnProperty.call(deps, name)
+  const depVer = (name) => String(deps[name] ?? '')
+
+  const forms = []
+  const isMini = Boolean(appJson?.pages?.length && projectCfg)
+  if (isMini) forms.push('miniapp')
+  const isCapacitor = hasDep('@capacitor/core') || collectFiles(dir, ['capacitor.config.json'], 2).length > 0
+  if (isCapacitor) forms.push('app')
+  const isAndroid = /com\.android\.application/.test(gradle)
+  if (isAndroid && !isCapacitor) {
+    if (/android tv|小米电视|miui tv|遥控|tv show|电视/.test(readme)) forms.push('tv')
+    else forms.push('app')
+  }
+  if (/\[project\.scripts\]/.test(pyproject) && !/fastapi|flask|django|express|fastify|koa/.test((req + pyproject).toLowerCase())) {
+    forms.push('cli')
+  }
+
+  const languages = []
+  if (req || pyproject || pySourceFiles.length) languages.push('Python')
+  if (pkgFiles.length || jsFiles.length) languages.push('JavaScript')
+  if (hasDep('typescript') || collectFiles(dir, ['.ts'], 2).length) languages.push('TypeScript')
+  if (goMod) languages.push('Go')
+  if (isAndroid && /kotlin/i.test(gradle)) languages.push('Kotlin')
+  if (isMini) languages.push('WXML/WXSS')
+
+  const frontend = []
+  if (isMini) {
+    frontend.push('微信小程序原生')
+  } else if (isAndroid) {
+    const extras = []
+    if (/viewbinding/i.test(gradle)) extras.push('ViewBinding')
+    if (/webview/.test(readme)) extras.push('WebView')
+    frontend.push(`Android 原生 Kotlin${extras.length ? `（${extras.join(' + ')}）` : ''}`)
+  } else if (hasDep('vue') || /vue\.global/.test(html)) {
+    frontend.push(depVer('vue').startsWith('^2') || depVer('vue').startsWith('2') ? 'Vue 2' : 'Vue 3')
+    if (hasDep('vite')) frontend.push('Vite')
+    if (hasDep('echarts') || /echarts/.test(html)) frontend.push('ECharts')
+    if (hasDep('bootstrap') || /bootstrap/.test(html)) frontend.push('Bootstrap')
+    if (hasDep('chart.js') || /chart\.js/.test(html)) frontend.push('Chart.js')
+  } else if (hasDep('react')) {
+    frontend.push('React')
+    if (hasDep('vite')) frontend.push('Vite')
+  } else if (hasDep('svelte')) {
+    frontend.push('Svelte')
+  } else if (htmlFiles.length) {
+    frontend.push('原生 HTML/CSS/JS')
+  }
+  if (isCapacitor && !frontend.length) frontend.push('原生 HTML/CSS/JS')
+  if (!frontend.length) frontend.push('无')
+
+  const backend = []
+  if (hasDep('fastify')) backend.push('Fastify')
+  else if (hasDep('express')) backend.push('Express')
+  else if (hasDep('koa')) backend.push('Koa')
+  else if (hasDep('hono')) backend.push('Hono')
+  if (/fastapi/.test(req + pyproject + pyText)) backend.push('FastAPI')
+  else if (/flask/.test(req + pyproject)) backend.push('Flask')
+  else if (/django/.test(req + pyproject)) backend.push('Django')
+  if (goMod) {
+    if (/go-chi|chi\/v5/.test(goMod)) backend.push('Go + go-chi')
+    else if (/gin-gonic/.test(goMod)) backend.push('Go + Gin')
+    else if (/labstack\/echo/.test(goMod)) backend.push('Go + Echo')
+    else backend.push('Go')
+  }
+  if (!backend.length && /http\.server/.test(pyText + serverText)) backend.push('Python 标准库 http.server')
+  if (!backend.length && /node:http|node:https|require\('http'\)|require\('https'\)|require\("http"\)|require\("https"\)/.test(serverText)) {
+    backend.push(/https/.test(serverText) ? 'Node.js 内置 https' : 'Node.js 内置 http')
+  }
+  if (backend.length && /node/i.test(backend.join(' ')) && pySourceFiles.length) backend.push('Python 采集脚本')
+  if (!backend.length) backend.push('无')
+
+  return {
+    forms: [...new Set(forms)],
+    languages: [...new Set(languages)],
+    frontend: [...new Set(frontend)],
+    backend: [...new Set(backend)],
+  }
 }
 
 /* ---------------- 远程应用健康探查（云服务器等外部主机） ---------------- */
@@ -126,6 +297,9 @@ async function probeRemote(meta, now) {
     status: info.online ? 'running' : 'down',
     kinds: normKinds(meta.kinds, ['web']),
     env: meta.env === 'lan' ? 'lan' : 'public',
+    languages: normList(meta.languages),
+    frontend: normList(meta.frontend),
+    backend: normList(meta.backend),
     github: meta.github || '',
     tags: meta.tags || [],
     icon: meta.icon || '☁️',
@@ -544,7 +718,17 @@ async function runProbe(NO_FETCH) {
   for (const meta of config.apps ?? []) {
     if (meta.exclude) continue
 
-    const kinds = normKinds(meta.kinds, meta.type === 'app' ? ['app'] : ['web'])
+    const configuredKinds = normKinds(meta.kinds, meta.type === 'app' ? ['app'] : ['web'])
+    let detected = { forms: [], languages: [], frontend: [], backend: [] }
+    try {
+      detected = detectStack(meta.directory)
+    } catch {
+      /* 识别失败时保持空结果，不影响探测 */
+    }
+    const kinds = [...new Set([...configuredKinds, ...detected.forms.filter((f) => f !== 'web')])]
+    const languages = pickList(meta.languages, detected.languages)
+    const frontend = pickList(meta.frontend, detected.frontend)
+    const backend = pickList(meta.backend, detected.backend)
     const env = meta.env === 'public' ? 'public' : 'lan'
 
     // 线下应用（纯 APP / 小程序，分类不含 web）：不做端口探测，
@@ -563,6 +747,9 @@ async function runProbe(NO_FETCH) {
         kinds,
         env,
         https: Boolean(meta.https),
+        languages,
+        frontend,
+        backend,
         github: meta.github || '',
         tags: meta.tags || [],
         icon: meta.icon || '📱',
@@ -610,6 +797,9 @@ async function runProbe(NO_FETCH) {
       kinds,
       env,
       https: Boolean(meta.https),
+      languages,
+      frontend,
+      backend,
       github: meta.github || '',
       tags: meta.tags || [],
       icon: meta.icon || '📦',
@@ -623,6 +813,12 @@ async function runProbe(NO_FETCH) {
     if (registeredDirs.has(dirName) || excludedDirs.has(dirName) || discovered.has(dirName)) continue
     discovered.add(dirName)
     const { primary, extraPorts: rest } = pickPrimary(found.ports, null)
+    let detected = { forms: [], languages: [], frontend: [], backend: [] }
+    try {
+      detected = detectStack(`${APPS_ROOT}/${dirName}`)
+    } catch {
+      /* 识别失败时保持空结果 */
+    }
     results.push({
       id: dirName,
       name: dirName,
@@ -633,9 +829,12 @@ async function runProbe(NO_FETCH) {
       extraPorts: rest,
       external: primary.external,
       status: 'running',
-      kinds: ['web'],
+      kinds: ['web', ...detected.forms.filter((f) => f !== 'web')],
       env: 'lan',
       https: false,
+      languages: detected.languages,
+      frontend: detected.frontend,
+      backend: detected.backend,
       github: '',
       tags: [],
       icon: '🆕',

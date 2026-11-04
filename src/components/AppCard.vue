@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { buildAppUrl, copyText, envInfo, gitSyncView, hasUrl, kindList, portText, remoteHealthTitle, statusClass, statusText, statusTitle } from '../lib/app-utils.js'
+import { buildAppUrl, copyText, envInfo, gitSyncView, hasUrl, kindList, portText, remoteHealthTitle, stackText, stackTitle, statusClass, statusText, statusTitle } from '../lib/app-utils.js'
 
 const props = defineProps({
   apps: { type: Array, required: true },
@@ -120,6 +120,10 @@ async function copyDir(app) {
           >{{ copiedId === app.id ? '✓ 已复制' : app.directory }}</span>
         </div>
         <div class="fact">
+          <span class="fact-label">技术栈</span>
+          <span class="stack-text" :title="stackTitle(app)">{{ stackText(app) || '—' }}</span>
+        </div>
+        <div class="fact">
           <span class="fact-label">同步</span>
           <span v-if="gitSyncView(app.git)" class="sync-chip" :class="gitSyncView(app.git).cls" :title="gitSyncView(app.git).title">
             {{ gitSyncView(app.git).text }}
@@ -138,7 +142,7 @@ async function copyDir(app) {
           v-for="k in kindList(app)"
           :key="k.value"
           class="kind-chip"
-          :title="`应用分类：${k.label}`"
+          :title="`应用形式：${k.label}`"
         >{{ k.label }}</span>
         <span v-for="tag in app.tags" :key="tag" class="tag">{{ tag }}</span>
       </footer>
@@ -288,9 +292,16 @@ async function copyDir(app) {
 
 .fact-label {
   flex: none;
-  width: 30px;
+  width: 42px;
   color: var(--gray);
   font-size: 12px;
+}
+
+.stack-text {
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
 }
 
 .dir {

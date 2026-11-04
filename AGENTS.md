@@ -167,18 +167,22 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
   "description": "一句话简介（主页表格显示 3 行内）",
   "directory": "/root/applications/study-log",    // 缺省时自动补 /root/applications/<id>
   "expectedPort": 3000,                           // ★ 主端口锚点：目录下可能有非 Web 附属监听
-  "kinds": ["web"],                               // 应用分类：web / app / miniapp，可多选
+  "kinds": ["web"],                               // 应用形式：web / app / miniapp / tv / cli，可多选
   "env": "lan",                                   // 部署位置：lan 内网 / public 公网
   "https": false,                                 // 可选：访问链接是否用 https（仅本机应用）
+  "languages": ["JavaScript"],                    // 主要语言（数组，留空则自动识别）
+  "frontend": ["Vue 3", "Vite"],                  // 前端框架（数组）
+  "backend": ["Fastify"],                         // 后端框架（数组）
   "github": "https://github.com/guojiaxian/Study-log",
-  "tags": ["Vue", "Fastify", "AI"],
+  "tags": ["AI"],
   "icon": "📚",                                   // emoji
   "exclude": true                                 // 可选：完全不在主页显示（连条目都不出现）
 }
 ```
 
 - `expectedPort` 的作用见 §7.1「主端口选择」——**遇到目录下有多个监听时务必填写**。
-- `kinds` 是**分类**（可多选），同时决定是否探测：含 `web` 就探测 Web 端口；不含 `web` 则视为**线下应用**（纯 APP / 小程序），不做端口探测、状态显示灰色「线下应用」。例如 `["web","app"]` 既有网页又有 APK，仍会探测 Web。
+- `kinds` 是**应用形式**（可多选）：`web` / `app` / `miniapp` / `tv` / `cli`，同时决定是否探测：含 `web` 就探测 Web 端口；不含 `web` 则视为**线下应用**（纯 APP / 小程序 / 电视 / CLI），不做端口探测、状态显示灰色「线下应用」。例如 `["web","app"]` 既有网页又有 APK，仍会探测 Web。
+- `languages` / `frontend` / `backend` 是**技术栈展示字段**（字符串数组）。本机应用留空时由探测器自动识别（见 §7.2.1）；填写后以手动值为准。远程应用没有本机目录，必须手动填写。
 - 旧字段 `type: "app"` 仅作为缺省分类推断的兼容回退（`kinds` 缺省时 → `["app"]`），**不再参与探测判断**；设置面板已移除该勾选，保存配置时会被丢弃。
 - `env` 是展示用的部署位置，缺省 `lan`（本机应用）；远程应用缺省 `public`。它不影响端口探测与远程健康探查，只影响首页蓝色/橙色标签与统计。
 - `https: true` 让本机应用的访问链接使用 `https://`（缺省 false，即 http）。远程应用直接用 `url`，不受此字段影响。
@@ -196,8 +200,11 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
   "url": "http://47.95.140.199:3000",                       // 点击跳转地址，缺省取 healthUrl 同源
   "location": "阿里云",                                      // 表格「服务器/目录」列显示「阿里云 · <host>」
   "host": "47.95.140.199",                                  // 缺省取 healthUrl 的 hostname
-  "kinds": ["web"],                                         // 分类，可多选；缺省 ["web"]
+  "kinds": ["web"],                                         // 应用形式，可多选；缺省 ["web"]
   "env": "public",                                          // 部署位置，缺省 public
+  "languages": ["JavaScript/Node.js"],                      // 主要语言（远程应用手填）
+  "frontend": ["Vue 3"],                                    // 前端框架
+  "backend": ["Fastify"],                                   // 后端框架
   "github": "…", "tags": ["公网"], "icon": "☁️"
 }
 ```
@@ -255,6 +262,17 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 状态优先级：`dirty`（未提交）> `ahead`（未推送）> `behind`（未拉取）> `untracked`（未跟踪）> `no-upstream` > `synced`；另有 `no-repo`（无仓库）、`error`（检查失败）。
 
+### 7.2.1 技术栈自动识别
+
+`detectStack(dir)` 只对本机应用目录运行，读取带深度限制的 `package.json`（含 `server/`、`web/`、`mobile/` 等子项目）、`requirements.txt`、`pyproject.toml`、`go.mod`、`build.gradle(.kts)`、`app.json`/`project.config.json`、README，以及少量 HTML/JS/Py 文件内容，得到：
+
+- `forms`：`app`（Capacitor / Android）、`tv`（Android + TV 关键字）、`miniapp`（微信小程序）、`cli`（pyproject scripts 且无 Web 后端）等，仅把**非 web** 形式并入 `kinds`，避免误改探测行为；
+- `languages`：Python / JavaScript / TypeScript / Go / Kotlin / WXML/WXSS；
+- `frontend`：Vue 3（含 Vite/ECharts 等）、React、Android 原生 Kotlin、微信小程序原生、原生 HTML/CSS/JS、无；
+- `backend`：Fastify / Express / FastAPI / Go + go-chi、Node.js 内置 http/https、Python 标准库 http.server、Python 采集脚本、无。
+
+识别是启发式的：会忽略 `tests/`、`test_*.py`、生成的 `lextab/yacctab/parsetab.py`、`dist*` 目录；识别不到的项返回「无」。手动填写 `languages/frontend/backend` 会覆盖自动结果。远程应用不做识别。
+
 实测边界（回答过用户「会不会影响应用运行/碰代码」）：探测期间 `/root/applications` 下**非 .git 文件零改动**，仅各仓库 `FETCH_HEAD` 更新。
 
 ### 7.3 远程健康探查
@@ -274,9 +292,12 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
       "port": 3000, "expectedPort": 3000, "extraPorts": [],
       "external": true,                     // 是否对外监听
       "status": "running",                  // running | down
-      "kinds": ["web"],                     // 应用分类：web / app / miniapp，可多选
+      "kinds": ["web"],                     // 应用形式：web / app / miniapp / tv / cli
       "env": "lan",                         // 部署位置：lan | public
       "https": false,                       // 访问链接是否用 https（仅本机应用）
+      "languages": ["JavaScript"],          // 主要语言（手动值或自动识别结果）
+      "frontend": ["Vue 3", "Vite"],        // 前端框架
+      "backend": ["Fastify"],               // 后端框架
       "github": "…", "tags": [], "icon": "📚", "pending": false,
       "git": { "status": "dirty", "repo": "github.com/…", "branch": "main",
                "uncommitted": 24, "untracked": 6, "ahead": 0, "behind": 0,
@@ -323,15 +344,16 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 - 设计变量集中在 `src/style.css`：浅色为默认，`html[data-theme=dark]` 为 GitHub Dark 配色；主题存 localStorage `theme`，支持 `auto` 跟随系统
 - **内网 = 蓝（`--accent`） / 公网 = 橙（`--amber`）**，四种呈现同时生效：名称旁 `env-chip` 标签、表格行 `td:first-child` 左边色条、卡片左边框、应用图标底色（`icon-net`）。判定以 `app.env` 为准，旧数据缺 `env` 时回退 `app.remote`
-- **应用分类 chip**：`kind-chip`（Web / APP / 小程序，可多选），表格显示在名称下方标签行，卡片显示在底部标签行
-- 状态徽标：**运行中（绿）/ 未运行（红）/ 线下应用（灰）**；远程应用同样统一为运行中/未运行，线下应用为纯 APP / 小程序、不做探测
+- **应用形式 chip**：`kind-chip`（Web / APP / 小程序 / 电视 / CLI，可多选），表格显示在名称下方标签行，卡片显示在底部标签行
+- **技术栈文本**：表格在应用形式 chip 后显示一行 `语言 · 前端 · 后端`，过长时省略、悬停看完整；卡片有独立「技术栈」行
+- 状态徽标：**运行中（绿）/ 未运行（红）/ 线下应用（灰）**；远程应用同样统一为运行中/未运行，线下应用为纯 APP / 小程序 / 电视 / CLI、不做探测
 - git 同步 chip：已同步绿、未提交红、未推送/未拉取/未跟踪橙、无仓库等灰
 - 表格布局：容器 `max-width: 1440px`；行内容 **`vertical-align: middle`**，表头 **`text-align: center`**；名称列 `min-width: 300px` 且 `nowrap`；简介列 `-webkit-line-clamp: 3` + 固定 `height: 63px`；`.app-meta` 同为 63px → **每行高度严格一致**（约 92px）
 - 移动端 `≤640px` 单列，`≤900px` 表格压缩列宽并横向滚动
 
 ### 8.4 设置面板（`src/components/SettingsPanel.vue`）
 
-`Teleport` 到 body 的模态框。三区块：页面信息 / 本机应用（增删）/ 云服务器应用（增删）。每个应用条目可设 **应用分类**（`kinds` 多选：Web / APP / 小程序）和 **部署位置**（`env`：内网 / 公网）；本机应用另有 **使用 HTTPS**、`exclude` 两个勾选。**是否探测由分类决定**：勾了 Web 就探测，不勾则视为线下应用（面板有提示）。本机应用「期望端口」旁会显示 `apps.json` 中的**实际探测端口**，与配置不一致时点「采用」可写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；分类对旧 `type: "app"` 回退为 `["app"]`）。保存逻辑见 §8.1 `onSaved`，**保存后立即关闭，探测在后台跑**。
+`Teleport` 到 body 的模态框。三区块：页面信息 / 本机应用（增删）/ 云服务器应用（增删）。每个应用条目可设 **应用形式**（`kinds` 多选：Web / APP / 小程序 / 电视 / CLI）、**主要语言 / 前端框架 / 后端框架**（逗号分隔数组）和 **部署位置**（`env`：内网 / 公网）；本机应用另有 **使用 HTTPS**、`exclude` 两个勾选。**是否探测由形式决定**：勾了 Web 就探测，不勾则视为线下应用（面板有提示）。本机应用的技术栈字段留空时，面板会从 `apps.json` 带入自动识别结果，保存后变为手动值；远程应用需手填。本机应用「期望端口」旁会显示 `apps.json` 中的**实际探测端口**，与配置不一致时点「采用」可写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；分类对旧 `type: "app"` 回退为 `["app"]`）。保存逻辑见 §8.1 `onSaved`，**保存后立即关闭，探测在后台跑**。
 
 ---
 
@@ -496,10 +518,10 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 3. 前端 60 秒内自动出现。（漏登记也会被自动发现，标「待补充」）
 
 **新增一个线下应用（纯 APP / 小程序）**
-同上，但应用分类只勾选 APP / 小程序、不勾 Web（配置里写 `"kinds": ["app"]`），不需要期望端口；只要勾了 Web 就会照常探测。
+同上，但应用形式只勾选 APP / 小程序 / 电视 / CLI 中适用的项、不勾 Web（配置里写 `"kinds": ["app"]`），不需要期望端口；只要勾了 Web 就会照常探测。
 
 **新增一个云服务器应用**
-设置面板 → 云服务器应用「＋添加」→ 填 `healthUrl`（必填）、访问 URL、位置、主机；或编辑 `remoteApps` 后 `npm run probe`。
+设置面板 → 云服务器应用「＋添加」→ 填 `healthUrl`（必填）、访问 URL、位置、主机，以及技术栈（主要语言 / 前端 / 后端，远程应用不会自动识别）；或编辑 `remoteApps` 后 `npm run probe`。
 
 **改页面文案 / 顶栏名称** → 设置面板「页面信息」→ 保存（改 `page` 段，无需重新构建）。
 

@@ -1,6 +1,6 @@
 <script setup>
 import { ref } from 'vue'
-import { buildAppUrl, copyText, envInfo, gitSyncView, hasUrl, kindList, portText, remoteHealthTitle, statusClass, statusText, statusTitle } from '../lib/app-utils.js'
+import { buildAppUrl, copyText, envInfo, gitSyncView, hasUrl, kindList, portText, remoteHealthTitle, stackText, stackTitle, statusClass, statusText, statusTitle } from '../lib/app-utils.js'
 
 defineProps({
   apps: { type: Array, required: true },
@@ -133,8 +133,9 @@ async function copyDir(app) {
                     v-for="k in kindList(app)"
                     :key="k.value"
                     class="kind-chip"
-                    :title="`应用分类：${k.label}`"
+                    :title="`应用形式：${k.label}`"
                   >{{ k.label }}</span>
+                  <span v-if="stackText(app)" class="stack-text" :title="stackTitle(app)">{{ stackText(app) }}</span>
                   <span v-for="tag in app.tags" :key="tag" class="tag">{{ tag }}</span>
                 </span>
               </div>
@@ -340,6 +341,20 @@ tbody tr.net td:first-child {
   flex-wrap: nowrap;
   gap: 4px;
   overflow: hidden;
+}
+
+.app-tags .tag,
+.app-tags .kind-chip {
+  flex: none;
+}
+
+.stack-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: 12px;
 }
 
 .desc {

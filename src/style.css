@@ -298,7 +298,7 @@ button {
   color: var(--text-2);
 }
 
-/* 应用分类：Web / APP / 小程序 */
+/* 应用形式：Web / APP / 小程序 / 电视 / CLI */
 .kind-chip {
   display: inline-block;
   padding: 1px 8px;

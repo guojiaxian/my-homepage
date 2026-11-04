@@ -12,12 +12,14 @@ const savedOk = ref(false)
 const error = ref('')
 const form = ref({ apps: [], remoteApps: [], page: {} })
 const existingIds = ref(new Set())
-const detectedPorts = ref(new Map())
+const detectedApps = ref(new Map())
 
 const KIND_OPTIONS = [
   { value: 'web', label: 'Web' },
   { value: 'app', label: 'APP' },
   { value: 'miniapp', label: '小程序' },
+  { value: 'tv', label: '电视' },
+  { value: 'cli', label: 'CLI' },
 ]
 
 function normalizeKinds(a) {
@@ -26,13 +28,55 @@ function normalizeKinds(a) {
   return a.type === 'app' ? ['app'] : ['web']
 }
 
-function normalizeEntry(a, isRemote) {
+function asList(value) {
+  if (Array.isArray(value)) return value.map((x) => String(x).trim()).filter(Boolean)
+  if (typeof value === 'string') return value.split(/[,，]/).map((x) => x.trim()).filter(Boolean)
+  return []
+}
+
+function normalizeEntry(a, isRemote, detected) {
+  const detectedKinds = detected?.kinds ?? []
   return {
     ...a,
-    kinds: normalizeKinds(a),
+    kinds: [...new Set([...normalizeKinds(a), ...detectedKinds.filter((k) => k !== 'web')])],
     env: a.env === 'lan' || a.env === 'public' ? a.env : (isRemote ? 'public' : 'lan'),
     https: Boolean(a.https),
+    languages: asList(a.languages),
+    frontend: asList(a.frontend),
+    backend: asList(a.backend),
   }
+}
+
+function listText(value) {
+  return asList(value).join(', ')
+}
+
+function detectedStack(a) {
+  const detected = detectedApps.value.get(a.id)
+  if (!detected) return null
+  return {
+    languages: detected.languages ?? [],
+    frontend: detected.frontend ?? [],
+    backend: detected.backend ?? [],
+  }
+}
+
+function detectedStackText(a) {
+  const stack = detectedStack(a)
+  if (!stack) return ''
+  return [
+    stack.languages.join('/'),
+    stack.frontend.join(' + '),
+    stack.backend.join(' + '),
+  ].filter(Boolean).join(' · ')
+}
+
+function stackPlaceholder(a, key) {
+  return (detectedStack(a)?.[key] ?? []).join(', ')
+}
+
+function setList(a, key, ev) {
+  a[key] = ev.target.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean)
 }
 
 function hasKind(a, value) {
@@ -48,7 +92,7 @@ function toggleKind(a, value, checked) {
 
 /** 当前探测到的实际端口（来自 apps.json） */
 function detectedPort(a) {
-  const port = detectedPorts.value.get(a.id)
+  const port = detectedApps.value.get(a.id)?.port
   return Number.isInteger(port) ? port : null
 }
 
@@ -71,18 +115,20 @@ async function load() {
     const res = await fetch('/api/config', { cache: 'no-store' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const cfg = await res.json()
+    let probedApps = new Map()
+    try {
+      const probed = await (await fetch(`./apps.json?t=${Date.now()}`, { cache: 'no-store' })).json()
+      probedApps = new Map((probed.apps ?? []).map((a) => [a.id, a]))
+    } catch {
+      probedApps = new Map()
+    }
+    detectedApps.value = probedApps
     form.value = {
-      apps: (cfg.apps ?? []).map((a) => normalizeEntry(a, false)),
-      remoteApps: (cfg.remoteApps ?? []).map((a) => normalizeEntry(a, true)),
+      apps: (cfg.apps ?? []).map((a) => normalizeEntry(a, false, probedApps.get(a.id))),
+      remoteApps: (cfg.remoteApps ?? []).map((a) => normalizeEntry(a, true, probedApps.get(a.id))),
       page: { siteName: '', heroTitle: '', heroSubtitle: '', ...cfg.page },
     }
     existingIds.value = new Set([...(cfg.apps ?? []), ...(cfg.remoteApps ?? [])].map((a) => a.id))
-    try {
-      const probed = await (await fetch(`./apps.json?t=${Date.now()}`, { cache: 'no-store' })).json()
-      detectedPorts.value = new Map((probed.apps ?? []).map((a) => [a.id, a.port]))
-    } catch {
-      detectedPorts.value = new Map()
-    }
   } catch (err) {
     error.value = `加载配置失败：${err.message}（请确认设置服务已运行：systemctl status my-homepage-settings）`
   } finally {
@@ -104,11 +150,11 @@ function setTags(a, ev) {
 }
 
 function addLocal() {
-  form.value.apps.push({ id: '', name: '', description: '', directory: '', expectedPort: null, kinds: ['web'], env: 'lan', https: false, github: '', tags: [], icon: '📦' })
+  form.value.apps.push({ id: '', name: '', description: '', directory: '', expectedPort: null, kinds: ['web'], env: 'lan', https: false, languages: [], frontend: [], backend: [], github: '', tags: [], icon: '📦' })
 }
 
 function addRemote() {
-  form.value.remoteApps.push({ id: '', name: '', description: '', healthUrl: '', url: '', location: '阿里云', host: '', kinds: ['web'], env: 'public', github: '', tags: [], icon: '☁️' })
+  form.value.remoteApps.push({ id: '', name: '', description: '', healthUrl: '', url: '', location: '阿里云', host: '', kinds: ['web'], env: 'public', languages: [], frontend: [], backend: [], github: '', tags: [], icon: '☁️' })
 }
 
 function removeApp(list, i) {
@@ -212,10 +258,16 @@ async function save() {
               </div>
               <label class="fld"><span>服务器目录</span><input v-model="a.directory" class="mono" /></label>
               <label class="fld"><span>GitHub 地址</span><input v-model="a.github" placeholder="https://github.com/…" /></label>
+              <div class="grid3">
+                <label class="fld"><span>主要语言（逗号分隔）</span><input :value="listText(a.languages)" :placeholder="stackPlaceholder(a, 'languages') || '如 Python, JavaScript'" @input="setList(a, 'languages', $event)" /></label>
+                <label class="fld"><span>前端框架</span><input :value="listText(a.frontend)" :placeholder="stackPlaceholder(a, 'frontend') || '如 Vue 3 + Vite'" @input="setList(a, 'frontend', $event)" /></label>
+                <label class="fld"><span>后端框架</span><input :value="listText(a.backend)" :placeholder="stackPlaceholder(a, 'backend') || '如 FastAPI'" @input="setList(a, 'backend', $event)" /></label>
+              </div>
+              <span class="stack-note">自动识别：{{ detectedStackText(a) || '未识别' }}（留空使用自动结果，填写后覆盖）</span>
               <label class="fld"><span>简介</span><textarea v-model="a.description" rows="2" /></label>
               <div class="app-edit-foot">
                 <span class="chk-group">
-                  <span class="foot-label">应用分类</span>
+                  <span class="foot-label">应用形式</span>
                   <label v-for="k in KIND_OPTIONS" :key="k.value" class="chk">
                     <input
                       type="checkbox"
@@ -278,10 +330,16 @@ async function save() {
                 <label class="fld"><span>GitHub 地址</span><input v-model="a.github" /></label>
                 <label class="fld"><span>标签（逗号分隔）</span><input :value="tagsText(a)" @input="setTags(a, $event)" /></label>
               </div>
+              <div class="grid3">
+                <label class="fld"><span>主要语言（逗号分隔）</span><input :value="listText(a.languages)" placeholder="如 JavaScript, Node.js" @input="setList(a, 'languages', $event)" /></label>
+                <label class="fld"><span>前端框架</span><input :value="listText(a.frontend)" placeholder="如 Vue 3" @input="setList(a, 'frontend', $event)" /></label>
+                <label class="fld"><span>后端框架</span><input :value="listText(a.backend)" placeholder="如 Fastify" @input="setList(a, 'backend', $event)" /></label>
+              </div>
+              <span class="stack-note">远程应用不在本机目录，技术栈需手动填写。</span>
               <label class="fld"><span>简介</span><textarea v-model="a.description" rows="2" /></label>
               <div class="app-edit-foot">
                 <span class="chk-group">
-                  <span class="foot-label">应用分类</span>
+                  <span class="foot-label">应用形式</span>
                   <label v-for="k in KIND_OPTIONS" :key="k.value" class="chk">
                     <input
                       type="checkbox"
@@ -526,6 +584,11 @@ section h3 {
 }
 
 .foot-note {
+  font-size: 12px;
+  color: var(--gray);
+}
+
+.stack-note {
   font-size: 12px;
   color: var(--gray);
 }

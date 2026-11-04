@@ -32,7 +32,7 @@ const numOrNull = (v) => {
   const n = Number(v)
   return Number.isInteger(n) && n > 0 && n < 65536 ? n : null
 }
-const KINDS = new Set(['web', 'app', 'miniapp'])
+const KINDS = new Set(['web', 'app', 'miniapp', 'tv', 'cli'])
 const normKinds = (v, fallback) => {
   const list = (Array.isArray(v) ? v : str(v).split(/[,，]/))
     .map((k) => str(k))
@@ -64,6 +64,9 @@ function sanitizeConfig(body) {
       icon: str(a?.icon) || '📦',
     }
     if (a?.https) out.https = true
+    if (tagArr(a?.languages).length) out.languages = tagArr(a.languages)
+    if (tagArr(a?.frontend).length) out.frontend = tagArr(a.frontend)
+    if (tagArr(a?.backend).length) out.backend = tagArr(a.backend)
     if (a?.exclude) out.exclude = true
     if (str(a?.name)) out.name = str(a?.name)
     if (str(a?.description)) out.description = str(a?.description)
@@ -96,6 +99,9 @@ function sanitizeConfig(body) {
       location: str(a?.location) || '远程',
       host: str(a?.host) || u.hostname,
     }
+    if (tagArr(a?.languages).length) out.languages = tagArr(a.languages)
+    if (tagArr(a?.frontend).length) out.frontend = tagArr(a.frontend)
+    if (tagArr(a?.backend).length) out.backend = tagArr(a.backend)
     if (str(a?.url)) out.url = str(a?.url)
     if (str(a?.name)) out.name = str(a?.name)
     if (str(a?.description)) out.description = str(a?.description)

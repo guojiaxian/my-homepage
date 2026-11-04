@@ -50,8 +50,8 @@ export function statusTitle(app) {
   return remoteHealthTitle(app)
 }
 
-/** 应用分类标签：web / APP / 小程序，可多选 */
-const KIND_LABELS = { web: 'Web', app: 'APP', miniapp: '小程序' }
+/** 应用形式标签：web / APP / 小程序 / 电视 / CLI，可多选 */
+const KIND_LABELS = { web: 'Web', app: 'APP', miniapp: '小程序', tv: '电视', cli: 'CLI' }
 
 /** 返回应用的分类列表 [{ value, label }]；旧数据没有 kinds 时按 appOnly 推断 */
 export function kindList(app) {
@@ -63,6 +63,24 @@ export function kindList(app) {
   return list
     .filter((k) => KIND_LABELS[k])
     .map((value) => ({ value, label: KIND_LABELS[value] }))
+}
+
+/** 技术栈摘要：语言 · 前端 · 后端（用于表格/卡片的一行展示） */
+export function stackText(app) {
+  return [
+    (app.languages ?? []).join('/'),
+    (app.frontend ?? []).join(' + '),
+    (app.backend ?? []).join(' + '),
+  ].filter(Boolean).join(' · ')
+}
+
+/** 技术栈完整提示（用于 title 悬停） */
+export function stackTitle(app) {
+  const parts = []
+  if (app.languages?.length) parts.push(`语言：${app.languages.join('、')}`)
+  if (app.frontend?.length) parts.push(`前端：${app.frontend.join('、')}`)
+  if (app.backend?.length) parts.push(`后端：${app.backend.join('、')}`)
+  return parts.join('；')
 }
 
 /** 部署位置：内网蓝色，公网橙色；优先使用配置的 env，旧数据回退到 remote */
