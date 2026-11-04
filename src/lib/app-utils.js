@@ -32,9 +32,9 @@ export function remoteHealthTitle(app) {
   return parts.join(' · ')
 }
 
-/** 状态分类：运行中（绿）/ 未运行（红）/ 线下应用（灰，纯 APP / 小程序不探测） */
+/** 状态分类：运行中（绿）/ 未运行（红）/ 离线应用（灰，纯 APP / 小程序不探测） */
 export function statusText(app) {
-  if (app.appOnly) return '线下应用'
+  if (app.appOnly) return '离线应用'
   return app.status === 'running' ? '运行中' : '未运行'
 }
 
@@ -46,7 +46,7 @@ export function statusClass(app) {
 
 /** 状态徽标悬停提示 */
 export function statusTitle(app) {
-  if (app.appOnly) return '线下应用：纯 APP / 小程序，无 Web 服务，不做端口探测'
+  if (app.appOnly) return '离线应用：纯 APP / 小程序，无 Web 服务，不做端口探测'
   return remoteHealthTitle(app)
 }
 

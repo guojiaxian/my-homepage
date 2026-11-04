@@ -34,7 +34,7 @@
 | 设置 API | `127.0.0.1:8300`（仅回环监听，nginx 反代 `/api/`） |
 | 探测定时器 | `my-homepage-probe-quick.timer` 每 3 分钟（`--no-fetch`）；`my-homepage-probe.timer` 每 5 分钟（完整，含 fetch） |
 | 前端轮询 | 每 60 秒拉一次 `apps.json`；页面回到前台时立即刷新 |
-| 已登记应用 | 11 个（含 2 个线下应用（纯 APP）+ 1 个公网远程） |
+| 已登记应用 | 11 个（含 2 个离线应用（纯 APP）+ 1 个公网远程） |
 
 **运行中的 systemd 单元（均已 enable）**
 
@@ -181,12 +181,12 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 ```
 
 - `expectedPort` 的作用见 §7.1「主端口选择」——**遇到目录下有多个监听时务必填写**。
-- `kinds` 是**应用形式**（可多选）：`web` / `app` / `miniapp` / `tv` / `cli`，同时决定是否探测：含 `web` 就探测 Web 端口；不含 `web` 则视为**线下应用**（纯 APP / 小程序 / 电视 / CLI），不做端口探测、状态显示灰色「线下应用」。例如 `["web","app"]` 既有网页又有 APK，仍会探测 Web。
+- `kinds` 是**应用形式**（可多选）：`web` / `app` / `miniapp` / `tv` / `cli`，同时决定是否探测：含 `web` 就探测 Web 端口；不含 `web` 则视为**离线应用**（纯 APP / 小程序 / 电视 / CLI），不做端口探测、状态显示灰色「离线应用」。例如 `["web","app"]` 既有网页又有 APK，仍会探测 Web。
 - `languages` / `frontend` / `backend` 是**技术栈展示字段**（字符串数组）。本机应用留空时由探测器自动识别（见 §7.2.1）；填写后以手动值为准。远程应用没有本机目录，必须手动填写。
 - 旧字段 `type: "app"` 仅作为缺省分类推断的兼容回退（`kinds` 缺省时 → `["app"]`），**不再参与探测判断**；设置面板已移除该勾选，保存配置时会被丢弃。
 - `env` 是展示用的部署位置，缺省 `lan`（本机应用）；远程应用缺省 `public`。它不影响端口探测与远程健康探查，只影响首页蓝色/橙色标签与统计。
 - `https: true` 让本机应用的访问链接使用 `https://`（缺省 false，即 http）。远程应用直接用 `url`，不受此字段影响。
-- `exclude: true` 表示「根本不显示」；线下应用与此无关，仍会显示为灰色「线下应用」。
+- `exclude: true` 表示「根本不显示」；离线应用与此无关，仍会显示为灰色「离线应用」。
 - 未登记的目录若在监听会被**自动发现**，以 `pending: true` + 「待补充」标签出现在主页末尾。
 
 ### 6.2 `remoteApps[]` — 远程应用（公网/云服务器）
@@ -307,7 +307,7 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
       "remoteInfo": { "online": true, "httpStatus": 200, "responseMs": 86,
                       "version": "1.1.0", "dbReady": true, "rssMb": 78,
                       "uptimeSec": 1088946, "error": "", "checkedAt": "…" },
-      // 仅线下应用（kinds 不含 web）：
+      // 仅离线应用（kinds 不含 web）：
       "appOnly": true
     }
   ]
@@ -336,7 +336,7 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 | **手动排序**（`sortKey === 'default'` 时可用） | 表格行首 ⠿ 手柄拖拽 / 卡片左侧手柄拖拽 / 卡片 ↑↓ 按钮 | localStorage `my-homepage:appOrder`（**仅本浏览器**；新应用自动排末尾；工具栏 ↺ 清除） |
 | **自动排序** | 表格表头点击（状态/应用/访问地址/同步，再点切方向）/ 工具栏下拉 | 不持久化 |
 
-自动排序键：`name`（中文拼音 `localeCompare('zh-Hans-CN')`）、`port`（升序，未监听排后）、`status`（运行中 → 未运行 → 线下应用）、`git`（按问题严重度：dirty → no-repo → ahead → behind → untracked → error → no-upstream → synced）。
+自动排序键：`name`（中文拼音 `localeCompare('zh-Hans-CN')`）、`port`（升序，未监听排后）、`status`（运行中 → 未运行 → 离线应用）、`git`（按问题严重度：dirty → no-repo → ahead → behind → untracked → error → no-upstream → synced）。
 
 **拖拽只从手柄触发**（`draggable` 只加在手柄元素上，行/卡片本身不可拖）——用户明确要求过，点击卡片不该出现拖拽效果。
 
@@ -347,14 +347,14 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 - **应用形式 chip**：`kind-chip`（Web / APP / 小程序 / 电视 / CLI，可多选），按类型配色：Web 蓝、APP 绿、小程序青、电视紫、CLI 灰；表格显示在名称下方标签行，卡片显示在底部标签行
 - **技术栈文本**：表格在应用形式 chip 后显示最多两行 `语言 · 前端 · 后端`，在应用列固定宽度内垂直居中，超出两行省略、悬停看完整；卡片有独立「技术栈」行
 - **业务标签 `tags`**：仍保存在配置与设置页中，但当前不在首页表格/卡片展示（避免与形式/技术栈重复）
-- 状态徽标：**运行中（绿）/ 未运行（红）/ 线下应用（灰）**；远程应用同样统一为运行中/未运行，线下应用为纯 APP / 小程序 / 电视 / CLI、不做探测
+- 状态徽标：**运行中（绿）/ 未运行（红）/ 离线应用（灰）**；远程应用同样统一为运行中/未运行，离线应用为纯 APP / 小程序 / 电视 / CLI、不做探测
 - git 同步 chip：已同步绿、未提交红、未推送/未拉取/未跟踪橙、无仓库等灰
 - 表格布局：容器 `max-width: 1440px`；行内容 **`vertical-align: middle`**，表头 **`text-align: center`**；应用列固定 `width/min-width: 340px`；简介列 `-webkit-line-clamp: 3` + 固定 `height: 63px`；`.app-meta` 同为 63px（名称行 + 两行技术栈约 60px）→ **每行高度严格一致**（约 92px）
 - 移动端 `≤640px` 单列，`≤900px` 表格压缩列宽并横向滚动
 
 ### 8.4 设置面板（`src/components/SettingsPanel.vue`）
 
-`Teleport` 到 body 的模态框。三区块：页面信息 / 本机应用（增删）/ 云服务器应用（增删）。每个应用条目可设 **应用形式**（`kinds` 多选：Web / APP / 小程序 / 电视 / CLI）、**主要语言 / 前端框架 / 后端框架**（逗号分隔数组）和 **部署位置**（`env`：内网 / 公网）；本机应用另有 **使用 HTTPS**、`exclude` 两个勾选。**是否探测由形式决定**：勾了 Web 就探测，不勾则视为线下应用（面板有提示）。本机应用的技术栈字段留空时，面板会从 `apps.json` 带入自动识别结果，保存后变为手动值；远程应用需手填。本机应用「期望端口」旁会显示 `apps.json` 中的**实际探测端口**，与配置不一致时点「采用」可写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；分类对旧 `type: "app"` 回退为 `["app"]`）。保存逻辑见 §8.1 `onSaved`，**保存后立即关闭，探测在后台跑**。
+`Teleport` 到 body 的模态框。三区块：页面信息 / 本机应用（增删）/ 云服务器应用（增删）。每个应用条目可设 **应用形式**（`kinds` 多选：Web / APP / 小程序 / 电视 / CLI）、**主要语言 / 前端框架 / 后端框架**（逗号分隔数组）和 **部署位置**（`env`：内网 / 公网）；本机应用另有 **使用 HTTPS**、`exclude` 两个勾选。**是否探测由形式决定**：勾了 Web 就探测，不勾则视为离线应用（面板有提示）。本机应用的技术栈字段留空时，面板会从 `apps.json` 带入自动识别结果，保存后变为手动值；远程应用需手填。本机应用「期望端口」旁会显示 `apps.json` 中的**实际探测端口**，与配置不一致时点「采用」可写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；分类对旧 `type: "app"` 回退为 `["app"]`）。保存逻辑见 §8.1 `onSaved`，**保存后立即关闭，探测在后台跑**。
 
 ---
 
@@ -478,7 +478,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 支持自动发现未登记应用 | 用户会持续把项目迁入 `/root/applications`，漏登记也不该消失 |
 | git 同步检测（fetch + status + ahead/behind） | 用户要求「检测源码是否完全同步至 git」，首测即发现 study-log 24 处未提交、expense-assistant 无仓库 |
 | `exclude` → 后来改 `type: "app"` | 用户后来明确「无 Web 服务的（APP/小程序）不要隐藏，显示灰色离线APP」 |
-| `type: "app"` → `kinds` + 三状态 | 用户要求分类 Web/APP/小程序可多选；纯 APP 不探测显示灰色「线下应用」，APP+Web 探测 Web；状态改为运行中绿 / 未运行红 / 线下应用灰 |
+| `type: "app"` → `kinds` + 三状态 | 用户要求分类 Web/APP/小程序可多选；纯 APP 不探测显示灰色「离线应用」，APP+Web 探测 Web；状态改为运行中绿 / 未运行红 / 离线应用灰 |
 | 远程应用独立 `remoteApps` 段 | 公网应用无本地目录，探端口/查 git 都不适用，改走健康接口 |
 | 设置面板 + 本机 API 服务 | 用户要求「在首页设置页修改，不进配置文件」。静态站点无法写文件，故加回环 API |
 | 保存异步 + `--no-fetch` | 同步等待 GitHub fetch 导致保存卡 27 秒 |
@@ -500,7 +500,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | expense-assistant | 财务报销附件助手 | 本机 | 19000 | synced（**曾无仓库**，后补建） |
 | wedding-plan | 备婚计划 | 本机 | 19002 | synced |
 | network-monitor | NetWatch 网络监控 | 本机 | 18003（+2222, 18099） | **dirty** |
-| jianji-ledger | 简记 · 账本 | 线下应用（kinds: app） | — | no-repo |
+| jianji-ledger | 简记 · 账本 | 离线应用（kinds: app） | — | no-repo |
 | time-logger | 时间记录器 | Web + APP（kinds: web, app） | 19001（https） | synced |
 | study-log-cloud | StudyLog 公网版 | 远程（阿里云） | http://47.95.140.199:3000 · v1.1.0 | — |
 | my-homepage | 我的应用导航（本站） | 本机（nginx 托管） | 80 | synced（已纳入 git） |
@@ -518,7 +518,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 2. 首页 ⚙ 设置 → 本机应用「＋添加」→ 填 id（=目录名）、名称、目录、期望端口 → 保存；或直接编辑 `apps.config.json` 后 `npm run probe`；
 3. 前端 60 秒内自动出现。（漏登记也会被自动发现，标「待补充」）
 
-**新增一个线下应用（纯 APP / 小程序）**
+**新增一个离线应用（纯 APP / 小程序）**
 同上，但应用形式只勾选 APP / 小程序 / 电视 / CLI 中适用的项、不勾 Web（配置里写 `"kinds": ["app"]`），不需要期望端口；只要勾了 Web 就会照常探测。
 
 **新增一个云服务器应用**

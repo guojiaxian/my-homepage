@@ -731,8 +731,8 @@ async function runProbe(NO_FETCH) {
     const backend = pickList(meta.backend, detected.backend)
     const env = meta.env === 'public' ? 'public' : 'lan'
 
-    // 线下应用（纯 APP / 小程序，分类不含 web）：不做端口探测，
-    // 状态显示灰色「线下应用」，不产生访问链接；分类含 web 则照常探测
+    // 离线应用（纯 APP / 小程序，分类不含 web）：不做端口探测，
+    // 状态显示灰色「离线应用」，不产生访问链接；分类含 web 则照常探测
     if (!kinds.includes('web')) {
       results.push({
         id: meta.id,
@@ -914,7 +914,7 @@ async function runProbe(NO_FETCH) {
       continue
     }
     if (r.appOnly) {
-      console.log(`  - ○ ${r.id}  [线下应用]`)
+      console.log(`  - ○ ${r.id}  [离线应用]`)
       continue
     }
     const ports = [r.port, ...(r.extraPorts ?? [])].filter(Boolean)

@@ -276,7 +276,7 @@ async function save() {
                     />
                     {{ k.label }}
                   </label>
-                  <span class="foot-note">未勾选 Web = 线下应用，不探测端口</span>
+                  <span class="foot-note">未勾选 Web = 离线应用，不探测端口</span>
                 </span>
                 <label class="env-fld">
                   <span>部署位置</span>
