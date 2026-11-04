@@ -228,7 +228,7 @@
 
   function applyTheme(theme) {
     root.setAttribute('data-theme', theme);
-    if (metaTheme) metaTheme.setAttribute('content', theme === 'dark' ? '#0b0e18' : '#eef0f9');
+    if (metaTheme) metaTheme.setAttribute('content', theme === 'dark' ? '#070b18' : '#e9efff');
     if (themeBtn) {
       themeBtn.setAttribute('aria-pressed', String(theme === 'dark'));
       themeBtn.setAttribute('aria-label', theme === 'dark' ? '切换浅色' : '切换深色');
