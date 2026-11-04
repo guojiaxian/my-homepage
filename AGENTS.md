@@ -361,12 +361,13 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 ### 8.5 独立毛玻璃页面（`glass/`，访问 `/glass/`）
 
-完全独立于 Vue 主站的静态页面，纯 HTML + CSS + JS，**不参与 Vite 构建、不读取 `apps.json`、不依赖任何第三方库**。
+完全独立于 Vue 主站的静态页面，纯 HTML + CSS + JS，**不参与 Vite 构建、不依赖任何第三方库**，运行时读取 `/apps.json` 展示真实应用数据（不改配置、不触发探测）。
 
 - 入口 `glass/index.html`，样式 `glass/assets/glass.css`，脚本 `glass/assets/glass.js`；全部类名/变量/存储键使用 `fg-`、`--fg-`、`fluxglass:*` 命名空间。
+- 数据：`fetch('../apps.json')`（经 nginx 即 `/apps.json`），每 60 秒刷新 + 回到前台刷新；展示应用总数 / 在线率 / 内网 / 公网 / 源码待同步，应用清单含真实名称、形式、端口、状态、Git 状态；筛选（全部 / 运行中 / 内网 / 公网）与搜索面板（`Ctrl+K`）均基于真实数据。
 - 视觉：环境层径向渐变光斑 + 噪点颗粒，卡片用 `backdrop-filter: blur(22px) saturate(165%)`、半透明渐变、内高光、三层阴影；含浅色 / 深色主题（localStorage `fluxglass:theme`）。
-- 交互：清单勾选与进度、指标计数、圆环分段、30 天趋势图悬停、实时流模拟、搜索面板（`Ctrl/Cmd+K`）、主题切换。
-- 响应式：≤1180px 调整栅格，≤900px 主卡单列，≤480px 指标卡单列；≤760px 模糊半径降至 16px；`prefers-reduced-motion` 下关闭光斑漂移与入场动效；不支持 `backdrop-filter` 时降级为高不透明度背景。
+- 交互：状态数字、分段圆环、应用状态条、进度条、列表滚动、搜索、主题切换；无任何模拟数据或演示性指标。
+- 响应式：≤1180px 调整栅格，≤900px 主卡单列，≤480px 指标卡单列并隐藏次要表格列；≤760px 模糊半径降至 16px；`prefers-reduced-motion` 下关闭光斑漂移与入场动效；不支持 `backdrop-filter` 时降级为高不透明度背景。
 - 部署：`deploy.sh` 的 `rsync --delete` 只覆盖 `www/`，**不会删除 `glass/`**；nginx 在两处 server 块各加了 `/glass/` location（`root /root/applications/my-homepage` + `try_files … /glass/index.html`）。改完无需构建，刷新即生效。
 
 ---
