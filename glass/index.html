@@ -3,12 +3,11 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="description" content="我的应用导航 · 毛玻璃视图，读取本机 apps.json 展示应用运行状态、端口与源码同步。">
+  <meta name="description" content="我的应用导航的毛玻璃视图：沿用原站布局，展示应用状态、端口、部署位置与源码同步。">
   <meta name="theme-color" content="#eef0f9">
   <title>我的应用导航 · 毛玻璃视图</title>
   <link rel="stylesheet" href="./assets/glass.css">
   <script>
-    /* 防止主题闪烁：仅读取带命名空间的存储键；无 JS 时内容仍然可见 */
     (function () {
       var el = document.documentElement;
       el.classList.add('fg-js');
@@ -22,7 +21,6 @@
 <body class="fg-body">
   <a class="fg-skip" href="#fg-main">跳到主要内容</a>
 
-  <!-- 环境层：所有色彩与模糊都在这里，卡片只负责折射 -->
   <div class="fg-ambient" aria-hidden="true">
     <div class="fg-ambient__wash"></div>
     <div class="fg-blob fg-blob--amber"></div>
@@ -35,298 +33,113 @@
   </div>
 
   <div class="fg-app">
-    <!-- ============ 顶栏 ============ -->
     <header class="fg-topbar" id="fg-topbar">
       <div class="fg-topbar__inner">
-        <a class="fg-brand" href="/" aria-label="返回我的应用导航主站">
+        <a class="fg-brand" href="/">
           <span class="fg-brand__mark" aria-hidden="true">
             <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-grid"></use></svg>
           </span>
-          <span class="fg-brand__name" id="fg-brand-name">我的应用导航</span>
+          <span class="fg-brand__name" id="fg-site-name">我的应用导航</span>
         </a>
 
-        <nav class="fg-navpill" aria-label="视图切换">
-          <button type="button" class="fg-navpill__btn is-active" data-fg-toast="当前为应用总览视图">
-            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-grid"></use></svg>
-            <span>应用总览</span>
-          </button>
-        </nav>
-
-        <div class="fg-navicons" aria-label="快捷工具">
-          <button type="button" class="fg-iconbtn" id="fg-refresh" aria-label="刷新应用数据" data-fg-refresh>
-            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-refresh"></use></svg>
-          </button>
-          <a class="fg-iconbtn" href="https://github.com/guojiaxian/my-homepage" target="_blank" rel="noopener" aria-label="打开 my-homepage 仓库">
-            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-code"></use></svg>
+        <div class="fg-topbar__actions">
+          <a class="fg-iconbtn" href="https://github.com/guojiaxian" target="_blank" rel="noopener" title="GitHub 主页" aria-label="GitHub 主页">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-github"></use></svg>
           </a>
-        </div>
-
-        <div class="fg-topbar__right">
-          <button type="button" class="fg-iconbtn fg-searchbtn" id="fg-search-btn" aria-label="搜索应用（Ctrl+K）" aria-haspopup="dialog">
-            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-search"></use></svg>
-          </button>
-          <button type="button" class="fg-iconbtn" id="fg-theme" aria-label="切换到深色主题" aria-pressed="false">
+          <a class="fg-iconbtn" href="/" title="在主站打开设置面板" aria-label="打开主站设置">
+            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-gear"></use></svg>
+          </a>
+          <button type="button" class="fg-iconbtn" id="fg-theme" title="切换深色" aria-label="切换深色" aria-pressed="false">
             <svg viewBox="0 0 24 24" class="fg-i fg-i--sun"><use href="#fg-i-sun"></use></svg>
             <svg viewBox="0 0 24 24" class="fg-i fg-i--moon"><use href="#fg-i-moon"></use></svg>
           </button>
-          <a class="fg-toplink" href="/">
-            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-home"></use></svg>
-            主站
-          </a>
         </div>
       </div>
     </header>
 
-    <!-- ============ 主内容 ============ -->
     <main class="fg-main" id="fg-main">
-      <section class="fg-hero" data-reveal>
-        <div class="fg-hero__copy">
-          <h1 id="fg-hero-title">我的应用</h1>
-          <p class="fg-hero__meta">
-            <span class="fg-live-dot" id="fg-live-dot" aria-hidden="true"></span>
-            <span id="fg-meta-running">正在读取应用数据…</span>
-            <span class="fg-sep" aria-hidden="true"></span>
-            <span id="fg-meta-public">—</span>
-            <span class="fg-sep" aria-hidden="true"></span>
-            <span id="fg-meta-probe">最后探测 —</span>
-          </p>
-        </div>
-        <div class="fg-actions" role="group" aria-label="应用筛选">
-          <button type="button" class="fg-pill is-active" data-filter="all" aria-pressed="true">
-            全部<span class="fg-pill__count" id="fg-count-all">—</span>
-          </button>
-          <button type="button" class="fg-pill" data-filter="running" aria-pressed="false">
-            运行中<span class="fg-pill__count" id="fg-count-running">—</span>
-          </button>
-          <button type="button" class="fg-pill" data-filter="lan" aria-pressed="false">
-            内网<span class="fg-pill__count" id="fg-count-lan">—</span>
-          </button>
-          <button type="button" class="fg-pill" data-filter="public" aria-pressed="false">
-            公网<span class="fg-pill__count" id="fg-count-public">—</span>
-          </button>
-          <a class="fg-pill fg-pill--primary" href="/">
-            <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-home"></use></svg>打开主站
-          </a>
+      <section class="fg-hero">
+        <h1 id="fg-hero-title">我的应用</h1>
+        <p class="fg-sub" id="fg-hero-sub">部署在这台服务器上的个人项目，端口与运行状态由服务端定时自动探测。</p>
+        <div class="fg-stats">
+          <span class="fg-stat-chip"><b id="fg-count-apps">—</b> 个应用</span>
+          <span class="fg-stat-chip">
+            <span class="fg-stat-dot" id="fg-run-dot"></span>
+            <b id="fg-count-running">—</b> 个运行中
+          </span>
+          <span class="fg-stat-chip" title="按部署位置：内网 / 公网">
+            内网 <b class="fg-num-blue" id="fg-count-lan">—</b>
+            <span class="fg-stat-sep">·</span>
+            公网 <b class="fg-num-amber" id="fg-count-public">—</b>
+          </span>
+          <span class="fg-stat-chip" title="源码与 GitHub 仓库的同步状态">
+            <span class="fg-stat-dot" id="fg-git-dot"></span>
+            <span id="fg-git-text">正在读取…</span>
+          </span>
         </div>
       </section>
 
-      <div class="fg-grid">
-        <!-- 运行概览 -->
-        <section class="fg-card fg-card--overview" data-reveal aria-labelledby="fg-overview-title">
-          <div class="fg-card__head">
-            <div>
-              <h2 class="fg-card__title" id="fg-overview-title">运行概览</h2>
-              <p class="fg-card__sub">端口与远程健康接口，每 3 分钟自动探测</p>
-            </div>
-          </div>
+      <div class="fg-toolbar">
+        <div class="fg-sortbox">
+          <select class="fg-select" id="fg-sort" title="排序方式" aria-label="排序方式">
+            <option value="default">排序：手动 / 默认顺序</option>
+            <option value="name">排序：名称</option>
+            <option value="port">排序：端口</option>
+            <option value="status">排序：运行状态</option>
+            <option value="git">排序：同步状态</option>
+          </select>
+          <button type="button" class="fg-iconbtn fg-dirbtn" id="fg-sort-dir" title="切换正序 / 倒序" hidden>↑</button>
+          <button type="button" class="fg-iconbtn" id="fg-reset-order" title="清除手动排序，恢复默认顺序" aria-label="清除手动排序" hidden>↺</button>
+        </div>
 
-          <div class="fg-progress" role="progressbar" aria-label="应用在线率" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="fg-progress">
-            <div class="fg-progress__track">
-              <span class="fg-progress__fill" id="fg-progress-fill" style="width:0%"></span>
-            </div>
-            <span class="fg-progress__num" id="fg-progress-num">—</span>
-          </div>
+        <div class="fg-segmented" role="tablist" aria-label="视图切换">
+          <button type="button" class="is-active" data-view="table" role="tab" aria-selected="true">表格</button>
+          <button type="button" data-view="card" role="tab" aria-selected="false">卡片</button>
+        </div>
 
-          <ul class="fg-overview" id="fg-overview">
-            <li class="fg-overview__row">
-              <span class="fg-overview__label"><i class="fg-legend__dot fg-legend__dot--green"></i>运行中</span>
-              <strong class="fg-overview__count" id="fg-ov-running">—</strong>
-            </li>
-            <li class="fg-overview__row">
-              <span class="fg-overview__label"><i class="fg-legend__dot fg-legend__dot--red"></i>未运行</span>
-              <strong class="fg-overview__count" id="fg-ov-down">—</strong>
-            </li>
-            <li class="fg-overview__row">
-              <span class="fg-overview__label"><i class="fg-legend__dot fg-legend__dot--amber"></i>源码待同步</span>
-              <strong class="fg-overview__count" id="fg-ov-git">—</strong>
-            </li>
-            <li class="fg-overview__row">
-              <span class="fg-overview__label"><i class="fg-legend__dot fg-legend__dot--orange"></i>公网应用</span>
-              <strong class="fg-overview__count" id="fg-ov-public">—</strong>
-            </li>
-          </ul>
-
-          <div class="fg-guide__foot">
-            <span class="fg-guide__count" id="fg-ov-probe">最后探测 —</span>
-            <a class="fg-roundbtn" href="/" aria-label="打开完整导航">
-              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
-            </a>
-          </div>
-        </section>
-
-        <!-- 应用分布 -->
-        <section class="fg-card fg-card--gauge" data-reveal aria-labelledby="fg-gauge-title">
-          <div class="fg-card__head">
-            <div>
-              <h2 class="fg-card__title" id="fg-gauge-title">应用分布</h2>
-              <p class="fg-card__sub">按部署位置与应用形式划分</p>
-            </div>
-            <a class="fg-more" href="/" aria-label="打开主站查看全部应用">
-              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
-            </a>
-          </div>
-
-          <div class="fg-gauge">
-            <div class="fg-donut" id="fg-donut" role="img" aria-label="应用在线率">
-              <!-- 由 glass.js 绘制分段圆环 -->
-            </div>
-          </div>
-
-          <div class="fg-legend" id="fg-legend"></div>
-        </section>
-
-        <!-- 四张指标卡 -->
-        <section class="fg-card fg-card--stat" data-reveal aria-labelledby="fg-stat-total">
-          <div class="fg-stat__top">
-            <h2 class="fg-stat__label" id="fg-stat-total">应用总数</h2>
-            <a class="fg-more" href="/" aria-label="在主站查看全部应用">
-              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
-            </a>
-          </div>
-          <div class="fg-stat__value-row">
-            <span class="fg-stat__value" data-stat="total">—</span>
-            <span class="fg-delta fg-delta--neutral">本机 + 云</span>
-          </div>
-          <p class="fg-stat__caption">已登记的应用数量</p>
-          <div class="fg-appbars" data-bars="env" aria-hidden="true"></div>
-        </section>
-
-        <section class="fg-card fg-card--stat" data-reveal aria-labelledby="fg-stat-running">
-          <div class="fg-stat__top">
-            <h2 class="fg-stat__label" id="fg-stat-running">运行中</h2>
-            <a class="fg-more" href="/" aria-label="在主站查看运行状态">
-              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
-            </a>
-          </div>
-          <div class="fg-stat__value-row">
-            <span class="fg-stat__value" data-stat="running">—</span>
-            <span class="fg-delta fg-delta--up" data-stat-chip="running">—</span>
-          </div>
-          <p class="fg-stat__caption">端口与健康接口在线</p>
-          <div class="fg-appbars" data-bars="status" aria-hidden="true"></div>
-        </section>
-
-        <section class="fg-card fg-card--stat" data-reveal aria-labelledby="fg-stat-lan">
-          <div class="fg-stat__top">
-            <h2 class="fg-stat__label" id="fg-stat-lan">内网应用</h2>
-            <a class="fg-more" href="/" aria-label="在主站查看内网应用">
-              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
-            </a>
-          </div>
-          <div class="fg-stat__value-row">
-            <span class="fg-stat__value" data-stat="lan">—</span>
-            <span class="fg-delta fg-delta--neutral" data-stat-chip="lan">—</span>
-          </div>
-          <p class="fg-stat__caption">部署在这台服务器</p>
-          <div class="fg-appbars" data-bars="env" aria-hidden="true"></div>
-        </section>
-
-        <section class="fg-card fg-card--stat" data-reveal aria-labelledby="fg-stat-git">
-          <div class="fg-stat__top">
-            <h2 class="fg-stat__label" id="fg-stat-git">源码待同步</h2>
-            <a class="fg-more" href="/" aria-label="在主站查看源码同步状态">
-              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
-            </a>
-          </div>
-          <div class="fg-stat__value-row">
-            <span class="fg-stat__value" data-stat="git">—</span>
-            <span class="fg-delta fg-delta--warn" data-stat-chip="git">—</span>
-          </div>
-          <p class="fg-stat__caption">未提交 / 未跟踪 / 未推送</p>
-          <div class="fg-appbars" data-bars="git" aria-hidden="true"></div>
-        </section>
-
-        <!-- 应用清单 -->
-        <section class="fg-card fg-card--list" data-reveal aria-labelledby="fg-list-title">
-          <div class="fg-card__head">
-            <div>
-              <h2 class="fg-card__title" id="fg-list-title">应用清单</h2>
-              <p class="fg-card__sub" id="fg-list-sub">正在读取…</p>
-            </div>
-            <span class="fg-list-live"><span class="fg-live-dot" aria-hidden="true"></span>实时</span>
-          </div>
-
-          <div class="fg-applist" id="fg-app-list" role="table" aria-label="应用清单">
-            <div class="fg-applist__head" role="row">
-              <span role="columnheader">应用</span>
-              <span role="columnheader">状态</span>
-              <span role="columnheader">访问地址</span>
-              <span role="columnheader">源码</span>
-            </div>
-            <div class="fg-applist__body" id="fg-app-list-body"></div>
-          </div>
-
-          <div class="fg-applist__foot">
-            <span id="fg-list-foot">全部应用</span>
-            <a class="fg-linkbtn" href="/">
-              主站表格视图
-              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
-            </a>
-          </div>
-        </section>
-
-        <!-- 源码同步 -->
-        <section class="fg-card fg-card--sync" data-reveal aria-labelledby="fg-sync-title">
-          <div class="fg-card__head">
-            <div>
-              <h2 class="fg-card__title" id="fg-sync-title">源码同步</h2>
-              <p class="fg-card__sub">每 5 分钟从远端校准一次</p>
-            </div>
-            <span class="fg-badge fg-badge--draft" id="fg-sync-count">—</span>
-          </div>
-
-          <div class="fg-syncbar" id="fg-syncbar" aria-hidden="true"></div>
-          <div class="fg-syncmeta" id="fg-syncmeta"></div>
-
-          <div class="fg-synclist" id="fg-sync-list"></div>
-
-          <div class="fg-sync__foot">
-            <span id="fg-sync-probe">—</span>
-            <a class="fg-linkbtn" href="/">
-              在主站维护应用
-              <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-arrow-right"></use></svg>
-            </a>
-          </div>
-        </section>
+        <button type="button" class="fg-syncbtn" id="fg-sync" title="立即重新探测所有应用：端口、git 同步与远程健康">
+          <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-refresh"></use></svg>
+          <span id="fg-sync-label">立刻同步</span>
+        </button>
+        <span class="fg-sync-error" id="fg-sync-error" hidden></span>
       </div>
 
-      <footer class="fg-foot">
-        <span>我的应用导航 · 毛玻璃视图</span>
-        <span class="fg-sep" aria-hidden="true"></span>
-        <span>数据来自 /apps.json，每 60 秒自动刷新</span>
+      <div class="fg-placeholder" id="fg-loading" aria-busy="true">
+        <div class="fg-skeleton" style="max-width: 760px"></div>
+        <div class="fg-skeleton" style="max-width: 760px"></div>
+        <div class="fg-skeleton" style="max-width: 760px"></div>
+      </div>
+
+      <div class="fg-placeholder" id="fg-error" hidden>
+        <p id="fg-error-text">加载应用数据失败</p>
+        <button type="button" class="fg-retry" id="fg-retry">重试</button>
+      </div>
+
+      <p class="fg-placeholder" id="fg-empty" hidden>还没有应用，请检查 apps.json</p>
+
+      <div class="fg-table-wrap" id="fg-table-wrap" hidden>
+        <table class="fg-app-table" aria-label="应用清单">
+          <thead id="fg-thead"></thead>
+          <tbody id="fg-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="fg-cardgrid" id="fg-card-grid" hidden></div>
+
+      <footer class="fg-footer">
+        <span>© <span id="fg-year">2026</span> <span id="fg-site-foot">我的应用导航</span> · 毛玻璃视图</span>
+        <span id="fg-probe-text"></span>
       </footer>
     </main>
   </div>
 
-  <!-- 搜索面板 -->
-  <div class="fg-search" id="fg-search" hidden>
-    <div class="fg-search__scrim" data-fg-close></div>
-    <div class="fg-search__dialog fg-glass" role="dialog" aria-modal="true" aria-label="搜索应用">
-      <div class="fg-search__field">
-        <svg viewBox="0 0 24 24" class="fg-i"><use href="#fg-i-search"></use></svg>
-        <input id="fg-search-input" type="search" placeholder="搜索应用、端口或技术栈…" autocomplete="off" spellcheck="false" aria-label="搜索内容">
-        <kbd>ESC</kbd>
-      </div>
-      <ul class="fg-search__list" id="fg-search-list"></ul>
-      <p class="fg-search__hint">↑ ↓ 选择 · Enter 打开</p>
-    </div>
-  </div>
-
-  <div class="fg-toast" id="fg-toast" role="status" aria-live="polite"></div>
-
-  <!-- 图标精灵（统一命名空间，不污染外部页面） -->
   <svg width="0" height="0" class="fg-sprite" aria-hidden="true" focusable="false">
     <symbol id="fg-i-grid"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></g></symbol>
-    <symbol id="fg-i-search"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="6.3"/><path d="m15.8 15.8 4.2 4.2"/></g></symbol>
+    <symbol id="fg-i-github"><g fill="currentColor" stroke="none"><path d="M12 .8C5.7.8.6 5.9.6 12.2c0 5 3.2 9.2 7.7 10.7.6.1.8-.3.8-.5v-1.9c-3 .6-3.7-1.4-3.7-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.8.1-.8.1-.8 1.1.1 1.7 1.1 1.7 1.1 1 1.7 2.6 1.3 3.2.9.1-.7.4-1.3.8-1.6-2.6-.3-5.3-1.3-5.3-5.9 0-1.3.5-2.4 1.3-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.3 11.3 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.3 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.6-2.7 5.6-5.3 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5 4.5-1.5 7.7-5.8 7.7-10.7C23.4 5.9 18.3.8 12 .8Z"/></g></symbol>
+    <symbol id="fg-i-gear"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3.2v2.3M12 18.5v2.3M3.2 12h2.3M18.5 12h2.3M5.8 5.8l1.6 1.6M16.6 16.6l1.6 1.6M18.2 5.8l-1.6 1.6M7.4 16.6l-1.6 1.6"/></g></symbol>
     <symbol id="fg-i-sun"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.6"/><path d="M12 3v2.2M12 18.8v2.2M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></g></symbol>
     <symbol id="fg-i-moon"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z"/></g></symbol>
     <symbol id="fg-i-refresh"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-13.5 5.8M4 12a8 8 0 0 1 13.5-5.8"/><path d="M20 4.5v5h-5M4 19.5v-5h5"/></g></symbol>
-    <symbol id="fg-i-home"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 10.5 12 4l8 6.5V19a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 19v-8.5Z"/><path d="M9.5 20.5v-6h5v6"/></g></symbol>
-    <symbol id="fg-i-code"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m8 7-5 5 5 5M16 7l5 5-5 5"/></g></symbol>
-    <symbol id="fg-i-arrow-right"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12h16m-6-6 6 6-6 6"/></g></symbol>
-    <symbol id="fg-i-alert"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5 21 19.5H3L12 3.5Z"/><path d="M12 9v4.5M12 16.6v.2"/></g></symbol>
-    <symbol id="fg-i-more"><g fill="currentColor"><circle cx="6" cy="12" r="1.5"/><circle cx="12" cy="12" r="1.5"/><circle cx="18" cy="12" r="1.5"/></g></symbol>
-    <symbol id="fg-i-trend-up"><g fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m4 16 6-6 4 4 6-7"/><path d="M14 7h6v6"/></g></symbol>
   </svg>
 
   <script src="./assets/glass.js" defer></script>
