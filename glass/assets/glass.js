@@ -38,7 +38,8 @@
     customOrder: loadOrder(),
     syncing: false,
     syncError: '',
-    dragId: ''
+    dragId: '',
+    cardEntered: false
   };
 
   /* ---------------- 小工具 ---------------- */
@@ -735,10 +736,13 @@
     var reorderable = state.sortKey === 'default';
     var list = displayApps();
     grid.innerHTML = '';
+    // 首次渲染播入场动画；之后（轮询/回前台重建 DOM）抑制重播，避免整片闪烁
+    grid.classList.toggle('fg-noenter', state.cardEntered);
 
     list.forEach(function (app, index) {
       grid.appendChild(buildCard(app, index, list.length, reorderable));
     });
+    state.cardEntered = true;
   }
 
   function buildCard(app, index, total, reorderable) {
