@@ -1,7 +1,7 @@
 # AGENTS.md · my-homepage 项目交接记忆
 
 > 面向接手本项目的 AI Agent / 开发者：读完这一份即可上手，无需再翻聊天记录。
-> 最后更新：2026-11-03 · 文档随代码演进，改功能时请同步更新本文。
+> 最后更新：2026-11-06 · 文档随代码演进，改功能时请同步更新本文。
 
 ---
 
@@ -140,6 +140,9 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 ├── glass/                     # ★ 独立毛玻璃页面（纯 HTML/CSS/JS，不参与 Vite 构建）
 │   ├── index.html
 │   └── assets/glass.css, glass.js
+├── unslop/                    # ★ 独立设计对比端点 /unslop/（主站重设计版，纯 HTML/CSS/JS，见 §8.6）
+│   ├── index.html
+│   └── assets/app.css, app.js
 ├── dist/                      # 构建输出（不手工编辑）
 ├── .verify/                   # 开发期截图与 Playwright 脚本（可删，不影响运行）
 └── node_modules/
@@ -153,6 +156,7 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 | `probe-apps.mjs` | 自动生效（下次定时探测）；也可 `npm run probe` |
 | `settings-server.mjs` | `systemctl restart my-homepage-settings` |
 | `src/**`（前端） | `./deploy.sh`（须重新构建） |
+| `glass/**` / `unslop/**`（独立静态页） | 刷新即生效（nginx 直发，无需构建） |
 | `deploy.sh` / nginx | 直接执行 / `nginx -s reload` |
 
 ---
@@ -371,6 +375,16 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 - 响应式：≤760px 默认卡片视图（与主站一致），表格横向滚动，≤760px 模糊半径降至 16px；`prefers-reduced-motion` 下关闭光斑漂移与入场动效；不支持 `backdrop-filter` 时降级为高不透明度背景。
 - 部署：`deploy.sh` 的 `rsync --delete` 只覆盖 `www/`，**不会删除 `glass/`**；nginx 在两处 server 块各加了 `/glass/` location（`root /root/applications/my-homepage` + `try_files … /glass/index.html`）。改完无需构建，刷新即生效。
 
+### 8.6 独立设计对比端点（`unslop/`，访问 `/unslop/`）
+
+主站首页的**重设计对比版本**（unslop 流程产出，视觉方向「机房仪表盘」），与 `/` 并存以便对比；旧主页完全未动。2026-11-06 生成。
+
+- 形态：与 `glass/` 同模式的独立静态页（`unslop/index.html` + `assets/app.css` + `assets/app.js`），纯 HTML/CSS/JS、零依赖、不参与 Vite 构建；类名前缀 `u-`，存储键 `unslop:appOrder` / `unslop:theme`。
+- 功能与主站对齐：同一份 `apps.json`（60s 轮询 + 回前台刷新）、表格/卡片双视图（≤760px 默认卡片）、表头/下拉排序 + 正倒序、手柄拖拽手动排序 + ↺ 重置、目录点击复制（含 execCommand 回退，http 局域网必需）、立刻同步（POST `/api/probe` + `startedAt` 轮询）。**设置入口链接回主站 `/`**（沿用 glass 先例，本端点只读）。
+- 与主站的视觉差异（对比要点）：emoji 图标 → 名称首字字块；彩色胶囊（环境/形式/端口/同步/状态）→ 小色点 + 中性 hairline chip + **mono 端口键帽**；行/卡左边色条移除；表头 sentence case 左对齐（原为大写居中）；hero 统计胶囊 → **机架面板**（深色仪表条：每应用一格状态灯 + 端口 + 名称，可点击直达，头部为 mono 统计行）——页面上唯一的丰富元素；主按钮「立刻同步」为墨色填充（浅色）/反白（深色）；单一 easing `cubic-bezier(.22,1,.36,1)`，动效只过渡 color/background/border/opacity/transform。
+- 维护：改 `unslop/**` 刷新即生效；**`apps.json` 字段结构变化时需同步改 `unslop/assets/app.js`**（它复制了 `src/lib/app-utils.js` 的加工逻辑，两处并存）。确认采用新版后把实现迁回 `src/` 重新构建，下线本端点。
+- nginx：`/unslop` → 301 → `/unslop/`，两处 server 块各一个 location（`root /root/applications/my-homepage` + `try_files … /unslop/index.html` + no-cache），备份 `*.bak-unslop-20261106`。
+
 ---
 
 ## 9. 设置 API（`scripts/settings-server.mjs`）
@@ -403,15 +417,15 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 ### 10.2 nginx 配置（两处！）
 
-**A. `/etc/nginx/conf.d/default.conf`** — `listen 80 default_server`，root `/root/applications/my-homepage/www`，含 SPA 回退、`/api/` 反代、`/assets/` 长缓存、`apps.json` no-cache，以及独立页面 `/glass/`（`root /root/applications/my-homepage`）。
+**A. `/etc/nginx/conf.d/default.conf`** — `listen 80 default_server`，root `/root/applications/my-homepage/www`，含 SPA 回退、`/api/` 反代、`/assets/` 长缓存、`apps.json` no-cache，以及独立页面 `/glass/`、`/unslop/`（`root /root/applications/my-homepage`）。
 
 **B. `/etc/nginx/nginx.conf` 内的 `server { listen 80; server_name 127.0.0.1; }`** — 这是 paraportal 遗留配置块，携带 `/Platform`、`/visualization`、`/pushservice` 等到 `127.0.0.1:8080` 的代理。原始 `root` 指向**不存在的** `/opt/paratera/paraportal/gui/webapps/ROOT`。
 
-已做的最小改动：`root` 改为 `/root/applications/my-homepage/www`，并补上 `/api/` 反代与 `/glass/` 独立页面 location。**不要删这个块**（会破坏 docker:8080 的代理路径）。
+已做的最小改动：`root` 改为 `/root/applications/my-homepage/www`，并补上 `/api/` 反代与 `/glass/`、`/unslop/` 独立页面 location。**不要删这个块**（会破坏 docker:8080 的代理路径）。
 
-> `/glass/` 必须两处都配：`Host: 127.0.0.1` 走 `nginx.conf` 的块，局域网 IP 走 `default.conf`，否则会出现「一个入口能开、另一个 404」。两处都用 `root`（不是 `alias`）+ `try_files $uri $uri/ /glass/index.html`，`alias` 与 `try_files` 组合会导致静态资源 404。
+> `/glass/`、`/unslop/` 必须两处都配：`Host: 127.0.0.1` 走 `nginx.conf` 的块，局域网 IP 走 `default.conf`，否则会出现「一个入口能开、另一个 404」。两处都用 `root`（不是 `alias`）+ `try_files $uri $uri/ /glass/index.html`（unslop 同理），`alias` 与 `try_files` 组合会导致静态资源 404。
 
-备份：`/etc/nginx/conf.d/default.conf.bak`、`/etc/nginx/nginx.conf.bak`（另有本次新增的 `*.bak-glass-20261104`）
+备份：`/etc/nginx/conf.d/default.conf.bak`、`/etc/nginx/nginx.conf.bak`（另有 `*.bak-glass-20261104`、`*.bak-unslop-20261106`）
 
 ### 10.3 systemd
 
@@ -484,6 +498,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 9. **`--no-fetch` 时 `remoteOk` 为 `null`**
    前端据此不显示「远端不可达」警告，沿用上次远端快照。别把它当成 fetch 失败。
 
+10. **`hidden` 属性会被组件的 `display` 规则顶掉**
+   给带 `display: inline-flex` 的元素加 `hidden` 不会隐藏它（作者样式 > UA 样式的 `[hidden]{display:none}`）。`unslop/assets/app.css` 顶部用 `[hidden]{display:none!important}` 兜底；Vue 组件里则用 `v-if` 或显式 class 切换。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
@@ -503,6 +520,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 拖拽仅手柄触发 | 用户反馈点击卡片会触发拖拽 |
 | 内网蓝 / 公网橙 | 用户要求「内网和公网区分明显，可用颜色」 |
 | 3 行简介 + 固定行高 | 用户要求「简介过长换行、每行高度一致」；超 3 行截断（悬停看全文）是行高一致的必要代价 |
+| `/unslop/` 设计对比端点（2026-11-06） | 用户要求「unslop 主页，生成新端点、保留旧的对比」；按 glass/ 先例做独立静态页，零构建、零风险，旧主页一字未动 |
 
 ---
 

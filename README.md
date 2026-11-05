@@ -24,6 +24,8 @@ my-homepage/
 │   └── probe-apps.mjs        # ★ 端口探测器（生成 apps.json）
 ├── systemd/                  # 探测定时器单元（快速 3 分钟 / 完整 5 分钟）
 ├── deploy.sh                 # 一键发布
+├── glass/                    # 独立毛玻璃视觉页面（/glass/，纯 HTML/CSS/JS）
+├── unslop/                   # 独立设计对比端点（/unslop/，主站重设计版，纯 HTML/CSS/JS）
 └── public/                   # favicon、apps.json（构建时随 dist 拷贝）
 ```
 
@@ -207,6 +209,10 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer
 ## nginx 配置（80 端口）
 
 `/etc/nginx/conf.d/default.conf` 指向 `/root/applications/my-homepage/www`（`listen 80 default_server`，SPA 回退 + gzip + 静态资源缓存）。原配置备份于 `/etc/nginx/conf.d/default.conf.bak`。
+
+## 设计对比端点 /unslop/
+
+`/unslop/` 是主站首页的**重设计对比版本**（机房仪表盘视觉方向），与主站读取同一份 `apps.json`，功能与 `/` 一致（表格/卡片、排序、手动拖拽、立刻同步、深浅主题）。它是纯 HTML/CSS/JS 静态页（`unslop/` 目录，不参与 Vite 构建），改完刷新即生效、无需 `npm run deploy`；设置入口链接回主站面板。旧主页 `/` 完全不受影响，两者可并排对比；若确定采用新版，把 `unslop/` 的实现迁回 `src/` 重新构建即可。
 
 ## 修改站点信息
 

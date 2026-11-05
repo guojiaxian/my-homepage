@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex" />
+  <title>我的应用导航</title>
+  <link rel="icon" href="/favicon.svg" />
+  <script>
+    // 主题先行，避免刷新闪色
+    try {
+      var t = localStorage.getItem('unslop:theme')
+      var dark = t === 'dark' || ((t === null || t === 'auto') && matchMedia('(prefers-color-scheme: dark)').matches)
+      document.documentElement.dataset.theme = dark ? 'dark' : 'light'
+    } catch (e) {}
+  </script>
+  <link rel="stylesheet" href="./assets/app.css" />
+</head>
+<body>
+  <header class="u-topbar">
+    <div class="u-topbar-in">
+      <a class="u-brand" href="./">
+        <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+          <rect x="0.5" y="0.5" width="6.5" height="6.5" rx="1.8" />
+          <rect x="9" y="0.5" width="6.5" height="6.5" rx="1.8" />
+          <rect x="0.5" y="9" width="6.5" height="6.5" rx="1.8" />
+          <rect x="9" y="9" width="6.5" height="6.5" rx="1.8" opacity="0.55" />
+        </svg>
+        <span id="u-siteName">我的应用导航</span>
+      </a>
+      <div class="u-top-actions">
+        <a class="u-iconbtn" href="https://github.com/guojiaxian" target="_blank" rel="noopener" title="GitHub 主页" aria-label="GitHub 主页">
+          <svg width="17" height="17" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
+            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8Z" />
+          </svg>
+        </a>
+        <a class="u-iconbtn" href="/" title="在主站打开设置面板" aria-label="打开主站设置面板">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="3" />
+            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
+          </svg>
+        </a>
+        <button class="u-iconbtn" id="u-themeBtn" type="button" title="切换深色" aria-label="切换主题">
+          <svg id="u-iconMoon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" />
+          </svg>
+          <svg id="u-iconSun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true" hidden>
+            <circle cx="12" cy="12" r="4" />
+            <path d="M12 2v2m0 16v2M4.9 4.9l1.4 1.4m11.4 11.4 1.4 1.4M2 12h2m16 0h2M4.9 19.1l1.4-1.4m11.4-11.4 1.4-1.4" />
+          </svg>
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <main class="u-wrap">
+    <section class="u-hero u-rise">
+      <h1 id="u-heroTitle">我的应用</h1>
+      <p class="u-sub" id="u-heroSubtitle">部署在这台服务器上的个人项目，端口与运行状态每 3 分钟自动探测，源码同步每 5 分钟。</p>
+    </section>
+
+    <section class="u-rack u-rise u-d1" id="u-rack" aria-label="应用机架面板" hidden>
+      <div class="u-rack-head">
+        <span class="u-rack-label mono" id="u-rackLabel">rack</span>
+        <span class="u-rack-stats mono" id="u-rackStats"></span>
+      </div>
+      <div class="u-rack-grid" id="u-rackGrid"></div>
+    </section>
+
+    <div class="u-toolbar u-rise u-d2">
+      <div class="u-sortbox">
+        <select id="u-sort" title="排序方式">
+          <option value="default">排序：手动 / 默认顺序</option>
+          <option value="name">排序：名称</option>
+          <option value="port">排序：端口</option>
+          <option value="status">排序：运行状态</option>
+          <option value="git">排序：同步状态</option>
+        </select>
+        <button class="u-iconbtn u-size36" id="u-dirBtn" type="button" title="正序（点击切换倒序）" hidden>↑</button>
+        <button class="u-iconbtn u-size36" id="u-resetBtn" type="button" title="清除手动排序，恢复默认顺序" hidden>↺</button>
+      </div>
+      <div class="u-segmented" role="tablist">
+        <button type="button" data-view="table" class="on">表格</button>
+        <button type="button" data-view="card">卡片</button>
+      </div>
+      <button class="u-primary" id="u-sync" type="button" title="立即重新探测所有应用：端口、git 同步与远程健康">
+        <svg id="u-syncIcon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12a9 9 0 1 1-2.64-6.36" />
+          <path d="M21 3v6h-6" />
+        </svg>
+        <span id="u-syncText">立刻同步</span>
+      </button>
+      <span class="u-sync-error" id="u-syncError" hidden></span>
+    </div>
+
+    <div id="u-content" class="u-rise u-d3" aria-live="polite">
+      <div class="u-placeholder" aria-busy="true">
+        <div class="u-skeleton"></div>
+        <div class="u-skeleton"></div>
+        <div class="u-skeleton"></div>
+      </div>
+    </div>
+
+    <footer class="u-footer">
+      <span id="u-copy"></span>
+      <span class="mono" id="u-probed"></span>
+    </footer>
+  </main>
+
+  <script src="./assets/app.js"></script>
+</body>
+</html>
