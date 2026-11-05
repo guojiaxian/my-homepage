@@ -212,7 +212,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer
 
 ## 设计对比端点 /unslop/
 
-`/unslop/` 是主站首页的**重设计对比版本**（机房仪表盘视觉方向），与主站读取同一份 `apps.json`，功能与 `/` 一致（表格/卡片、排序、手动拖拽、立刻同步、深浅主题）。它是纯 HTML/CSS/JS 静态页（`unslop/` 目录，不参与 Vite 构建），改完刷新即生效、无需 `npm run deploy`；设置入口链接回主站面板。旧主页 `/` 完全不受影响，两者可并排对比；若确定采用新版，把 `unslop/` 的实现迁回 `src/` 重新构建即可。
+`/unslop/` 是主站首页的**净化对比版**：视觉与 `/` 完全同款（同一套配色、chips、emoji 图标与布局 1:1），仅做了几处不改变观感的优化（表头去大写、`transition: all` 收敛、h1 字重、键盘焦点环、动效降级）。它与主站读取同一份 `apps.json`，功能一致（表格/卡片、排序、手动拖拽、立刻同步、深浅主题）。纯 HTML/CSS/JS 静态页（`unslop/` 目录，不参与 Vite 构建），改完刷新即生效；设置入口链接回主站面板。旧主页 `/` 完全不受影响。
 
 ## 修改站点信息
 

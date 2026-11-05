@@ -1,5 +1,5 @@
 /* ============================================================
-   /unslop/ 设计对比端点 · 数据与交互
+   /unslop/ 设计对比端点 v2 · 主站视觉 1:1 移植 + 净化级优化
    数据源与主站一致：apps.json（探测器定时生成，页面 60s 轮询）
    ============================================================ */
 ;(function () {
@@ -90,6 +90,19 @@
     return parts.join(' · ')
   }
 
+  /** 状态：运行中（绿）/ 未运行（红）/ 离线应用（灰，纯 APP / 小程序不探测） */
+  function statusInfo(app) {
+    if (app.appOnly) {
+      return {
+        text: '离线应用',
+        cls: 'offline',
+        title: '离线应用：纯 APP / 小程序，无 Web 服务，不做端口探测',
+      }
+    }
+    if (app.status === 'running') return { text: '运行中', cls: 'ok', title: remoteHealthTitle(app) }
+    return { text: '未运行', cls: 'down', title: remoteHealthTitle(app) }
+  }
+
   const KIND_LABELS = { web: 'Web', app: 'APP', miniapp: '小程序', tv: '电视', cli: 'CLI' }
 
   function kindList(app) {
@@ -123,19 +136,7 @@
       : { cls: 'lan', label: '内网' }
   }
 
-  function statusInfo(app) {
-    if (app.appOnly) {
-      return {
-        text: '离线应用',
-        dot: 'off',
-        title: '离线应用：纯 APP / 小程序，无 Web 服务，不做端口探测',
-      }
-    }
-    if (app.status === 'running') return { text: '运行中', dot: 'ok', title: remoteHealthTitle(app) }
-    return { text: '未运行', dot: 'bad', title: remoteHealthTitle(app) }
-  }
-
-  /** git 同步状态 → { text, dot, title }；无 git 信息返回 null */
+  /** git 同步状态 → { text, cls, title }；无 git 信息返回 null */
   function gitView(git) {
     if (!git) return null
     const branch = git.branch || '（detached）'
@@ -147,24 +148,21 @@
     if (git.remoteOk === false) counts.push('远端不可达，以上为上次快照')
 
     const map = {
-      synced: { text: '已同步', dot: 'ok' },
-      dirty: { text: `未提交 ${git.uncommitted}`, dot: 'bad' },
-      ahead: { text: `未推送 ${git.ahead}`, dot: 'warn' },
-      behind: { text: `未拉取 ${git.behind}`, dot: 'warn' },
-      untracked: { text: `未跟踪 ${git.untracked}`, dot: 'warn' },
-      'no-repo': { text: '无 Git 仓库', dot: 'gray' },
-      'no-upstream': { text: '未关联远端', dot: 'gray' },
-      error: { text: '检查失败', dot: 'gray' },
+      synced: { text: '已同步', cls: 'ok' },
+      dirty: { text: `未提交 ${git.uncommitted}`, cls: 'bad' },
+      ahead: { text: `未推送 ${git.ahead}`, cls: 'warn' },
+      behind: { text: `未拉取 ${git.behind}`, cls: 'warn' },
+      untracked: { text: `未跟踪 ${git.untracked}`, cls: 'warn' },
+      'no-repo': { text: '无 Git 仓库', cls: 'muted' },
+      'no-upstream': { text: '未关联远端', cls: 'muted' },
+      error: { text: '检查失败', cls: 'muted' },
     }
-    const view = map[git.status] ?? { text: '检查失败', dot: 'gray' }
+    const view = map[git.status] ?? { text: '检查失败', cls: 'muted' }
 
     const detail = git.message ? git.message : counts.length ? counts.join(' · ') : `分支 ${branch} 与远端一致`
     const title = git.repo ? `${git.repo}（${branch}）：${detail}` : `分支 ${branch}：${detail}`
     return { ...view, title }
   }
-
-  /** 名称首字字块（替代 emoji 图标） */
-  const monogram = (app) => Array.from((app.name || '·').trim())[0] || '·'
 
   /* ---------- 状态 ---------- */
   const ORDER_KEY = 'unslop:appOrder'
@@ -284,7 +282,7 @@
     }
   }
 
-  /* ---------- 主题 ---------- */
+  /* ---------- 主题（与主站同机制：light/dark/auto） ---------- */
   const root = document.documentElement
 
   function isDark() {
@@ -301,8 +299,8 @@
   }
 
   function syncThemeBtn() {
-    $('#u-iconMoon').hidden = isDark()
     $('#u-iconSun').hidden = !isDark()
+    $('#u-iconMoon').hidden = isDark()
     $('#u-themeBtn').title = isDark() ? '切换浅色' : '切换深色'
   }
 
@@ -316,7 +314,7 @@
     }
   }
 
-  /* ---------- 渲染：页面文案 ---------- */
+  /* ---------- 渲染：页面文案 + hero 统计（与主站同款胶囊） ---------- */
   function renderPageText() {
     document.title = state.page.siteName || '我的应用导航'
     $('#u-siteName').textContent = state.page.siteName
@@ -331,218 +329,201 @@
       probedLine = `最后探测 ${t}（北京时间）· 端口每 3 分钟 · git 每 5 分钟`
     }
     $('#u-probed').textContent = probedLine
+
+    const apps = state.apps
+    const running = apps.filter((a) => a.status === 'running').length
+    const lan = apps.filter((a) => !isPublic(a)).length
+    const net = apps.filter((a) => isPublic(a)).length
+    const unsynced = apps.filter((a) => a.git && a.git.status !== 'synced').length
+    $('#u-stats').innerHTML = `
+      <span class="stat-chip"><b>${apps.length}</b> 个应用</span>
+      <span class="stat-chip">
+        <span class="dot" style="background:${running ? 'var(--green)' : 'var(--gray)'}"></span>
+        <b>${running}</b> 个运行中
+      </span>
+      <span class="stat-chip" title="按部署位置：内网 / 公网">
+        内网 <b style="color: var(--accent)">${lan}</b>
+        <span style="color: var(--gray)">·</span>
+        公网 <b style="color: var(--amber)">${net}</b>
+      </span>
+      <span class="stat-chip" title="源码与 GitHub 仓库的同步状态">
+        <span class="dot" style="background:${unsynced ? 'var(--amber)' : 'var(--green)'}"></span>
+        ${unsynced ? `<b>${unsynced}</b> 个源码未同步` : '源码全部已同步'}
+      </span>`
   }
 
-  /* ---------- 渲染：机架面板 ---------- */
-  function renderRack() {
-    const apps = displayApps()
-    const rack = $('#u-rack')
-    if (!apps.length) {
-      rack.hidden = true
-      return
-    }
-    rack.hidden = false
-    $('#u-rackLabel').textContent = `rack · ${window.location.hostname || 'localhost'}`
-
-    const running = state.apps.filter((a) => a.status === 'running').length
-    const lan = state.apps.filter((a) => !isPublic(a)).length
-    const net = state.apps.filter((a) => isPublic(a)).length
-    const unsynced = state.apps.filter((a) => a.git && a.git.status !== 'synced').length
-    $('#u-rackStats').innerHTML =
-      `<b>${running}</b>/${state.apps.length} 运行中 · 内网 <b>${lan}</b> · 公网 <b>${net}</b> · 未同步 <b>${unsynced}</b>`
-
-    $('#u-rackGrid').innerHTML = apps.map((app) => {
-      const name = `<span class="u-slot-name">${esc(app.name)}</span>`
-      if (app.appOnly) {
-        const kindLabel = kindList(app).map((k) => k.label).join('·') || 'APP'
-        return `<span class="u-slot u-slot-off"${attr('title', statusInfo(app).title)}>` +
-          `<i class="u-dot off"></i><span class="u-slot-port">${esc(kindLabel)}</span>${name}</span>`
-      }
-      const url = buildAppUrl(app)
-      const port = `<span class="u-slot-port">:${esc(portText(app))}</span>`
-      if (hasUrl(app) && url) {
-        return `<a class="u-slot" href="${esc(url)}" target="_blank" rel="noopener"${attr('title', url)}>` +
-          `<i class="u-dot ${app.status === 'running' ? 'ok' : 'bad'}"></i>${port}${name}</a>`
-      }
-      return `<span class="u-slot u-slot-off" title="未监听，不可访问">` +
-        `<i class="u-dot bad"></i>${port}${name}</span>`
-    }).join('')
-  }
-
-  /* ---------- 渲染：表格 ---------- */
+  /* ---------- 渲染：表格（主站 AppTable.vue 同款结构） ---------- */
   function arrowHtml(key) {
     if (state.sortKey !== key) return ''
-    return `<span class="u-arrow">${state.sortDir === 1 ? '▲' : '▼'}</span>`
+    return `<span class="arrow">${state.sortDir === 1 ? '▲' : '▼'}</span>`
   }
 
-  function statusHtml(app) {
+  function badgeHtml(app) {
     const s = statusInfo(app)
-    return `<span class="u-state"${attr('title', s.title)}><i class="u-dot ${s.dot}"></i>${esc(s.text)}</span>`
+    return `<span class="badge ${s.cls}"${attr('title', s.title)}><span class="dot"></span>${esc(s.text)}</span>`
   }
 
   function appCellHtml(app) {
     const env = envInfo(app)
     const version = app.remoteInfo?.version
-      ? `<span class="u-vers">v${esc(app.remoteInfo.version)}</span>`
+      ? `<span class="tag"${attr('title', remoteHealthTitle(app))}>v${esc(app.remoteInfo.version)}</span>`
       : ''
-    const pending = app.pending ? '<span class="u-pending">待补充</span>' : ''
+    const pending = app.pending
+      ? '<span class="tag warn" title="请在 scripts/apps.config.json 中补充信息">待补充</span>'
+      : ''
     const kinds = kindList(app)
-      .map((k) => `<span class="u-kind" title="应用形式：${esc(k.label)}">${esc(k.label)}</span>`)
+      .map((k) => `<span class="kind-chip ${k.value}" title="应用形式：${esc(k.label)}">${esc(k.label)}</span>`)
       .join('')
     const stack = stackText(app)
-    return `<div class="u-appcell">
-      <span class="u-avatar" aria-hidden="true">${esc(monogram(app))}</span>
-      <div class="u-appmeta">
-        <span class="u-appname"><span class="u-env ${env.cls}">${env.label}</span>${esc(app.name)}${version}${pending}</span>
-        <span class="u-apptags">${kinds}<span class="u-stack"${attr('title', stackTitle(app))}>${esc(stack)}</span></span>
+    return `<div class="app-cell">
+      <span class="app-icon${env.cls === 'net' ? ' icon-net' : ''}" aria-hidden="true">${esc(app.icon || '·')}</span>
+      <div class="app-meta">
+        <span class="app-name"><span class="env-chip ${env.cls}">${env.label}</span>${esc(app.name)}${version}${pending}</span>
+        <span class="app-tags">${kinds}<span class="stack-text"${attr('title', stackTitle(app))}>${esc(stack)}</span></span>
       </div>
     </div>`
   }
 
   function portCellHtml(app) {
-    if (app.appOnly) return '<span class="u-none" title="该应用无 Web 服务入口">—</span>'
+    if (app.appOnly) return '<span class="text-muted" title="该应用无 Web 服务入口">—</span>'
     const url = buildAppUrl(app)
     const extra = app.extraPorts?.length
-      ? `<span class="u-extra">+${esc(app.extraPorts.join(', '))}</span>`
+      ? `<span class="extra-ports mono">+${esc(app.extraPorts.join(', '))}</span>`
       : ''
     const local = app.port && !app.external
-      ? '<span class="u-local" title="该服务仅监听 127.0.0.1，仅本机可访问">仅本机</span>'
+      ? '<span class="tag neutral" title="该服务仅监听 127.0.0.1，仅本机可访问">仅本机</span>'
       : ''
     if (hasUrl(app) && url) {
-      return `<a class="u-key" href="${esc(url)}" target="_blank" rel="noopener"${attr('title', url)}>:${esc(portText(app))}<span class="u-ext">↗</span></a>${extra}${local}`
+      return `<a class="port-link" href="${esc(url)}" target="_blank" rel="noopener"${attr('title', url)}>:${esc(portText(app))} <span aria-hidden="true">↗</span></a>${extra}${local}`
     }
-    return `<span class="u-key u-key-muted" title="未监听，不可访问">:${esc(portText(app))}</span>${extra}${local}`
+    return `<span class="port-link muted" title="未监听，不可访问">:${esc(portText(app))}</span>${extra}${local}`
   }
 
   function dirCellHtml(app) {
     if (app.remote) {
-      return `<span class="u-dir mono" title="${esc(`${app.location ?? ''} · ${app.host ?? ''}`)}">${esc(`${app.location ?? ''} · ${app.host ?? ''}`)}</span>`
+      const text = `${app.location ?? ''} · ${app.host ?? ''}`
+      return `<span class="mono dir"${attr('title', text)}>${esc(text)}</span>`
     }
-    return `<span class="u-dir mono u-copyable" data-copy="${esc(app.directory ?? '')}"` +
+    return `<span class="mono dir copyable" data-copy="${esc(app.directory ?? '')}"` +
       `${attr('title', `${app.directory ?? ''}（点击复制）`)}>${esc(app.directory ?? '')}</span>`
   }
 
   function gitCellHtml(app) {
     const g = gitView(app.git)
-    if (!g) return '<span class="u-none">—</span>'
-    return `<span class="u-git"${attr('title', g.title)}><i class="u-dot ${g.dot}"></i>${esc(g.text)}</span>`
-  }
-
-  function ghCellHtml(app) {
-    if (!app.github) return '<span class="u-none">—</span>'
-    return `<a class="u-gh" href="${esc(app.github)}" target="_blank" rel="noopener" title="查看源码">源码 ↗</a>`
+    if (!g) return '<span class="text-muted">—</span>'
+    return `<span class="sync-chip ${g.cls}"${attr('title', g.title)}>${esc(g.text)}</span>`
   }
 
   function renderTable(apps) {
     const reorderable = state.sortKey === 'default'
     const head = `<thead><tr>
-      ${reorderable ? '<th class="u-td-handle"><span class="u-sr">拖拽调整顺序</span></th>' : ''}
-      <th class="u-sortable${state.sortKey === 'status' ? ' u-on' : ''}" data-sort="status" title="按运行状态排序（再次点击切换方向）">状态${arrowHtml('status')}</th>
-      <th class="u-sortable${state.sortKey === 'name' ? ' u-on' : ''}" data-sort="name" title="按名称排序（再次点击切换方向）">应用${arrowHtml('name')}</th>
-      <th>简介</th>
-      <th class="u-sortable${state.sortKey === 'port' ? ' u-on' : ''}" data-sort="port" title="按端口排序（再次点击切换方向）">访问地址${arrowHtml('port')}</th>
+      ${reorderable ? '<th class="col-handle" title="拖拽行调整顺序（保存在本浏览器）"></th>' : ''}
+      <th class="col-status sortable${state.sortKey === 'status' ? ' on' : ''}" data-sort="status" title="按运行状态排序（再次点击切换方向）">状态${arrowHtml('status')}</th>
+      <th class="sortable${state.sortKey === 'name' ? ' on' : ''}" data-sort="name" title="按名称排序（再次点击切换方向）">应用${arrowHtml('name')}</th>
+      <th class="col-desc">简介</th>
+      <th class="sortable${state.sortKey === 'port' ? ' on' : ''}" data-sort="port" title="按端口排序（再次点击切换方向）">访问地址${arrowHtml('port')}</th>
       <th>服务器 / 目录</th>
-      <th class="u-sortable${state.sortKey === 'git' ? ' u-on' : ''}" data-sort="git" title="按同步状态排序（未同步的在前，再次点击切换方向）">同步${arrowHtml('git')}</th>
-      <th class="u-td-gh">GitHub</th>
+      <th class="sortable${state.sortKey === 'git' ? ' on' : ''}" data-sort="git" title="按同步状态排序（未同步的在前，再次点击切换方向）">同步${arrowHtml('git')}</th>
+      <th class="col-github">GitHub</th>
     </tr></thead>`
 
-    const rows = apps.map((app) => `<tr data-id="${esc(app.id)}"${state.dragId === app.id ? ' class="u-dragging"' : ''}>
+    const rows = apps.map((app) => `<tr data-id="${esc(app.id)}" class="${envInfo(app).cls}${state.dragId === app.id ? ' dragging' : ''}">
       ${reorderable
-        ? `<td class="u-td-handle"><span class="u-grip" draggable="true" title="按住拖拽调整顺序" aria-label="拖拽调整顺序">
+        ? `<td class="col-handle"><span class="grip" draggable="true" title="按住拖拽调整顺序" aria-label="拖拽调整顺序">
             <svg width="10" height="16" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true">
               <circle cx="5" cy="4" r="1.8" /><circle cx="11" cy="4" r="1.8" />
               <circle cx="5" cy="10" r="1.8" /><circle cx="11" cy="10" r="1.8" />
               <circle cx="5" cy="16" r="1.8" /><circle cx="11" cy="16" r="1.8" />
             </svg></span></td>`
         : ''}
-      <td>${statusHtml(app)}</td>
+      <td class="col-status">${badgeHtml(app)}</td>
       <td>${appCellHtml(app)}</td>
-      <td class="u-td-desc"><span class="u-desc"${attr('title', app.description)}>${esc(app.description)}</span></td>
+      <td class="col-desc"><span class="desc"${attr('title', app.description)}>${esc(app.description)}</span></td>
       <td>${portCellHtml(app)}</td>
       <td>${dirCellHtml(app)}</td>
-      <td>${gitCellHtml(app)}</td>
-      <td class="u-td-gh">${ghCellHtml(app)}</td>
+      <td class="col-sync">${gitCellHtml(app)}</td>
+      <td class="col-github">${app.github
+        ? `<a href="${esc(app.github)}" target="_blank" rel="noopener" title="查看源码">源码 ↗</a>`
+        : '<span class="text-muted">—</span>'}</td>
     </tr>`).join('')
 
-    return `<div class="u-tablewrap"><table class="u-table">${head}<tbody>${rows}</tbody></table></div>`
+    return `<div class="table-wrap"><table class="app-table">${head}<tbody>${rows}</tbody></table></div>`
   }
 
-  /* ---------- 渲染：卡片 ---------- */
+  /* ---------- 渲染：卡片（主站 AppCard.vue 同款结构） ---------- */
   function renderCards(apps) {
     const reorderable = state.sortKey === 'default'
     const cards = apps.map((app, idx) => {
       const env = envInfo(app)
       const version = app.remoteInfo?.version
-        ? `<span class="u-vers">v${esc(app.remoteInfo.version)}</span>`
+        ? `<span class="tag"${attr('title', remoteHealthTitle(app))}>v${esc(app.remoteInfo.version)}</span>`
         : ''
-      const pending = app.pending ? '<span class="u-pending">待补充</span>' : ''
+      const pending = app.pending
+        ? '<span class="tag warn" title="请在 scripts/apps.config.json 中补充信息">待补充</span>'
+        : ''
       const extra = app.extraPorts?.length
-        ? `<span class="u-extra">+${esc(app.extraPorts.join(', '))}</span>`
+        ? `<span class="mono extra-ports">+${esc(app.extraPorts.join(', '))}</span>`
         : ''
-      const local = app.port && !app.external
-        ? '<span class="u-local" title="该服务仅监听 127.0.0.1，仅本机可访问">仅本机</span>'
-        : ''
-      const dirTitle = app.remote ? `${app.location ?? ''} · ${app.host ?? ''}` : `${app.directory ?? ''}（点击复制）`
       const ghShort = app.github ? app.github.replace('https://github.com/', '') : ''
       const kinds = kindList(app)
-        .map((k) => `<span class="u-kind" title="应用形式：${esc(k.label)}">${esc(k.label)}</span>`)
+        .map((k) => `<span class="kind-chip ${k.value}" title="应用形式：${esc(k.label)}">${esc(k.label)}</span>`)
         .join('')
 
-      return `<article class="u-card${state.dragIdx === idx ? ' u-dragging' : ''}" data-idx="${idx}">
-        <header class="u-cardhead">
+      return `<article class="card ${env.cls}${state.dragIdx === idx ? ' dragging' : ''}" data-idx="${idx}">
+        <header class="card-head">
           ${reorderable
-            ? `<span class="u-grip" draggable="true" title="按住拖拽调整顺序" aria-label="拖拽调整顺序">
+            ? `<span class="grip" draggable="true" title="按住拖拽调整顺序" aria-label="拖拽调整顺序">
                 <svg width="10" height="14" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true">
                   <circle cx="5" cy="4" r="1.8" /><circle cx="11" cy="4" r="1.8" />
                   <circle cx="5" cy="10" r="1.8" /><circle cx="11" cy="10" r="1.8" />
                   <circle cx="5" cy="16" r="1.8" /><circle cx="11" cy="16" r="1.8" />
                 </svg></span>`
             : ''}
-          <span class="u-avatar u-avatar-lg" aria-hidden="true">${esc(monogram(app))}</span>
-          <div class="u-cardtitle">
-            <h3><span class="u-env ${env.cls}">${env.label}</span>${esc(app.name)}${version}${pending}</h3>
-            ${statusHtml(app)}
+          <span class="app-icon${env.cls === 'net' ? ' icon-net' : ''}" aria-hidden="true">${esc(app.icon || '·')}</span>
+          <div class="card-title">
+            <h3><span class="env-chip ${env.cls}">${env.label}</span>${esc(app.name)}${version}${pending}</h3>
+            ${badgeHtml(app)}
           </div>
           ${reorderable
-            ? `<div class="u-cardmove">
-                <button class="u-mini" type="button" data-move="-1" data-id="${esc(app.id)}" title="上移"${idx === 0 ? ' disabled' : ''}>↑</button>
-                <button class="u-mini" type="button" data-move="1" data-id="${esc(app.id)}" title="下移"${idx === apps.length - 1 ? ' disabled' : ''}>↓</button>
+            ? `<div class="card-move">
+                <button class="mini-btn" type="button" data-move="-1" data-id="${esc(app.id)}" title="上移"${idx === 0 ? ' disabled' : ''}>↑</button>
+                <button class="mini-btn" type="button" data-move="1" data-id="${esc(app.id)}" title="下移"${idx === apps.length - 1 ? ' disabled' : ''}>↓</button>
               </div>`
             : ''}
         </header>
 
-        <p class="u-carddesc">${esc(app.description)}</p>
+        <p class="card-desc">${esc(app.description)}</p>
 
-        <dl class="u-facts">
-          <div class="u-fact">
-            <dt>访问</dt>
-            <dd>${portCellHtml(app)}</dd>
+        <div class="card-facts">
+          <div class="fact">
+            <span class="fact-label">访问</span>
+            <span>${portCellHtml(app)}</span>
           </div>
-          <div class="u-fact">
-            <dt>${app.remote ? '位置' : '目录'}</dt>
-            <dd>${dirCellHtml(app)}</dd>
+          <div class="fact">
+            <span class="fact-label">${app.remote ? '位置' : '目录'}</span>
+            <span>${dirCellHtml(app)}</span>
           </div>
-          <div class="u-fact">
-            <dt>技术栈</dt>
-            <dd><span class="u-stack"${attr('title', stackTitle(app))}>${esc(stackText(app)) || '—'}</span></dd>
+          <div class="fact">
+            <span class="fact-label">技术栈</span>
+            <span class="stack-text"${attr('title', stackTitle(app))}>${esc(stackText(app)) || '—'}</span>
           </div>
-          <div class="u-fact">
-            <dt>同步</dt>
-            <dd>${gitCellHtml(app)}</dd>
+          <div class="fact">
+            <span class="fact-label">同步</span>
+            <span>${gitCellHtml(app)}</span>
           </div>
-          <div class="u-fact">
-            <dt>源码</dt>
-            <dd>${app.github
-              ? `<a class="u-gh" href="${esc(app.github)}" target="_blank" rel="noopener">${esc(ghShort)} ↗</a>`
-              : '<span class="u-none">—</span>'}</dd>
+          <div class="fact">
+            <span class="fact-label">源码</span>
+            <span>${app.github
+              ? `<a href="${esc(app.github)}" target="_blank" rel="noopener">${esc(ghShort)} ↗</a>`
+              : '<span class="text-muted">—</span>'}</span>
           </div>
-        </dl>
+        </div>
 
-        ${kinds ? `<footer class="u-cardtags">${kinds}</footer>` : ''}
+        ${kinds ? `<footer class="card-tags">${kinds}</footer>` : ''}
       </article>`
     }).join('')
 
-    return `<div class="u-cardgrid">${cards}</div>`
+    return `<div class="card-grid">${cards}</div>`
   }
 
   /* ---------- 渲染：内容区 ---------- */
@@ -550,26 +531,27 @@
     const box = $('#u-content')
 
     if (state.loading) {
-      box.innerHTML = `<div class="u-placeholder" aria-busy="true">
-        <div class="u-skeleton"></div><div class="u-skeleton"></div><div class="u-skeleton"></div>
+      box.innerHTML = `<div class="placeholder" aria-busy="true">
+        <div class="skeleton-row" style="max-width: 720px; margin-left: auto; margin-right: auto"></div>
+        <div class="skeleton-row" style="max-width: 720px; margin-left: auto; margin-right: auto"></div>
+        <div class="skeleton-row" style="max-width: 720px; margin-left: auto; margin-right: auto"></div>
       </div>`
       return
     }
     if (state.loadError) {
-      box.innerHTML = `<div class="u-placeholder"><p>${esc(state.loadError)}</p>
-        <button class="u-retry" type="button" data-retry>重试</button></div>`
+      box.innerHTML = `<div class="placeholder"><p>${esc(state.loadError)}</p>
+        <button class="icon-btn" style="width: auto; padding: 0 16px" data-retry>重试</button></div>`
       return
     }
     const apps = displayApps()
     if (!apps.length) {
-      box.innerHTML = '<p class="u-placeholder">还没有应用，请检查 apps.json</p>'
+      box.innerHTML = '<p class="placeholder">还没有应用，请检查 apps.json</p>'
       return
     }
     box.innerHTML = state.view === 'table' ? renderTable(apps) : renderCards(apps)
   }
 
   function render() {
-    renderRack()
     renderContent()
 
     // 工具栏状态
@@ -579,8 +561,8 @@
     $('#u-dirBtn').title = state.sortDir === 1 ? '正序（点击切换倒序）' : '倒序（点击切换正序）'
     $('#u-resetBtn').hidden = !(state.sortKey === 'default' && state.customOrder.length)
 
-    document.querySelectorAll('.u-segmented button').forEach((b) => {
-      b.classList.toggle('on', b.dataset.view === state.view)
+    document.querySelectorAll('.segmented button').forEach((b) => {
+      b.classList.toggle('active', b.dataset.view === state.view)
     })
   }
 
@@ -589,19 +571,19 @@
 
   content.addEventListener('click', (e) => {
     // 表头排序
-    const th = e.target.closest('th.u-sortable')
+    const th = e.target.closest('th.sortable')
     if (th) {
       setSort(th.dataset.sort)
       return
     }
     // 卡片上移 / 下移
-    const mini = e.target.closest('.u-mini[data-move]')
+    const mini = e.target.closest('.mini-btn[data-move]')
     if (mini && !mini.disabled) {
       moveApp(mini.dataset.id, Number(mini.dataset.move))
       return
     }
     // 复制目录
-    const dir = e.target.closest('.u-dir[data-copy]')
+    const dir = e.target.closest('.dir[data-copy]')
     if (dir) {
       copyText(dir.dataset.copy).then((ok) => {
         if (!ok) return
@@ -620,16 +602,16 @@
   })
 
   content.addEventListener('dragstart', (e) => {
-    const grip = e.target.closest('.u-grip')
+    const grip = e.target.closest('.grip')
     if (!grip) return
     const row = grip.closest('tr')
-    const card = grip.closest('.u-card')
+    const card = grip.closest('.card')
     if (row) {
       state.dragId = row.dataset.id
-      row.classList.add('u-dragging')
+      row.classList.add('dragging')
     } else if (card) {
       state.dragIdx = Number(card.dataset.idx)
-      card.classList.add('u-dragging')
+      card.classList.add('dragging')
     }
     if (e.dataTransfer) {
       e.dataTransfer.effectAllowed = 'move'
@@ -642,7 +624,7 @@
   content.addEventListener('dragend', () => {
     state.dragId = ''
     state.dragIdx = -1
-    content.querySelectorAll('.u-dragging').forEach((el) => el.classList.remove('u-dragging'))
+    content.querySelectorAll('.dragging').forEach((el) => el.classList.remove('dragging'))
   })
 
   content.addEventListener('dragover', (e) => {
@@ -654,13 +636,13 @@
       const row = e.target.closest('tr[data-id]')
       const from = state.dragId
       state.dragId = ''
-      content.querySelectorAll('.u-dragging').forEach((el) => el.classList.remove('u-dragging'))
+      content.querySelectorAll('.dragging').forEach((el) => el.classList.remove('dragging'))
       if (row && row.dataset.id !== from) onDropRow(from, row.dataset.id)
     } else if (state.dragIdx >= 0) {
-      const card = e.target.closest('.u-card')
+      const card = e.target.closest('.card')
       const from = state.dragIdx
       state.dragIdx = -1
-      content.querySelectorAll('.u-dragging').forEach((el) => el.classList.remove('u-dragging'))
+      content.querySelectorAll('.dragging').forEach((el) => el.classList.remove('dragging'))
       if (card) onDropCard(from, Number(card.dataset.idx))
     }
   })
@@ -685,7 +667,7 @@
     render()
   })
 
-  document.querySelectorAll('.u-segmented button').forEach((btn) => {
+  document.querySelectorAll('.segmented button').forEach((btn) => {
     btn.addEventListener('click', () => {
       state.view = btn.dataset.view
       state.viewPicked = true
@@ -722,7 +704,7 @@
     const btn = $('#u-sync')
     const errEl = $('#u-syncError')
     btn.disabled = true
-    btn.classList.add('u-syncing')
+    btn.classList.add('syncing')
     $('#u-syncText').textContent = '同步中…'
     errEl.hidden = true
     try {
@@ -743,7 +725,7 @@
     } finally {
       state.syncing = false
       btn.disabled = false
-      btn.classList.remove('u-syncing')
+      btn.classList.remove('syncing')
       $('#u-syncText').textContent = '立刻同步'
     }
   })

@@ -377,13 +377,14 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 ### 8.6 独立设计对比端点（`unslop/`，访问 `/unslop/`）
 
-主站首页的**重设计对比版本**（unslop 流程产出，视觉方向「机房仪表盘」），与 `/` 并存以便对比；旧主页完全未动。2026-11-06 生成。
+主站首页的**净化对比版**：在旧页面视觉的基础上只做轻度优化（v2，2026-11-06）。首版曾按「机房仪表盘」重新设计（机架面板/首字字块/mono 键帽），用户反馈「还没有原来的好看，在旧页面的基础上优化即可」后重写为 v2 —— **视觉 1:1 移植主站**（`src/style.css` 全套变量与组件、`AppTable.vue`/`AppCard.vue` 的 scoped 样式原样并入，emoji 图标、彩色 chips、行色条、hero 统计胶囊全部保留），旧主页完全未动。
 
-- 形态：与 `glass/` 同模式的独立静态页（`unslop/index.html` + `assets/app.css` + `assets/app.js`），纯 HTML/CSS/JS、零依赖、不参与 Vite 构建；类名前缀 `u-`，存储键 `unslop:appOrder` / `unslop:theme`。
-- 功能与主站对齐：同一份 `apps.json`（60s 轮询 + 回前台刷新）、表格/卡片双视图（≤760px 默认卡片）、表头/下拉排序 + 正倒序、手柄拖拽手动排序 + ↺ 重置、目录点击复制（含 execCommand 回退，http 局域网必需）、立刻同步（POST `/api/probe` + `startedAt` 轮询）。**设置入口链接回主站 `/`**（沿用 glass 先例，本端点只读）。
-- 与主站的视觉差异（对比要点）：emoji 图标 → 名称首字字块；彩色胶囊（环境/形式/端口/同步/状态）→ 小色点 + 中性 hairline chip + **mono 端口键帽**；行/卡左边色条移除；表头 sentence case 左对齐（原为大写居中）；hero 统计胶囊 → **机架面板**（深色仪表条：每应用一格状态灯 + 端口 + 名称，可点击直达，头部为 mono 统计行）——页面上唯一的丰富元素；主按钮「立刻同步」为墨色填充（浅色）/反白（深色）；单一 easing `cubic-bezier(.22,1,.36,1)`，动效只过渡 color/background/border/opacity/transform。
-- 维护：改 `unslop/**` 刷新即生效；**`apps.json` 字段结构变化时需同步改 `unslop/assets/app.js`**（它复制了 `src/lib/app-utils.js` 的加工逻辑，两处并存）。确认采用新版后把实现迁回 `src/` 重新构建，下线本端点。
+- 形态：与 `glass/` 同模式的独立静态页（`unslop/index.html` + `assets/app.css` + `assets/app.js`），纯 HTML/CSS/JS、零依赖、不参与 Vite 构建；类名与主站相同（`topbar/hero/stat-chip/app-table/card…`，无前缀，便于 diff），存储键 `unslop:appOrder` / `unslop:theme`。
+- **与主站的全部差异（仅 4 处，写在 app.css 头部注释里）**：① 表头去掉 `uppercase + letter-spacing`（GITHUB → GitHub，仍居中）；② 所有 `transition: all` 改为枚举属性；③ `.hero h1` 字重 700 → 600；④ 补 `:focus-visible` 焦点环、`[hidden]{display:none!important}` 兜底、`prefers-reduced-motion` 降级。
+- 功能与主站对齐：同一份 `apps.json`（60s 轮询 + 回前台刷新）、表格/卡片双视图（≤760px 默认卡片）、表头/下拉排序 + 正倒序、手柄拖拽手动排序 + ↺ 重置、目录点击复制（含 execCommand 回退，http 局域网必需）、立刻同步（POST `/api/probe` + `startedAt` 轮询）、深浅主题。**设置入口链接回主站 `/`**（沿用 glass 先例，本端点只读）。页脚无「Powered by Vue」（静态页非 Vue）。
+- 维护：改 `unslop/**` 刷新即生效；**主站视觉/`apps.json` 字段结构变化时需同步 `unslop/assets/app.js` 与 `app.css`**（加工逻辑复制自 `src/lib/app-utils.js`，两处并存）。若决定采纳某处优化，把对应改动搬回 `src/` 重新构建即可；确认弃用后删除目录并撤销两处 nginx location。
 - nginx：`/unslop` → 301 → `/unslop/`，两处 server 块各一个 location（`root /root/applications/my-homepage` + `try_files … /unslop/index.html` + no-cache），备份 `*.bak-unslop-20261106`。
+- 踩坑：Vue 模板习惯的自闭合 `<div />` 在原生 HTML 里是**未闭合标签**，曾把 footer 吞进 `#u-content` 内部，首次 `innerHTML` 渲染将其销毁、`renderPageText` 抛错中断整个渲染（见踩坑 #11）。
 
 ---
 
@@ -501,6 +502,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 10. **`hidden` 属性会被组件的 `display` 规则顶掉**
    给带 `display: inline-flex` 的元素加 `hidden` 不会隐藏它（作者样式 > UA 样式的 `[hidden]{display:none}`）。`unslop/assets/app.css` 顶部用 `[hidden]{display:none!important}` 兜底；Vue 组件里则用 `v-if` 或显式 class 切换。
 
+11. **原生 HTML 不支持自闭合 `<div />`**
+   从 Vue 模板搬静态 HTML 时，`<div class="skeleton-row" />` 在浏览器解析里是**未闭合的开始标签**，会把后续兄弟内容全部吞为其子元素——曾把 footer 吞进 `#u-content`，首次 `innerHTML` 渲染将其销毁、`renderPageText` 因找不到 `#u-copy` 抛错、整个页面渲染中断。静态 HTML 里必须写全 `</div>`。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
@@ -520,7 +524,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 拖拽仅手柄触发 | 用户反馈点击卡片会触发拖拽 |
 | 内网蓝 / 公网橙 | 用户要求「内网和公网区分明显，可用颜色」 |
 | 3 行简介 + 固定行高 | 用户要求「简介过长换行、每行高度一致」；超 3 行截断（悬停看全文）是行高一致的必要代价 |
-| `/unslop/` 设计对比端点（2026-11-06） | 用户要求「unslop 主页，生成新端点、保留旧的对比」；按 glass/ 先例做独立静态页，零构建、零风险，旧主页一字未动 |
+| `/unslop/` 设计对比端点（2026-11-06） | 用户要求「unslop 主页，生成新端点、保留旧的对比」；按 glass/ 先例做独立静态页，零构建、零风险，旧主页一字未动。首版「机房仪表盘」方向被用户否掉（「还没有原来的好看」），v2 改为主站视觉 1:1 移植 + 仅 4 处净化修正 |
 
 ---
 
