@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -13,6 +13,22 @@ const error = ref('')
 const form = ref({ apps: [], remoteApps: [], page: {} })
 const existingIds = ref(new Set())
 const detectedApps = ref(new Map())
+
+/** 当前正在编辑的条目：null 或 { list: 'apps' | 'remoteApps', index } */
+const editing = ref(null)
+const editingApp = computed(() => {
+  if (!editing.value) return null
+  return form.value[editing.value.list]?.[editing.value.index] ?? null
+})
+const editingIsRemote = computed(() => editing.value?.list === 'remoteApps')
+
+function openEditor(list, index) {
+  editing.value = { list, index }
+}
+
+function closeEditor() {
+  editing.value = null
+}
 
 const KIND_OPTIONS = [
   { value: 'web', label: 'Web' },
@@ -90,6 +106,33 @@ function toggleKind(a, value, checked) {
   a.kinds = KIND_OPTIONS.map((o) => o.value).filter((v) => set.has(v))
 }
 
+/** 列表行的摘要文案：应用形式 · 部署位置 · 端口/主机 */
+function kindLabels(a) {
+  return (a.kinds ?? []).map((k) => KIND_OPTIONS.find((o) => o.value === k)?.label).filter(Boolean)
+}
+
+function healthHost(a) {
+  if (a.host) return a.host
+  try {
+    return new URL(a.healthUrl).host
+  } catch {
+    return ''
+  }
+}
+
+function rowMeta(a, isRemote) {
+  const parts = [...kindLabels(a), a.env === 'public' ? '公网' : '内网']
+  if (isRemote) {
+    const host = healthHost(a)
+    if (host) parts.push(host)
+  } else {
+    const p = Number(a.expectedPort)
+    if (a.expectedPort != null && a.expectedPort !== '' && !Number.isNaN(p)) parts.push(`:${p}`)
+    if (a.https) parts.push('HTTPS')
+  }
+  return parts.join(' · ')
+}
+
 /** 当前探测到的实际端口（来自 apps.json） */
 function detectedPort(a) {
   const port = detectedApps.value.get(a.id)?.port
@@ -111,6 +154,7 @@ async function load() {
   loading.value = true
   error.value = ''
   savedOk.value = false
+  editing.value = null
   try {
     const res = await fetch('/api/config', { cache: 'no-store' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
@@ -151,14 +195,25 @@ function setTags(a, ev) {
 
 function addLocal() {
   form.value.apps.push({ id: '', name: '', description: '', directory: '', expectedPort: null, kinds: ['web'], env: 'lan', https: false, languages: [], frontend: [], backend: [], github: '', tags: [], icon: '📦' })
+  openEditor('apps', form.value.apps.length - 1)
 }
 
 function addRemote() {
   form.value.remoteApps.push({ id: '', name: '', description: '', healthUrl: '', url: '', location: '阿里云', host: '', kinds: ['web'], env: 'public', languages: [], frontend: [], backend: [], github: '', tags: [], icon: '☁️' })
+  openEditor('remoteApps', form.value.remoteApps.length - 1)
 }
 
 function removeApp(list, i) {
-  if (window.confirm('确定删除该条目？保存后生效。')) list.splice(i, 1)
+  if (window.confirm('确定删除该条目？保存后生效。')) {
+    list.splice(i, 1)
+    return true
+  }
+  return false
+}
+
+function removeEditing() {
+  if (!editing.value) return
+  if (removeApp(form.value[editing.value.list], editing.value.index)) closeEditor()
 }
 
 async function save() {
@@ -214,150 +269,63 @@ async function save() {
             </div>
           </section>
 
-          <!-- 本机应用 -->
+          <!-- 本机应用：列表 + 点击弹窗编辑 -->
           <section>
             <h3>
-              本机应用
+              本机应用（{{ form.apps.length }}）
               <button class="mini-btn add-btn" @click="addLocal">＋ 添加</button>
             </h3>
-            <fieldset v-for="(a, i) in form.apps" :key="i" class="app-edit">
-              <div class="app-edit-head">
-                <span class="app-edit-title">
-                  <span class="app-edit-icon">{{ a.icon }}</span>
-                  <b>{{ a.name || a.id || '未命名应用' }}</b>
-                  <small class="mono">{{ a.id || '（新应用）' }}</small>
-                  <span v-if="a.exclude" class="tag warn" title="已勾选「在主页隐藏」">已隐藏</span>
+            <div class="app-list">
+              <button
+                v-for="(a, i) in form.apps"
+                :key="i"
+                type="button"
+                class="app-row"
+                @click="openEditor('apps', i)"
+              >
+                <span class="app-row-icon">{{ a.icon }}</span>
+                <span class="app-row-main">
+                  <span class="app-row-name">
+                    {{ a.name || a.id || '未命名应用' }}
+                    <small class="mono">{{ a.id || '（新应用）' }}</small>
+                  </span>
+                  <span class="app-row-meta">{{ rowMeta(a, false) }}</span>
                 </span>
-                <button class="del-btn" @click="removeApp(form.apps, i)">删除</button>
-              </div>
-              <div class="grid3">
-                <label class="fld">
-                  <span>id{{ existingIds.has(a.id) ? '（不可改）' : '' }}</span>
-                  <input v-model="a.id" :readonly="existingIds.has(a.id)" placeholder="目录名" />
-                </label>
-                <label class="fld"><span>图标 emoji</span><input v-model="a.icon" /></label>
-                <div class="fld">
-                  <span>期望端口 <small v-if="detectedPort(a)" class="port-hint">当前探测 :{{ detectedPort(a) }}</small></span>
-                  <div class="port-row">
-                    <input v-model="a.expectedPort" inputmode="numeric" placeholder="如 3000" />
-                    <button
-                      v-if="canAdoptPort(a)"
-                      type="button"
-                      class="use-port"
-                      title="把实际探测端口写入期望端口"
-                      @click="adoptPort(a)"
-                    >
-                      采用
-                    </button>
-                  </div>
-                </div>
-              </div>
-              <div class="grid2">
-                <label class="fld"><span>名称</span><input v-model="a.name" /></label>
-                <label class="fld"><span>标签（逗号分隔）</span><input :value="tagsText(a)" @input="setTags(a, $event)" /></label>
-              </div>
-              <label class="fld"><span>服务器目录</span><input v-model="a.directory" class="mono" /></label>
-              <label class="fld"><span>GitHub 地址</span><input v-model="a.github" placeholder="https://github.com/…" /></label>
-              <div class="grid3">
-                <label class="fld"><span>主要语言（逗号分隔）</span><input :value="listText(a.languages)" :placeholder="stackPlaceholder(a, 'languages') || '如 Python, JavaScript'" @input="setList(a, 'languages', $event)" /></label>
-                <label class="fld"><span>前端框架</span><input :value="listText(a.frontend)" :placeholder="stackPlaceholder(a, 'frontend') || '如 Vue 3 + Vite'" @input="setList(a, 'frontend', $event)" /></label>
-                <label class="fld"><span>后端框架</span><input :value="listText(a.backend)" :placeholder="stackPlaceholder(a, 'backend') || '如 FastAPI'" @input="setList(a, 'backend', $event)" /></label>
-              </div>
-              <span class="stack-note">自动识别：{{ detectedStackText(a) || '未识别' }}（留空使用自动结果，填写后覆盖）</span>
-              <label class="fld"><span>简介</span><textarea v-model="a.description" rows="2" /></label>
-              <div class="app-edit-foot">
-                <span class="chk-group">
-                  <span class="foot-label">应用形式</span>
-                  <label v-for="k in KIND_OPTIONS" :key="k.value" class="chk">
-                    <input
-                      type="checkbox"
-                      :checked="hasKind(a, k.value)"
-                      @change="toggleKind(a, k.value, $event.target.checked)"
-                    />
-                    {{ k.label }}
-                  </label>
-                  <span class="foot-note">未勾选 Web = 离线应用，不探测端口</span>
-                </span>
-                <label class="env-fld">
-                  <span>部署位置</span>
-                  <select v-model="a.env">
-                    <option value="lan">内网</option>
-                    <option value="public">公网</option>
-                  </select>
-                </label>
-              </div>
-              <div class="app-edit-foot">
-                <span class="chk-group">
-                  <label class="chk" title="访问链接使用 https://（自签名证书会触发浏览器警告）">
-                    <input v-model="a.https" type="checkbox" /> 使用 HTTPS
-                  </label>
-                  <label class="chk"><input v-model="a.exclude" type="checkbox" /> 在主页隐藏（exclude）</label>
-                </span>
-              </div>
-            </fieldset>
+                <span v-if="!a.id" class="tag">新</span>
+                <span v-else-if="a.exclude" class="tag warn" title="已勾选「在主页隐藏」">已隐藏</span>
+                <span class="app-row-arrow">›</span>
+              </button>
+            </div>
+            <p class="list-hint">点击应用条目编辑详情</p>
           </section>
 
-          <!-- 云服务器应用 -->
+          <!-- 云服务器应用：列表 + 点击弹窗编辑 -->
           <section>
             <h3>
-              云服务器应用（远程探查）
+              云服务器应用（{{ form.remoteApps.length }}）
               <button class="mini-btn add-btn" @click="addRemote">＋ 添加</button>
             </h3>
-            <fieldset v-for="(a, i) in form.remoteApps" :key="i" class="app-edit">
-              <div class="app-edit-head">
-                <span class="app-edit-title">
-                  <span class="app-edit-icon">{{ a.icon }}</span>
-                  <b>{{ a.name || a.id || '未命名应用' }}</b>
-                  <small class="mono">{{ a.id || '（新应用）' }}</small>
+            <div class="app-list">
+              <button
+                v-for="(a, i) in form.remoteApps"
+                :key="i"
+                type="button"
+                class="app-row"
+                @click="openEditor('remoteApps', i)"
+              >
+                <span class="app-row-icon">{{ a.icon }}</span>
+                <span class="app-row-main">
+                  <span class="app-row-name">
+                    {{ a.name || a.id || '未命名应用' }}
+                    <small class="mono">{{ a.id || '（新应用）' }}</small>
+                  </span>
+                  <span class="app-row-meta">{{ rowMeta(a, true) }}</span>
                 </span>
-                <button class="del-btn" @click="removeApp(form.remoteApps, i)">删除</button>
-              </div>
-              <div class="grid3">
-                <label class="fld">
-                  <span>id{{ existingIds.has(a.id) ? '（不可改）' : '' }}</span>
-                  <input v-model="a.id" :readonly="existingIds.has(a.id)" />
-                </label>
-                <label class="fld"><span>图标 emoji</span><input v-model="a.icon" /></label>
-                <label class="fld"><span>位置</span><input v-model="a.location" placeholder="阿里云" /></label>
-              </div>
-              <div class="grid2">
-                <label class="fld"><span>名称</span><input v-model="a.name" /></label>
-                <label class="fld"><span>主机 IP / 域名</span><input v-model="a.host" class="mono" /></label>
-              </div>
-              <label class="fld"><span>健康接口 URL（必填）</span><input v-model="a.healthUrl" class="mono" placeholder="http://…/api/v1/health" /></label>
-              <label class="fld"><span>访问页面 URL（可选，默认取健康接口同源）</span><input v-model="a.url" class="mono" /></label>
-              <div class="grid2">
-                <label class="fld"><span>GitHub 地址</span><input v-model="a.github" /></label>
-                <label class="fld"><span>标签（逗号分隔）</span><input :value="tagsText(a)" @input="setTags(a, $event)" /></label>
-              </div>
-              <div class="grid3">
-                <label class="fld"><span>主要语言（逗号分隔）</span><input :value="listText(a.languages)" placeholder="如 JavaScript, Node.js" @input="setList(a, 'languages', $event)" /></label>
-                <label class="fld"><span>前端框架</span><input :value="listText(a.frontend)" placeholder="如 Vue 3" @input="setList(a, 'frontend', $event)" /></label>
-                <label class="fld"><span>后端框架</span><input :value="listText(a.backend)" placeholder="如 Fastify" @input="setList(a, 'backend', $event)" /></label>
-              </div>
-              <span class="stack-note">远程应用不在本机目录，技术栈需手动填写。</span>
-              <label class="fld"><span>简介</span><textarea v-model="a.description" rows="2" /></label>
-              <div class="app-edit-foot">
-                <span class="chk-group">
-                  <span class="foot-label">应用形式</span>
-                  <label v-for="k in KIND_OPTIONS" :key="k.value" class="chk">
-                    <input
-                      type="checkbox"
-                      :checked="hasKind(a, k.value)"
-                      @change="toggleKind(a, k.value, $event.target.checked)"
-                    />
-                    {{ k.label }}
-                  </label>
-                </span>
-                <label class="env-fld">
-                  <span>部署位置</span>
-                  <select v-model="a.env">
-                    <option value="lan">内网</option>
-                    <option value="public">公网</option>
-                  </select>
-                </label>
-              </div>
-            </fieldset>
+                <span v-if="!a.id" class="tag">新</span>
+                <span class="app-row-arrow">›</span>
+              </button>
+            </div>
+            <p class="list-hint">点击应用条目编辑详情</p>
           </section>
         </div>
 
@@ -368,6 +336,147 @@ async function save() {
           <div class="foot-actions">
             <button class="mini-btn" :disabled="saving" @click="emit('close')">取消</button>
             <button class="primary-btn" :disabled="saving || loading" @click="save">{{ saving ? '保存中…' : '保存' }}</button>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <!-- 单个应用的编辑弹窗（嵌套在设置面板之上） -->
+    <div v-if="open && editingApp" class="editor-overlay" @click.self="closeEditor">
+      <div class="editor-panel" role="dialog" :aria-label="`编辑 ${editingApp.name || editingApp.id || '应用'}`">
+        <header class="settings-head">
+          <h2 class="editor-title">
+            <span class="app-edit-icon">{{ editingApp.icon }}</span>
+            {{ editingApp.name || editingApp.id || '未命名应用' }}
+            <small class="mono">{{ editingApp.id || '（新应用）' }}</small>
+          </h2>
+          <button class="icon-btn" title="关闭" @click="closeEditor">✕</button>
+        </header>
+
+        <div class="settings-body editor-body">
+          <!-- 本机应用编辑 -->
+          <template v-if="!editingIsRemote">
+            <div class="grid3">
+              <label class="fld">
+                <span>id{{ existingIds.has(editingApp.id) ? '（不可改）' : '' }}</span>
+                <input v-model="editingApp.id" :readonly="existingIds.has(editingApp.id)" placeholder="目录名" />
+              </label>
+              <label class="fld"><span>图标 emoji</span><input v-model="editingApp.icon" /></label>
+              <div class="fld">
+                <span>期望端口 <small v-if="detectedPort(editingApp)" class="port-hint">当前探测 :{{ detectedPort(editingApp) }}</small></span>
+                <div class="port-row">
+                  <input v-model="editingApp.expectedPort" inputmode="numeric" placeholder="如 3000" />
+                  <button
+                    v-if="canAdoptPort(editingApp)"
+                    type="button"
+                    class="use-port"
+                    title="把实际探测端口写入期望端口"
+                    @click="adoptPort(editingApp)"
+                  >
+                    采用
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="grid2">
+              <label class="fld"><span>名称</span><input v-model="editingApp.name" /></label>
+              <label class="fld"><span>标签（逗号分隔）</span><input :value="tagsText(editingApp)" @input="setTags(editingApp, $event)" /></label>
+            </div>
+            <label class="fld"><span>服务器目录</span><input v-model="editingApp.directory" class="mono" /></label>
+            <label class="fld"><span>GitHub 地址</span><input v-model="editingApp.github" placeholder="https://github.com/…" /></label>
+            <div class="grid3">
+              <label class="fld"><span>主要语言（逗号分隔）</span><input :value="listText(editingApp.languages)" :placeholder="stackPlaceholder(editingApp, 'languages') || '如 Python, JavaScript'" @input="setList(editingApp, 'languages', $event)" /></label>
+              <label class="fld"><span>前端框架</span><input :value="listText(editingApp.frontend)" :placeholder="stackPlaceholder(editingApp, 'frontend') || '如 Vue 3 + Vite'" @input="setList(editingApp, 'frontend', $event)" /></label>
+              <label class="fld"><span>后端框架</span><input :value="listText(editingApp.backend)" :placeholder="stackPlaceholder(editingApp, 'backend') || '如 FastAPI'" @input="setList(editingApp, 'backend', $event)" /></label>
+            </div>
+            <span class="stack-note">自动识别：{{ detectedStackText(editingApp) || '未识别' }}（留空使用自动结果，填写后覆盖）</span>
+            <label class="fld"><span>简介</span><textarea v-model="editingApp.description" rows="2" /></label>
+            <div class="app-edit-foot">
+              <span class="chk-group">
+                <span class="foot-label">应用形式</span>
+                <label v-for="k in KIND_OPTIONS" :key="k.value" class="chk">
+                  <input
+                    type="checkbox"
+                    :checked="hasKind(editingApp, k.value)"
+                    @change="toggleKind(editingApp, k.value, $event.target.checked)"
+                  />
+                  {{ k.label }}
+                </label>
+                <span class="foot-note">未勾选 Web = 离线应用，不探测端口</span>
+              </span>
+              <label class="env-fld">
+                <span>部署位置</span>
+                <select v-model="editingApp.env">
+                  <option value="lan">内网</option>
+                  <option value="public">公网</option>
+                </select>
+              </label>
+            </div>
+            <div class="app-edit-foot">
+              <span class="chk-group">
+                <label class="chk" title="访问链接使用 https://（自签名证书会触发浏览器警告）">
+                  <input v-model="editingApp.https" type="checkbox" /> 使用 HTTPS
+                </label>
+                <label class="chk"><input v-model="editingApp.exclude" type="checkbox" /> 在主页隐藏（exclude）</label>
+              </span>
+            </div>
+          </template>
+
+          <!-- 云服务器应用编辑 -->
+          <template v-else>
+            <div class="grid3">
+              <label class="fld">
+                <span>id{{ existingIds.has(editingApp.id) ? '（不可改）' : '' }}</span>
+                <input v-model="editingApp.id" :readonly="existingIds.has(editingApp.id)" />
+              </label>
+              <label class="fld"><span>图标 emoji</span><input v-model="editingApp.icon" /></label>
+              <label class="fld"><span>位置</span><input v-model="editingApp.location" placeholder="阿里云" /></label>
+            </div>
+            <div class="grid2">
+              <label class="fld"><span>名称</span><input v-model="editingApp.name" /></label>
+              <label class="fld"><span>主机 IP / 域名</span><input v-model="editingApp.host" class="mono" /></label>
+            </div>
+            <label class="fld"><span>健康接口 URL（必填）</span><input v-model="editingApp.healthUrl" class="mono" placeholder="http://…/api/v1/health" /></label>
+            <label class="fld"><span>访问页面 URL（可选，默认取健康接口同源）</span><input v-model="editingApp.url" class="mono" /></label>
+            <div class="grid2">
+              <label class="fld"><span>GitHub 地址</span><input v-model="editingApp.github" /></label>
+              <label class="fld"><span>标签（逗号分隔）</span><input :value="tagsText(editingApp)" @input="setTags(editingApp, $event)" /></label>
+            </div>
+            <div class="grid3">
+              <label class="fld"><span>主要语言（逗号分隔）</span><input :value="listText(editingApp.languages)" placeholder="如 JavaScript, Node.js" @input="setList(editingApp, 'languages', $event)" /></label>
+              <label class="fld"><span>前端框架</span><input :value="listText(editingApp.frontend)" placeholder="如 Vue 3" @input="setList(editingApp, 'frontend', $event)" /></label>
+              <label class="fld"><span>后端框架</span><input :value="listText(editingApp.backend)" placeholder="如 Fastify" @input="setList(editingApp, 'backend', $event)" /></label>
+            </div>
+            <span class="stack-note">远程应用不在本机目录，技术栈需手动填写。</span>
+            <label class="fld"><span>简介</span><textarea v-model="editingApp.description" rows="2" /></label>
+            <div class="app-edit-foot">
+              <span class="chk-group">
+                <span class="foot-label">应用形式</span>
+                <label v-for="k in KIND_OPTIONS" :key="k.value" class="chk">
+                  <input
+                    type="checkbox"
+                    :checked="hasKind(editingApp, k.value)"
+                    @change="toggleKind(editingApp, k.value, $event.target.checked)"
+                  />
+                  {{ k.label }}
+                </label>
+              </span>
+              <label class="env-fld">
+                <span>部署位置</span>
+                <select v-model="editingApp.env">
+                  <option value="lan">内网</option>
+                  <option value="public">公网</option>
+                </select>
+              </label>
+            </div>
+          </template>
+        </div>
+
+        <footer class="settings-foot">
+          <button class="del-btn" @click="removeEditing">删除此条目</button>
+          <span class="hint">修改先存于草稿，点设置面板底部「保存」后写入</span>
+          <div class="foot-actions">
+            <button class="mini-btn" @click="closeEditor">完成</button>
           </div>
         </footer>
       </div>
@@ -388,6 +497,18 @@ async function save() {
   padding: 24px;
 }
 
+.editor-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  background: rgb(0 0 0 / 0.45);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
 .settings-panel {
   background: var(--bg);
   border: 1px solid var(--border);
@@ -399,10 +520,22 @@ async function save() {
   box-shadow: var(--shadow-hover);
 }
 
+.editor-panel {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  width: min(760px, 100%);
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: var(--shadow-hover);
+}
+
 .settings-head {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 10px;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
 }
@@ -412,9 +545,34 @@ async function save() {
   font-size: 16px;
 }
 
+.editor-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.editor-title small {
+  color: var(--text-2);
+  font-weight: 400;
+  font-size: 12.5px;
+}
+
+.app-edit-icon {
+  font-size: 17px;
+}
+
 .settings-body {
   overflow-y: auto;
   padding: 6px 20px 16px;
+}
+
+.editor-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-top: 14px;
 }
 
 .settings-tip {
@@ -436,44 +594,83 @@ section h3 {
   gap: 10px;
 }
 
-.app-edit {
-  border: 1px solid var(--border-strong);
-  border-left: 3px solid var(--accent);
-  border-radius: 10px;
-  padding: 12px 16px 14px;
-  margin: 0 0 20px;
+/* 应用列表（紧凑行，点击弹窗编辑） */
+.app-list {
   display: flex;
   flex-direction: column;
-  gap: 12px;
-  background: var(--bg-soft);
-  box-shadow: var(--shadow);
+  gap: 8px;
 }
 
-.app-edit-head {
+.app-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 10px;
-  padding-bottom: 10px;
-  margin-bottom: 2px;
-  border-bottom: 1px solid var(--border);
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  color: var(--text);
+  padding: 9px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
-.app-edit-title {
-  display: inline-flex;
-  align-items: center;
+.app-row:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.app-row-icon {
+  flex: none;
+  font-size: 16px;
+}
+
+.app-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.app-row-name {
+  font-size: 13.5px;
+  font-weight: 600;
+  display: flex;
+  align-items: baseline;
   gap: 8px;
-  font-size: 14.5px;
   min-width: 0;
 }
 
-.app-edit-title small {
+.app-row-name small {
   color: var(--text-2);
   font-weight: 400;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
-.app-edit-icon {
-  font-size: 17px;
+.app-row-meta {
+  font-size: 12px;
+  color: var(--text-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.app-row-arrow {
+  flex: none;
+  color: var(--text-2);
+  font-size: 16px;
+}
+
+.list-hint {
+  margin: 8px 0 0;
+  font-size: 12px;
+  color: var(--gray);
 }
 
 .grid2 {
@@ -617,6 +814,35 @@ section h3 {
   border-color: var(--accent);
 }
 
+/* 文字型小按钮（＋添加 / 取消 / 完成） */
+.mini-btn {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-2);
+  border-radius: 8px;
+  padding: 6px 14px;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.mini-btn:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.mini-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.add-btn {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: transparent;
+}
+
 .del-btn {
   border: 1px solid var(--border);
   background: transparent;
@@ -630,12 +856,6 @@ section h3 {
 .del-btn:hover {
   border-color: var(--red);
   background: var(--red-soft);
-}
-
-.add-btn {
-  background: var(--accent-soft);
-  color: var(--accent);
-  border-color: transparent;
 }
 
 .settings-foot {
@@ -657,6 +877,7 @@ section h3 {
 
 .settings-foot .hint {
   color: var(--text-2);
+  font-size: 12.5px;
 }
 
 .foot-actions {
@@ -687,8 +908,13 @@ section h3 {
     grid-template-columns: 1fr;
   }
 
-  .settings-overlay {
+  .settings-overlay,
+  .editor-overlay {
     padding: 8px;
+  }
+
+  .settings-foot .hint {
+    display: none;
   }
 }
 </style>
