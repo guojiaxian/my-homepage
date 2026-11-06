@@ -374,7 +374,7 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 - 视觉：环境层径向渐变光斑 + 噪点颗粒，表格/卡片/顶栏用 `backdrop-filter: blur(22px) saturate(165%)`、半透明渐变、内高光与多层阴影；含浅色 / 深色主题。
 - 响应式：≤760px 默认卡片视图（与主站一致），表格横向滚动，≤760px 模糊半径降至 16px；`prefers-reduced-motion` 下关闭光斑漂移与入场动效；不支持 `backdrop-filter` 时降级为高不透明度背景。
 - 部署：`deploy.sh` 的 `rsync --delete` 只覆盖 `www/`，**不会删除 `glass/`**；nginx 在两处 server 块各加了 `/glass/` location（`root /root/applications/my-homepage` + `try_files … /glass/index.html`）。改完无需构建，刷新即生效。
-- 视觉净化（2026-11-06，unslop polish 模式，毛玻璃特质全部保留）：① 修复 `.fg-body button` 重置（特异性 0-1-1）压过单类按钮组件（0-1-0）导致**主题按钮 / 立刻同步 / 卡片↑↓ / 重试的玻璃底与边框整体失效**的问题——重置不再写 border/background，`.fg-segmented button` 自带 `border:0; background:transparent`；② 表头去 `uppercase + letter-spacing`（GITHUB → GitHub，11.5px → 12px）；③ brand mark 蓝→紫渐变 tile + 彩色 glow 改为主站同款**纯色 flat mark**；④ 分段控件选中态蓝色渐变 + 彩色 glow 改纯色；⑤ 非标准字重 650/550 统一为 600；⑥ 卡片入场动画只播一次（`state.cardEntered` + grid 级 `fg-noenter` 抑制类），修复**每 60s 轮询重建 DOM 整片重播入场动画**的闪烁。
+- 视觉净化（2026-11-06，unslop polish 模式，毛玻璃特质全部保留）：① 修复 `.fg-body button` 重置（特异性 0-1-1）压过单类按钮组件（0-1-0）导致**主题按钮 / 立刻同步 / 卡片↑↓ / 重试的玻璃底与边框整体失效**的问题——重置不再写 border/background，`.fg-segmented button` 自带 `border:0; background:transparent`；② 表头去 `uppercase + letter-spacing`（GITHUB → GitHub，11.5px → 12px）；③ brand mark 蓝→紫渐变 tile + 彩色 glow 改为主站同款**纯色 flat mark**；④ 分段控件选中态蓝色渐变 + 彩色 glow 改纯色；⑤ 非标准字重 650/550 统一为 600；⑥ 卡片入场动画只播一次（`state.cardEntered` + grid 级 `fg-noenter` 抑制类），修复**每 60s 轮询重建 DOM 整片重播入场动画**的闪烁；⑦ 用户反馈后二次调整：环境光斑**去除紫色相、全部收敛为蓝色系（科技蓝）**（`--violet`/`--indigo` 类名沿用历史位置命名，实际色值已为蓝/靛蓝），浅色 wash 渐变同步偏蓝；次级/弱文字对比度调高（`--fg-text-2` 0.64→0.8、`--fg-text-3` 0.48→0.62；dark 0.68/0.5→0.78/0.6），修复「简介等字体不黑看不清」。
 
 ### 8.6 独立设计对比端点（`unslop/`，访问 `/unslop/`）
 
