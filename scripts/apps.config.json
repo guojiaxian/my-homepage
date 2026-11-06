@@ -102,23 +102,6 @@
       "description": "新人的专属备婚工具网站：婚礼倒计时、预算规划、物品清单、筹备任务、当天流程、座位排布与宾客礼金管理，电脑 / 手机 / 平板均可使用。"
     },
     {
-      "id": "network-monitor",
-      "directory": "/root/applications/network-monitor",
-      "expectedPort": 18003,
-      "kinds": [
-        "web"
-      ],
-      "env": "lan",
-      "github": "https://github.com/guojiaxian/network-monitor",
-      "tags": [
-        "网络",
-        "告警"
-      ],
-      "icon": "🌐",
-      "name": "NetWatch 网络监控",
-      "description": "单位多出口宽带网络监控系统：面向 12 条联通宽带 × 12 个楼层子网的分流场景，监测出口线路连通性 / 网速并告警，同时覆盖外网视角的官网可达性监控。"
-    },
-    {
       "id": "jianji-ledger",
       "directory": "/root/applications/jianji-ledger",
       "expectedPort": null,
@@ -198,6 +181,32 @@
       "url": "http://47.95.140.199:3000",
       "name": "StudyLog 公网版",
       "description": "部署在阿里云服务器上的公网版 StudyLog 学习成绩记录系统，面向外网提供访问，数据与内网版本相互独立。"
+    },
+    {
+      "id": "network-monitor",
+      "healthUrl": "http://10.8.14.200/api/health",
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/network-monitor",
+      "tags": [
+        "网络",
+        "告警"
+      ],
+      "icon": "🌐",
+      "location": "内网服务器",
+      "host": "10.8.14.200",
+      "languages": [
+        "JavaScript"
+      ],
+      "frontend": [
+        "Vue 3",
+        "Vite"
+      ],
+      "url": "http://10.8.14.200",
+      "name": "NetWatch 网络监控",
+      "description": "单位多出口宽带网络监控系统（部署于内网另一台服务器 10.8.14.200）：面向 12 条联通宽带 × 12 个楼层子网的分流场景，监测出口线路连通性 / 网速并告警，同时覆盖外网视角的官网可达性监控。"
     }
   ],
   "page": {
