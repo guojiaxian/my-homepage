@@ -1123,16 +1123,27 @@
 
     return {
       activate() { if (!booted) boot(); else { startPoll(); refreshSummary() } },
-      boot, onThemeChange,
+      boot, onThemeChange, showLogin,
     }
   })()
 
-  /* ============================ 启动 ============================ */
+  /* ============================ 启动（全站登录门） ============================ */
+  // 未鉴权时登录层覆盖整个页面（应用 + 监控）；应用为公开数据照常预载，
+  // 登录成功后立即可用。网关不可达时放行，不把页面锁死。
   const startView = location.hash === '#monitor' || localStorage.getItem('gv2:view') === 'monitor' ? 'monitor' : 'apps'
-  apps.boot()
-  if (startView === 'monitor') {
-    // 直接进入监控视图（会话 Cookie 与主站共享，已登录则直接出数据）
-    switchView('monitor')
+  async function siteGate() {
+    let authed = true
+    try {
+      const r = await fetch('/api/monitor/summary', { headers: { 'X-Requested-With': 'XMLHttpRequest' }, credentials: 'same-origin' })
+      if (r.status === 401) authed = false
+    } catch { authed = true } // 网络异常放行
+    apps.boot()
+    if (!authed) {
+      monitorModule.showLogin()
+      return
+    }
+    if (startView === 'monitor') switchView('monitor')
   }
+  siteGate()
   document.addEventListener('visibilitychange', () => { if (!document.hidden) apps.refresh() })
 })()

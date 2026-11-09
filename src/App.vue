@@ -32,6 +32,49 @@ watch(topView, (v) => {
   history.replaceState(null, '', v === 'monitor' ? '#monitor' : location.pathname)
 })
 
+/* ---------- 全站登录门：未鉴权时覆盖整个主页（应用 + 监控） ----------
+   会话为一年滑动 Cookie，自己浏览器登录一次即可；
+   网关不可达（stop.sh / 502）时放行，不把主页锁死。 */
+const siteAuthed = ref(false)
+const loginPw = ref('')
+const loginErr = ref('')
+const loginBusy = ref(false)
+
+async function siteAuthCheck() {
+  try {
+    const r = await fetch('/api/monitor/summary', {
+      headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      credentials: 'same-origin',
+    })
+    siteAuthed.value = r.status !== 401
+  } catch {
+    siteAuthed.value = true // 网络异常放行
+  }
+}
+async function siteLogin() {
+  loginBusy.value = true
+  loginErr.value = ''
+  try {
+    const r = await fetch('/api/monitor/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({ password: loginPw.value }),
+      credentials: 'same-origin',
+    })
+    if (!r.ok) {
+      const d = await r.json().catch(() => ({}))
+      throw new Error(d.error || `HTTP ${r.status}`)
+    }
+    loginPw.value = ''
+    loginErr.value = ''
+    siteAuthed.value = true
+  } catch (e) {
+    loginErr.value = e.message
+  } finally {
+    loginBusy.value = false
+  }
+}
+
 /* ---------- 数据获取：apps.json 由探测器每 5 分钟生成，页面每 60 秒轮询 ---------- */
 const apps = shallowRef([])
 const probedAt = ref('')
@@ -286,6 +329,7 @@ onMounted(() => {
   applyTheme()
   applyDefaultView()
   mql.addEventListener('change', applyTheme)
+  siteAuthCheck()
   fetchApps()
   pollTimer = setInterval(() => fetchApps(true), POLL_MS)
   // 从后台切回页面时立即刷新一次
@@ -463,8 +507,25 @@ onBeforeUnmount(() => {
     </footer>
     </div>
 
-    <MonitorView :active="topView === 'monitor'" />
+    <MonitorView
+      :active="topView === 'monitor'"
+      :authed="siteAuthed"
+      @unauth="siteAuthed = false"
+    />
   </main>
+
+  <!-- 全站登录层：覆盖应用与监控两个视图 -->
+  <div v-if="!siteAuthed" class="site-login-mask">
+    <form class="site-login" @submit.prevent="siteLogin">
+      <h1>我的应用导航</h1>
+      <p>输入一次访问密码即可，本浏览器将长期记住，无需重复登录</p>
+      <input v-model="loginPw" type="password" placeholder="访问密码" autocomplete="current-password" />
+      <p class="site-login-err">{{ loginErr }}</p>
+      <button type="submit" class="site-login-btn" :disabled="loginBusy">
+        {{ loginBusy ? '登录中…' : '登 录' }}
+      </button>
+    </form>
+  </div>
 
   <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" @saved="onSaved" />
 </template>

@@ -218,7 +218,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer
 - **应用资源占比与目录跟踪**：按目录归属聚合进程资源（cwd/exe/cmdline/cgroup 四路匹配），主页登记应用的目录自动纳入跟踪，无需重复配置；点击卡片内联展开详情——CPU/内存/网络/磁盘 IO 趋势、分区用量、目录占比（内存/CPU/IO/线程/句柄维度）、多目录历史对比（1 小时 / 24 小时 / 7 天）与进程明细下钻。
 - **Web 终端**：卡片点「⌨ 终端」侧边抽屉进入目标机网页 SSH（xterm.js + ssh2，同一会话鉴权），可弹出独立窗口；空闲 15 分钟 / 单会话 4 小时 / 每主机并发 2 上限，会话与命令入审计日志。
 - **告警**：CPU/内存/磁盘/负载阈值持续 3 分钟触发（可在设置调整），hero 区横幅展示，支持 webhook 通知。
-- **安全**：独立访问密码（scrypt 存储），会话 HttpOnly Cookie；远程凭据推荐密钥认证，密码凭据 AES-256-GCM 加密存储。
+- **安全**：独立访问密码（scrypt 存储）构成**全站登录门**——未登录时登录层覆盖应用与监控两个视图，本浏览器登录一次长期免密（会话持久化、重启不掉线）；网关宕机自动放行不锁主页。远程凭据推荐密钥认证，密码凭据 AES-256-GCM 加密存储。
 
 架构与选型见 `docs/monitor-terminal-blueprint.md`，部署/配置/排障见 `docs/monitor-ops.md`。网关服务 `my-homepage-monitor.service`（`scripts/monitor-server.mjs`，仅回环 8301），已纳入 `scripts/start.sh / restart.sh / stop.sh` 管理。
 

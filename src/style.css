@@ -169,6 +169,82 @@ button {
   font-weight: 600;
 }
 
+/* 全站登录层：未鉴权时覆盖应用与监控两个视图 */
+.site-login-mask {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg);
+}
+
+.site-login {
+  width: 360px;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-hover);
+  padding: 32px 28px;
+}
+
+.site-login h1 {
+  margin: 0 0 4px;
+  font-size: 20px;
+}
+
+.site-login p {
+  margin: 0 0 16px;
+  color: var(--text-2);
+  font-size: 13.5px;
+}
+
+.site-login input {
+  width: 100%;
+  font: inherit;
+  font-size: 13.5px;
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  padding: 7px 10px;
+  outline: none;
+  margin-bottom: 6px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.site-login input:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.site-login-err {
+  color: var(--red);
+  font-size: 13px;
+  min-height: 20px;
+  margin: 2px 0 8px;
+}
+
+.site-login-btn {
+  width: 100%;
+  padding: 8px;
+  font-size: 14.5px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.site-login-btn:hover {
+  filter: brightness(1.06);
+}
+
+.site-login-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .icon-btn {
   display: inline-flex;
   align-items: center;

@@ -6,19 +6,20 @@ import MonitorSettings from './MonitorSettings.vue'
 import MonitorTerm from './MonitorTerm.vue'
 
 /* active：是否为当前顶层视图（App.vue v-show 常驻，由父级告知）。
+   authed：全站登录门状态（App.vue 持有；401 时向上抛 unauth，由父级展示全站登录层）。
    v-if/v-else 分支会让 <KeepAlive> 自身被销毁重建、缓存失效，故改用 v-show + active 自管轮询。 */
-const props = defineProps({ active: { type: Boolean, default: false } })
+const props = defineProps({
+  active: { type: Boolean, default: false },
+  authed: { type: Boolean, default: false },
+})
+const emit = defineEmits(['unauth'])
 
 /* ---------- 状态 ---------- */
-const authed = ref(false)
 const summary = ref(null)
 const loadErr = ref('')
 const selectedId = ref('')
 const settingsOpen = ref(false)
 const termHost = ref(null) // { id, name }
-const loginPw = ref('')
-const loginErr = ref('')
-const loginBusy = ref(false)
 
 let pollTimer = null
 let started = false
@@ -39,25 +40,24 @@ const thresholds = ref({})
 
 /* ---------- 数据 ---------- */
 async function refresh() {
-  if (document.hidden || !authed.value) return
+  if (document.hidden || !props.authed) return
   try {
     summary.value = await monApi('/api/monitor/summary')
     loadErr.value = ''
   } catch (e) {
-    if (e.authRequired) { authed.value = false; stopPoll() }
+    if (e.authRequired) { emit('unauth'); stopPoll() }
     /* 其余错误静默，下轮重试 */
   }
 }
 async function boot() {
   try {
     summary.value = await monApi('/api/monitor/summary')
-    authed.value = true
     loadErr.value = ''
     monApi('/api/monitor/config').then((c) => { thresholds.value = c.thresholds || {} }).catch(() => {})
     startPoll()
   } catch (e) {
-    authed.value = false
-    loadErr.value = e.authRequired ? '' : e.message
+    if (e.authRequired) emit('unauth')
+    else loadErr.value = e.message
   }
 }
 function startPoll() {
@@ -67,33 +67,19 @@ function startPoll() {
 }
 function stopPoll() { if (pollTimer) { clearInterval(pollTimer); pollTimer = null } }
 
-/* 视图激活时启动（首次 boot / 恢复轮询），离开时停止 */
+/* 视图激活且全站已鉴权时启动（首次 boot / 恢复轮询），离开或掉鉴权时停止 */
 watch(
-  () => props.active,
+  () => props.active && props.authed,
   (v) => {
     if (v) {
       if (!started) { started = true; boot() }
-      else if (authed.value) startPoll()
+      else startPoll()
     } else {
       stopPoll()
     }
   },
   { immediate: true },
 )
-
-/* ---------- 登录 ---------- */
-async function doLogin() {
-  loginBusy.value = true
-  loginErr.value = ''
-  try {
-    await monApi('/api/monitor/login', { method: 'POST', body: { password: loginPw.value } })
-    loginPw.value = ''
-    authed.value = true
-    startPoll()
-  } catch (e) {
-    loginErr.value = e.authRequired ? '密码错误' : e.message
-  } finally { loginBusy.value = false }
-}
 
 /* ---------- 交互 ---------- */
 function toggleDetail(h) {
@@ -127,20 +113,8 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
 
 <template>
   <div v-show="active">
-    <!-- 登录（仅在本视图激活且未鉴权时显示） -->
-    <div v-if="active && !authed" class="mon-login-mask">
-      <form class="mon-login" @submit.prevent="doLogin">
-        <h1>监控中心</h1>
-        <p>首次访问输入一次密码即可，本浏览器将长期记住，无需重复登录</p>
-        <input v-model="loginPw" type="password" placeholder="访问密码" autocomplete="current-password" />
-        <p class="login-err">{{ loginErr || loadErr }}</p>
-        <button type="submit" class="login-btn" :disabled="loginBusy">{{ loginBusy ? '登录中…' : '登 录' }}</button>
-      </form>
-    </div>
-
-    <template v-else>
-      <!-- 概览 hero：与主页同结构 -->
-      <section class="hero">
+    <!-- 概览 hero：与主页同结构（未鉴权时被 App.vue 的全站登录层覆盖） -->
+    <section class="hero">
         <h1>监控中心</h1>
         <p class="sub">本机与远程服务器实时指标 · 每 5 秒自动刷新 · 点击卡片查看详情并进入终端</p>
         <div class="stats">
@@ -241,7 +215,6 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
         @close="selectedId = ''"
       />
       <div v-if="selectedHost" style="height: 8px" />
-    </template>
 
     <!-- 设置弹窗 -->
     <MonitorSettings :open="settingsOpen" @close="settingsOpen = false" @saved="onSaved" />
@@ -269,16 +242,6 @@ export default { name: 'MonitorView' }
 .sub { color: var(--text-2); font-size: 12.5px; }
 
 /* ===== 登录 ===== */
-.mon-login-mask { position: fixed; inset: 0; z-index: 30; display: flex; align-items: center; justify-content: center; background: var(--bg); }
-.mon-login { width: 360px; background: var(--bg-soft); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow-hover); padding: 32px 28px; }
-.mon-login h1 { margin: 0 0 4px; font-size: 20px; }
-.mon-login p { margin: 0 0 16px; color: var(--text-2); font-size: 13.5px; }
-.mon-login input { width: 100%; font: inherit; font-size: 13.5px; border: 1px solid var(--border-strong); border-radius: 8px; padding: 7px 10px; outline: none; margin-bottom: 6px; }
-.mon-login input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
-.login-err { color: var(--red); font-size: 13px; min-height: 20px; margin: 2px 0 8px !important; }
-.login-btn { width: 100%; padding: 8px; font-size: 14.5px; border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 8px; cursor: pointer; }
-.login-btn:hover { filter: brightness(1.06); }
-.login-btn:disabled { opacity: 0.6; cursor: default; }
 
 /* ===== 告警横幅 ===== */
 .alert-banner { display: flex; flex-direction: column; gap: 8px; margin: 4px 0 6px; }
