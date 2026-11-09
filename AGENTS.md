@@ -36,6 +36,8 @@
 | 设置 API | `127.0.0.1:8300`（仅回环监听，nginx 反代 `/api/`） |
 | 监控网关 | `127.0.0.1:8301`（仅回环，nginx 反代 `/api/monitor/` 与 `/api/terminal` WS）；看板在**主页内**（顶栏「我的应用 / 监控中心」标题切换，`#monitor` hash 可直达），`/monitor/` 仅剩重定向 stub + 终端弹窗页 |
 | 监控登录密码 | 首启随机生成于 `data/monitor/INITIAL_PASSWORD.txt`（0600），登录后请在设置中修改 |
+| 监控采集模式 | `hosts[].mode`：`ssh`（中心拉取，默认/公网机）或 `agent`（目标机推送，内网机）；netwatch=agent 实测中 |
+| 被监控主机 | 4 台：本机（local）+ netwatch(10.8.14.200, agent) + aliyun(47.95.140.199, ssh) + lan-1103(10.8.11.3, ssh)；均 ONLINE（2026-11-10） |
 | 探测定时器 | `my-homepage-probe-quick.timer` 每 3 分钟（`--no-fetch`）；`my-homepage-probe.timer` 每 5 分钟（完整，含 fetch） |
 | 前端轮询 | 主页每 60 秒拉一次 `apps.json`；监控看板每 5 秒拉 summary |
 | 已登记应用 | 11 个（含 2 个离线应用（纯 APP）+ 1 个公网远程） |
@@ -49,6 +51,8 @@ systemctl status my-homepage-probe.timer        # 每 5 分钟完整探测（含
 systemctl status my-homepage-probe-quick.timer  # 每 3 分钟快速探测（--no-fetch）
 systemctl status my-homepage-monitor.service    # 监控网关（指标采集 + Web 终端），常驻
 ```
+
+> 目标服务器上另有 **`my-homepage-agent.service`**（agent 推送模式的常驻单元，运行在 netwatch/113 等**目标机**上，不在本机）——由一键安装脚本部署，见 §8.7。
 
 ---
 
@@ -169,7 +173,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 │   └── assets/terminal.js, vendor/(xterm+xterm-addon-fit+xterm.css)
 ├── data/                      # 运行数据（已 gitignore，勿入库）
 │   └── monitor/               # history/*.jsonl 分钟历史 · audit.jsonl 审计 · alerts.jsonl 告警
-│                              # credentials.json(AES-GCM 凭据+主机指纹) · .secret(密钥) · keys/ 监控专用 SSH 密钥
+│                              # credentials.json(AES-GCM 凭据+主机指纹+agent token) · .secret(密钥) · .password-hash(登录哈希)
+│                              # sessions.json(持久会话) · keys/ 监控专用 SSH 密钥
 │                              # INITIAL_PASSWORD.txt(首启密码，改密后可删)
 ├── docs/
 │   ├── monitor-terminal-blueprint.md  # ★ 监控+终端 落地方案（选型对比/架构/安全/视觉）
@@ -419,7 +424,9 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - nginx：`/unslop` → 301 → `/unslop/`，两处 server 块各一个 location（`root /root/applications/my-homepage` + `try_files … /unslop/index.html` + no-cache），备份 `*.bak-unslop-20261106`。
 - 踩坑：Vue 模板习惯的自闭合 `<div />` 在原生 HTML 里是**未闭合标签**，曾把 footer 吞进 `#u-content` 内部，首次 `innerHTML` 渲染将其销毁、`renderPageText` 抛错中断整个渲染（见踩坑 #11）。
 
-**Agent 推送模式（2026-11-10）**：`hosts[].mode: 'agent'` 切换——目标机常驻零依赖 sh agent（采集代码与 SSH 探测**同源**，指标口径一致），每 20s `curl POST /api/monitor/agent/push`（X-Agent-Token 鉴权，token 存 credentials.json agents 段，CLI/凭据库 fs.watch 热同步）；中心复用 parseRemoteOutput→buildSnapshot 管线，**监控零 SSH 连接**（终端仍 SSH）；推送断流 >70s 看门狗判离线。一键安装：`GET /api/monitor/agent/install.sh?token=`（token 门禁）返回自带采集器/systemd 单元的幂等安装脚本（无 systemd 兜底 nohup+cron）；设置页主机弹窗「采集方式=Agent 推送」可生成/复制命令，CLI `--agent-install-cmd <hostId>` 同效。适用内网可达中心的机器；**公网不可内连的主机（如阿里云）保持 SSH 拉取模式**（中心 20s 短连接外连采集，即当前定制方案）。netwatch 已实测切换（推送驱动/掉线告警/恢复/终端不受影响）。
+**详情布局与按钮体系（2026-11-10 按用户反馈重做）**：详情页 = 4 趋势图一行 → 目录占比**全宽**（分区用量图已按用户要求删除，分区占用保留在主机卡磁盘圆环）→ 目录历史对比 → 进程明细；**无跟踪目录的主机**（netwatch/aliyun/113）目录占比与对比盒整体收起、显示一行占位指引（守卫 elDirs/elCmp 为 null 的 echarts.init 崩溃）。按钮统一**软胶囊两档**（强调蓝 accent-soft / 中性灰 bg-hover），去 ⌨/✕ emoji；时间窗为分段控件（bg-hover 槽 + 白色浮起选中）；markLine 标签 `position:'insideEndTop'` 防右缘裁剪。主机卡圆环根因：`@property --v` 必须 `inherits: true`（见踩坑 #19）。
+
+**Agent 推送模式（2026-11-10）**：`hosts[].mode: 'agent'` 切换——目标机常驻零依赖 sh agent（采集代码与 SSH 探测**同源**，指标口径一致），每 20s `curl POST /api/monitor/agent/push`（X-Agent-Token 鉴权，token 存 credentials.json agents 段，CLI/凭据库 fs.watch 热同步）；中心复用 parseRemoteOutput→buildSnapshot 管线，**监控零 SSH 连接**（终端仍 SSH）；推送断流 >70s 看门狗判离线。一键安装：`GET /api/monitor/agent/install.sh?token=`（token 门禁）返回自带采集器/systemd 单元的幂等安装脚本（无 systemd 兜底 nohup+cron）；设置页主机弹窗「采集方式=Agent 推送」可生成/复制命令，CLI `--agent-install-cmd <hostId>` 同效。适用内网可达中心的机器；**公网不可内连的主机（如阿里云）保持 SSH 拉取模式**（中心 20s 短连接外连采集，即当前定制方案）。netwatch 已实测切换（推送驱动/掉线告警/恢复/终端不受影响）；目标机单元名 `my-homepage-agent.service`，push URL 走 nginx `/api/monitor/agent/*`（8301 仅回环）。设置页主机弹窗含「采集方式」下拉与安装命令生成/复制；CLI `--agent-install-cmd <hostId>` 同效。
 
 ### 8.8 毛玻璃 v2 对比端点（`/glass-v2/`，2026-11-10，unslop skill 产出）
 
@@ -431,6 +438,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - **文件**：`glass-v2/index.html` + `assets/glass-v2.css` + `assets/glass-v2.js`（应用逻辑移植自 `/unslop/` 成熟实现，监控逻辑移植自 git 历史版 monitor.js）+ `assets/vendor/`（echarts/xterm 自包含——**不要跨端点引用 /monitor/assets/vendor**，echarts.min.js 已在 SPA 化时从那里删除，会落 try_files 兜底返回 HTML）。
 - nginx：两处 server 块各一个 `/glass-v2/` location（`root` + `try_files`），备份 `*.bak-glassv2-20261110`。
 - 踩坑：`.gv-gauge` 忘写 `position: relative` → `::after` 内圆孔与 `.gv-gval` 数值锚到卡片上漂移；自定义属性过渡必须 `@property` 注册。
+- **与主站的同步状态（2026-11-10）**：目录历史对比默认全选 + 全选/清空（`state.seededDirs`、`#gv-cmp-all/#gv-cmp-none`）**已同步**；主站主机设置改紧凑列表 + `MonitorHostEdit.vue` 双通道后，此端点的设置弹窗**未同步**（仍为主机平铺表单版）——如需对齐，照 `glass-v2.js` 既有「渲染函数 + addEventListener」模式移植，勿引 Vue。
 
 ### 8.7 监控中心与 Web 终端（并入主站 SPA，2026-11-10；首版为独立 /monitor/ 页，同日按用户反馈合并）
 
@@ -438,9 +446,9 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **形态（2026-11-10 用户反馈后定稿）**：监控看板**不再是独立页面**——主站顶栏是双标题「我的应用 / 监控中心」（`.brand-tabs`，active 高亮胶囊，点击切换 `topView`，localStorage `my-homepage:topView` 持久化 + `#monitor` hash 直达）。两视图均**常驻 `v-show`**（不用 KeepAlive，原因见踩坑 #17），`MonitorView` 接收 `active` prop 自管「boot / 轮询启停」。首版独立静态页已退役：`monitor/index.html` 只剩重定向 stub，`monitor/terminal.html`（终端弹窗放大页）保留。
 
-**组件结构**：`MonitorView.vue`（hero 统计胶囊 + 告警横幅 + 主机卡 grid + 登录层）→ `MonitorDetail.vue`（点卡片**内联展开**：4 趋势图一行 / 目录占比 + 目录对比 / 进程明细全宽，独立加载 history+procs，15s 自刷；详情头部 ⚙ 打开该主机的设置弹窗；**目录历史对比默认全选**——`seededDirs` 记录已补勾路径，只补新目录、自刷不重置用户手动取消项，标题旁有全选/清空按钮）→ `MonitorSettings.vue`（设置弹窗，**纳管主机为紧凑列表**：点击行弹出嵌套 `MonitorHostEdit.vue` 编辑弹窗）与 `MonitorTerm.vue`（终端抽屉 + 弹窗放大）。图表走 `src/lib/monitor-charts.js`（**echarts/core 按需注册**，动态 import → 独立 chunk 180KB gz，不占首屏；主包 56KB gz 基本不变）；xterm 同样动态分包（73KB gz）。
+**组件结构**：`MonitorView.vue`（hero 统计胶囊 + 告警横幅 + 主机卡 grid；登录层已上移至 App.vue 全站门禁）→ `MonitorDetail.vue`（点卡片**内联展开**：4 趋势图一行 / 目录占比 + 目录对比 / 进程明细全宽，独立加载 history+procs，15s 自刷；详情头部 ⚙ 打开该主机的设置弹窗；**目录历史对比默认全选**——`seededDirs` 记录已补勾路径，只补新目录、自刷不重置用户手动取消项，标题旁有全选/清空按钮）→ `MonitorSettings.vue`（设置弹窗，**纳管主机为紧凑列表**：点击行弹出嵌套 `MonitorHostEdit.vue` 编辑弹窗）与 `MonitorTerm.vue`（终端抽屉 + 弹窗放大）。图表走 `src/lib/monitor-charts.js`（**echarts/core 按需注册**，动态 import → 独立 chunk 180KB gz，不占首屏；主包 56KB gz 基本不变）；xterm 同样动态分包（73KB gz）。
 
-**主机设置双通道**（2026-11-11）：`MonitorHostEdit.vue` 是单主机编辑弹窗的共享组件（表单 + 该主机跟踪目录 + 凭据提示），两种模式：① **草稿模式**（设置面板进入）——面板「纳管主机」区为紧凑列表（图标 + 名称 + mono id + 摘要行「类型 · 分组 · 地址:端口 · N 个跟踪目录」+ 本机标「内置」），点击行弹嵌套弹窗（z-index 80 > 面板 70），修改直接改 cfg 里的响应式对象，仍由面板底部「保存配置」统一 PUT；「＋添加主机」创建空条目并立即打开弹窗。② **直连模式**（详情页 ⚙ 进入）——`MonitorView` 拉全量配置深拷贝出目标主机，弹窗底部「保存」直接 PUT 整份配置（其余段原样带回），成功后刷新 summary 并同步详情图阈值参考线；服务端校验错误（如 SSH 缺 address）就地显示在弹窗内，不改配置。删除主机只在草稿模式弹窗提供（confirm 后删草稿行，保存生效）；本机主机不可删。
+**主机设置双通道**（2026-11-10）：`MonitorHostEdit.vue` 是单主机编辑弹窗的共享组件（表单 + 该主机跟踪目录 + 凭据提示），两种模式：① **草稿模式**（设置面板进入）——面板「纳管主机」区为紧凑列表（图标 + 名称 + mono id + 摘要行「类型 · 分组 · 地址:端口 · N 个跟踪目录」+ 本机标「内置」），点击行弹嵌套弹窗（z-index 80 > 面板 70），修改直接改 cfg 里的响应式对象，仍由面板底部「保存配置」统一 PUT；「＋添加主机」创建空条目并立即打开弹窗。② **直连模式**（详情页 ⚙ 进入）——`MonitorView` 拉全量配置深拷贝出目标主机，弹窗底部「保存」直接 PUT 整份配置（其余段原样带回），成功后刷新 summary 并同步详情图阈值参考线；服务端校验错误（如 SSH 缺 address）就地显示在弹窗内，不改配置。删除主机只在草稿模式弹窗提供（confirm 后删草稿行，保存生效）；本机主机不可删。
 
 **架构**：`monitor-server.mjs`（systemd 常驻，`127.0.0.1:8301`，依赖 ssh2+ws）同时承载 HTTP API 与终端 WebSocket；nginx **两处 server 块**各加三个 location：`/monitor/`（静态 stub+终端页）、`/api/monitor/`（反代）、`/api/terminal`（WS 升级，read_timeout 3600s）。备份 `*.bak-monitor-20261110`。echarts/@xterm 已移入 dependencies（SPA 打包需要），主站「前端零第三方运行时依赖」的说法仅对**首屏主包**成立。
 
@@ -601,6 +609,12 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 18. **临时替换鉴权材料必须有「先验证还原」的闭环**
    联调监控登录时曾把 `monitor.config.json` 的 passwordHash 换成测试哈希，备份后又在验证还原**之前**就执行了 `rm` 备份文件（且本机 `cp` 带 `-i` 别名，非交互 shell 下覆盖被拒）——用户自设密码哈希丢失，只能临时密码过渡请用户重设。教训：动鉴权/凭据类文件，备份后**立即验证还原路径可用**，验证通过前不许清理；非交互 shell 用 `command -p cp -f` 绕过别名。
 
+19. **监控 UI 的 Playwright 验证不用登录：从 sessions.json 注入会话 cookie**
+   全站门禁下 Playwright 新开浏览器会撞登录层。正确做法（**只读**，符合 #18 教训——绝不动鉴权材料）：读 `data/monitor/sessions.json`，取一个 `expires > now` 的 token，`context.addCookies([{ name: 'mh_mon', value: token, url: 'http://127.0.0.1' }])`。轮询页照例用 `domcontentloaded` + `waitForSelector`（见 #15）。现成脚本：`.verify/shot-hostedit.cjs`（主机设置弹窗三态）、`.verify/shot-cmpall.cjs`(目录对比默认全选/自刷/全选清空)。
+
+20. **配置「校验报错」类测试必须挑 SSH 主机，别用本机主机**
+   本机（type=local）的展示地址留空时 `normalizeHost` 会默认填 `127.0.0.1`——清空地址点「保存」不会触发 400，反而**把展示地址真实改掉**（实测把 `10.8.11.4` 改成了 `127.0.0.1`，靠同一条 PUT API 改回）。SSH 主机才有「缺 address → 400 `主机 xx 缺少 address`」的校验路径，且失败不落盘。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
@@ -628,6 +642,8 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 远程采集免 Agent（ssh2 exec 注入脚本） | 目标机（NetWatch/阿里云）不想装常驻组件；探测脚本纯只读、计数器口径由网关差分，单次 <1.5s；Agent 推送模式留作扩展 |
 | 监控/终端独立访问密码而非复用主页 | 主页本无登录体系；监控持有服务器凭据必须独立鉴权，OIDC 统一登录留作扩展点 |
 | 白底视觉 + 同源变量（2026-11-10） | 用户明确要求监控看板「以白色底色为主、保持现有风格一致、适度炫酷」：全套复用 src/style.css 变量，动效只走合成层并 reduced-motion 降级 |
+| 监控主机设置弹窗化 + 详情页 ⚙（2026-11-10） | 用户要求「点击服务器弹窗设置、详情页加齿轮直达」：复用主页设置面板 2026-11-07「紧凑列表 + 嵌套弹窗」成熟模式，抽出 MonitorHostEdit 共享组件；详情页齿轮走直连保存（就地调单机不必开整个设置面板） |
+| 目录历史对比默认全选（2026-11-10） | 用户要求「默认全选」：seededDirs 只补新目录，15s 自刷不勾回手动取消项；另配全选/清空按钮兜底 |
 
 ---
 
@@ -718,6 +734,9 @@ tail -5 data/monitor/audit.jsonl
 tail -5 data/monitor/alerts.jsonl
 # 终端端到端自检（需要已登录会话；脚本自动登录）
 node .verify/term-test.mjs
+# 监控 UI 免登录验证（Playwright；见踩坑 #19 的会话注入法）
+node .verify/shot-hostedit.cjs   # 主机设置弹窗（草稿/直连/校验错误路径）
+node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 全选/清空
 # 排障速查表见 docs/monitor-ops.md §6
 ```
 
