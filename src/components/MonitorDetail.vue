@@ -20,7 +20,7 @@ const loading = ref(true)
 const err = ref('')
 
 const elCpu = ref(null), elMem = ref(null), elNet = ref(null), elDio = ref(null)
-const elDisk = ref(null), elDirs = ref(null), elCmp = ref(null)
+const elDirs = ref(null), elCmp = ref(null)
 let charts = null // 动态加载后的 { mod, instances: Map }
 
 const RANGES = [
@@ -74,7 +74,6 @@ async function load() {
 async function renderAll() {
   await loadCharts()
   renderTrends()
-  renderDisks()
   renderDirs()
   await renderCompare()
   window.addEventListener('resize', onResize)
@@ -97,7 +96,7 @@ function renderTrends() {
         markLine: pts().length ? {
           silent: true, symbol: 'none',
           lineStyle: { color: cssVar('--red'), type: 'dashed' },
-          label: { color: cssVar('--red'), fontSize: 10, formatter: `${th}` },
+          label: { color: cssVar('--red'), fontSize: 10, formatter: `${th}`, position: 'insideEndTop' },
           data: [{ yAxis: th }],
         } : undefined,
       }),
@@ -134,22 +133,8 @@ function renderTrends() {
   }, { notMerge: true })
 }
 
-function renderDisks() {
-  const { hBarOption, cssVar } = mod()
-  const last = [...pts()].reverse().find((p) => p.disks && p.disks.length) || { disks: [] }
-  const disks = last.disks || []
-  inst('disk', elDisk.value).setOption(hBarOption(
-    disks.map((d) => d.mnt),
-    disks.map((d) => ({
-      value: d.pct,
-      itemStyle: { color: d.pct >= 90 ? cssVar('--red') : d.pct >= 75 ? cssVar('--amber') : cssVar('--accent') },
-      label: { formatter: `${d.pct}% · ${d.usedGb}/${d.totalGb}G` },
-    })),
-    { max: 100, labelWidth: 110, xFmt: '{value}%' },
-  ), { notMerge: true })
-}
-
 function renderDirs() {
+  if (!dirsList.value.length || !elDirs.value) return // 无目录主机：占位文案已替代图表
   const { hBarOption, cssVar } = mod()
   const field = DIR_FIELD[dirMetric.value] || dirMetric.value
   const top = [...dirsList.value].sort((a, b) => (b[field] || 0) - (a[field] || 0)).slice(0, 10)
@@ -172,6 +157,7 @@ function renderDirs() {
 }
 
 async function renderCompare() {
+  if (!dirsList.value.length || !elCmp.value) return // 对比框随目录存在与否整体收起
   const { baseOption, lineSeries, legendStyle, cssVar } = mod()
   const dirs = [...compareSet]
   const c = inst('cmp', elCmp.value)
@@ -242,8 +228,8 @@ onBeforeUnmount(() => {
       <div class="range-tabs">
         <button v-for="r in RANGES" :key="r.v" :class="{ on: range === r.v }" @click="range = r.v">{{ r.label }}</button>
       </div>
-      <button class="mini-btn" @click="emit('term')">⌨ 终端</button>
-      <button class="mini-btn" @click="emit('close')">✕ 收起</button>
+      <button class="head-btn accent" @click="emit('term')">终端</button>
+      <button class="head-btn" @click="emit('close')">收起</button>
     </div>
 
     <p v-if="err" class="detail-err">加载失败：{{ err }}</p>
@@ -255,20 +241,18 @@ onBeforeUnmount(() => {
       <div class="chart-box"><h4>磁盘 IO</h4><div ref="elDio" class="chart" /></div>
     </div>
 
-    <div class="charts2">
-      <div class="chart-box"><h4>分区用量</h4><div ref="elDisk" class="chart tall" /></div>
-      <div class="chart-box">
-        <h4 class="with-ctl">应用 / 目录资源占比
-          <select v-model="dirMetric" class="mini-select">
-            <option v-for="m in METRICS" :key="m.v" :value="m.v">{{ m.label }}</option>
-          </select>
-          <span class="hint">点击条目过滤下方进程</span>
-        </h4>
-        <div ref="elDirs" class="chart tall" />
-      </div>
+    <div class="chart-box" style="margin-bottom:12px">
+      <h4 class="with-ctl">应用 / 目录资源占比
+        <select v-model="dirMetric" class="mini-select">
+          <option v-for="m in METRICS" :key="m.v" :value="m.v">{{ m.label }}</option>
+        </select>
+        <span class="hint">点击条目过滤下方进程</span>
+      </h4>
+      <div v-if="dirsList.length" ref="elDirs" class="chart wide-tall" />
+      <p v-else class="dirs-empty">该主机没有命中跟踪目录（远程主机默认不跟踪目录）——目录级资源统计仅对已登记目录的主机展示。</p>
     </div>
 
-    <div class="chart-box">
+    <div v-if="dirsList.length" class="chart-box">
       <h4 class="with-ctl">目录历史对比（CPU%）<span class="hint">勾选目录叠加曲线</span></h4>
       <div class="compare-list">
         <label v-for="d in dirsList" :key="d.path" class="dir-chip" :class="{ on: compareSet.has(d.path) }">
@@ -338,7 +322,6 @@ onBeforeUnmount(() => {
 .detail-err { color: var(--red); font-size: 13px; margin: 4px 0 10px; }
 
 .charts4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 12px; }
-.charts2 { display: grid; grid-template-columns: 5fr 7fr; gap: 12px; margin-bottom: 12px; }
 .chart-box {
   border: 1px solid var(--border);
   border-radius: 10px;
@@ -349,12 +332,24 @@ onBeforeUnmount(() => {
 .chart-box h4.with-ctl { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .chart-box .hint { font-size: 11.5px; color: var(--gray); font-weight: 400; }
 .chart { width: 100%; height: 190px; }
-.chart.tall { height: 230px; }
+.chart.wide-tall { height: 260px; }
 
-.range-tabs { display: inline-flex; border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
-.range-tabs button { border: 0; background: transparent; padding: 4px 12px; font-size: 12.5px; cursor: pointer; color: var(--text-2); }
-.range-tabs button + button { border-left: 1px solid var(--border); }
-.range-tabs button.on { background: var(--accent); color: #fff; }
+.dirs-empty { margin: 0; padding: 26px 8px; color: var(--text-3); font-size: 12.5px; text-align: center; background: var(--bg-hover); border-radius: 8px; }
+
+/* 详情头按钮：软胶囊两档（强调 / 中性） */
+.head-btn {
+  padding: 5px 16px; border-radius: 999px; font-size: 12.5px; cursor: pointer;
+  color: var(--text-2); background: var(--bg-hover); border: 0;
+  transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.head-btn:hover { color: var(--text); background: var(--accent-soft); }
+.head-btn.accent { color: var(--accent); background: var(--accent-soft); font-weight: 500; }
+.head-btn.accent:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 2px 10px rgb(37 99 235 / 0.18); }
+
+/* 分段式时间窗（与主站 segmented 同族） */
+.range-tabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--bg-hover); }
+.range-tabs button { border: 0; background: transparent; padding: 4px 14px; border-radius: 7px; font-size: 12.5px; cursor: pointer; color: var(--text-2); transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease; }
+.range-tabs button.on { background: var(--bg-soft); color: var(--accent); font-weight: 500; box-shadow: 0 1px 4px rgb(16 24 40 / 0.12); }
 .mini-select { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
 
 .compare-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
@@ -382,6 +377,5 @@ onBeforeUnmount(() => {
 .empty { color: var(--text-2); text-align: center; padding: 18px; }
 
 @media (max-width: 1180px) { .charts4 { grid-template-columns: repeat(2, 1fr); } }
-@media (max-width: 900px) { .charts2 { grid-template-columns: 1fr; } }
 @media (max-width: 640px) { .charts4 { grid-template-columns: 1fr; } }
 </style>

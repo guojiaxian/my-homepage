@@ -194,13 +194,13 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
               <span class="hint">跟踪 {{ dirCount(h) }} 目录<template v-if="h.snap.containersCount"> · 容器 {{ h.snap.containersCount }}</template></span>
               <span class="grow" />
               <button class="mini-btn" @click.stop="toggleDetail(h)">{{ selectedId === h.id ? '收起' : '详情' }}</button>
-              <button class="mini-btn" @click.stop="openTerm(h)">⌨ 终端</button>
+              <button class="mini-btn" @click.stop="openTerm(h)">终端</button>
             </div>
           </template>
 
           <div v-else class="hc-offline">
             <p>{{ h.credReady ? (h.error || '等待首个探测周期…') : `待配置凭据：${h.note || '在监控设置中添加密钥或密码后自动开始采集'}` }}</p>
-            <button v-if="h.credReady" class="mini-btn" @click.stop="openTerm(h)">⌨ 仍要连接</button>
+            <button v-if="h.credReady" class="mini-btn" @click.stop="openTerm(h)">仍要连接</button>
           </div>
         </article>
       </div>
@@ -231,7 +231,7 @@ export default { name: 'MonitorView' }
 /* @property 供仪表环数值过渡（全局 at-rule） */
 @property --v {
   syntax: '<number>';
-  inherits: false;
+  inherits: true;
   initial-value: 0;
 }
 </style>
@@ -254,8 +254,12 @@ export default { name: 'MonitorView' }
 /* ===== 工具行 ===== */
 .mon-toolbar { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 14px; flex-wrap: wrap; }
 .mon-toolbar h2 { font-size: 16px; margin: 0; font-weight: 600; }
-.ghost-btn { border: 1px solid var(--border); background: var(--bg-soft); color: var(--text); border-radius: 8px; padding: 5px 12px; font-size: 13px; cursor: pointer; }
-.ghost-btn:hover { border-color: var(--accent); color: var(--accent); }
+.ghost-btn {
+  border: 0; background: var(--accent-soft); color: var(--accent);
+  border-radius: 999px; padding: 6px 16px; font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
+}
+.ghost-btn:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 2px 10px rgb(37 99 235 / 0.18); }
 .mon-empty { color: var(--text-2); font-size: 13.5px; background: var(--bg-soft); border: 1px dashed var(--border); border-radius: 12px; padding: 28px; text-align: center; }
 
 /* ===== 主机卡片 ===== */
@@ -337,8 +341,12 @@ export default { name: 'MonitorView' }
 
 .hc-foot { display: flex; align-items: center; gap: 8px; padding-top: 9px; border-top: 1px dashed var(--border); }
 .hc-foot .hint { color: var(--text-2); font-size: 12px; }
-.mini-btn { border: 1px solid var(--border); background: var(--bg-soft); border-radius: 6px; padding: 2px 10px; font-size: 12.5px; cursor: pointer; color: var(--text-2); transition: border-color 0.15s ease, color 0.15s ease; }
-.mini-btn:hover { border-color: var(--accent); color: var(--accent); }
+.mini-btn {
+  border: 0; background: var(--bg-hover); color: var(--text-2);
+  border-radius: 999px; padding: 4px 14px; font-size: 12.5px; cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.mini-btn:hover { color: var(--accent); background: var(--accent-soft); }
 
 .hc-offline { padding: 10px 0 6px; }
 .hc-offline p { margin: 0 0 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }

@@ -176,24 +176,22 @@
             <div class="gv-chart-box"><h4>网络（<span id="gv-ch-iface" class="gv-num">-</span>）</h4><div id="gv-ch-net" class="gv-chart"></div></div>
             <div class="gv-chart-box"><h4>磁盘 IO</h4><div id="gv-ch-dio" class="gv-chart"></div></div>
           </div>
-          <div class="gv-charts2">
-            <div class="gv-chart-box"><h4>分区用量</h4><div id="gv-ch-disk" class="gv-chart gv-tall"></div></div>
-            <div class="gv-chart-box">
-              <h4 class="gv-with-ctl">应用 / 目录资源占比
-                <select id="gv-m-dir-metric" class="gv-select gv-mini">
-                  <option value="cpu">CPU %</option>
-                  <option value="mem" selected>内存 MB</option>
-                  <option value="ioR">IO 读 MB/s</option>
-                  <option value="ioW">IO 写 MB/s</option>
-                  <option value="threads">线程数</option>
-                  <option value="fds">句柄数</option>
-                </select>
-                <span class="gv-hint">点击条目过滤下方进程</span>
-              </h4>
-              <div id="gv-ch-dirs" class="gv-chart gv-tall"></div>
-            </div>
+          <div class="gv-chart-box" style="margin-bottom:12px">
+            <h4 class="gv-with-ctl">应用 / 目录资源占比
+              <select id="gv-m-dir-metric" class="gv-select gv-mini">
+                <option value="cpu">CPU %</option>
+                <option value="mem" selected>内存 MB</option>
+                <option value="ioR">IO 读 MB/s</option>
+                <option value="ioW">IO 写 MB/s</option>
+                <option value="threads">线程数</option>
+                <option value="fds">句柄数</option>
+              </select>
+              <span class="gv-hint">点击条目过滤下方进程</span>
+            </h4>
+            <div id="gv-ch-dirs" class="gv-chart gv-tall"></div>
+            <p class="gv-dirs-empty" id="gv-m-dirs-empty" hidden></p>
           </div>
-          <div class="gv-chart-box">
+          <div class="gv-chart-box" id="gv-m-cmp-box" hidden>
             <h4 class="gv-with-ctl">目录历史对比（CPU%）<span class="gv-hint">勾选目录叠加曲线</span></h4>
             <div class="gv-compare-list" id="gv-m-compare"></div>
             <div id="gv-ch-cmp" class="gv-chart" hidden></div>

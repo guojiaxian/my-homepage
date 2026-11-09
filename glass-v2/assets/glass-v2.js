@@ -809,7 +809,7 @@
         ...baseOption('{value}%'), yAxis: { ...baseOption('{value}%').yAxis, max: 100 },
         series: [
           lineSeries('CPU %', pts.map((p) => [t(p), p.cpu]), accent, {
-            markLine: pts.length ? { silent: true, symbol: 'none', lineStyle: { color: red, type: 'dashed' }, label: { color: red, fontSize: 10, formatter: `${th}` }, data: [{ yAxis: th }] } : undefined,
+            markLine: pts.length ? { silent: true, symbol: 'none', lineStyle: { color: red, type: 'dashed' }, label: { color: red, fontSize: 10, formatter: `${th}`, position: 'insideEndTop' }, data: [{ yAxis: th }] } : undefined,
           }),
           lineSeries('负载', pts.map((p) => [t(p), p.load]), amber, { noArea: true }),
         ],
@@ -834,21 +834,6 @@
           lineSeries('读 MB/s', pts.map((p) => [t(p), p.dioR]), teal),
           lineSeries('写 MB/s', pts.map((p) => [t(p), p.dioW]), amber),
         ],
-      }, { notMerge: true })
-      const last = [...pts].reverse().find((p) => p.disks && p.disks.length) || { disks: [] }
-      const disks = last.disks || []
-      inst('disk', $('#gv-ch-disk')).setOption({
-        animationDuration: reducedMotion ? 0 : 400,
-        backgroundColor: 'transparent',
-        grid: { left: 120, right: 110, top: 8, bottom: 22 },
-        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: 'rgba(15,24,42,0.94)', borderColor: 'rgba(150,175,220,0.3)', textStyle: { color: '#e9effa', fontSize: 12 } },
-        xAxis: { type: 'value', max: 100, axisLabel: { ...axisCommon().axisLabel, formatter: '{value}%' }, splitLine: axisCommon().splitLine },
-        yAxis: { type: 'category', data: disks.map((d) => d.mnt), axisLabel: { ...axisCommon().axisLabel, fontSize: 11, fontFamily: 'monospace' } },
-        series: [{ type: 'bar', barWidth: 14, data: disks.map((d) => ({
-          value: d.pct,
-          itemStyle: { color: d.pct >= 90 ? red : d.pct >= 75 ? amber : accent, borderRadius: 4 },
-          label: { show: true, position: 'right', formatter: `${d.pct}% · ${d.usedGb}/${d.totalGb}G`, color: cssVar('--gv-text-2'), fontSize: 11 },
-        })) }],
       }, { notMerge: true })
     }
 
@@ -882,6 +867,9 @@
     function renderCompareList() {
       const wrap = $('#gv-m-compare')
       const dirs = state.dirsList || []
+      $('#gv-m-dirs-empty').hidden = !!dirs.length
+      $('#gv-ch-dirs').hidden = !dirs.length
+      $('#gv-m-cmp-box').hidden = !dirs.length
       wrap.innerHTML = dirs.length
         ? dirs.map((d) => `<label class="gv-dir-chip${state.compareSet.has(d.path) ? ' is-on' : ''}">
             <input type="checkbox" data-dir="${esc(d.path)}"${state.compareSet.has(d.path) ? ' checked' : ''} />${esc(d.name)}</label>`).join('')
