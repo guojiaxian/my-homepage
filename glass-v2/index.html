@@ -192,7 +192,10 @@
             <p class="gv-dirs-empty" id="gv-m-dirs-empty" hidden>该主机暂无命中跟踪目录的进程 —— 可在「⚙ 监控设置 → 对应主机」中添加该机上的应用目录（如 /opt/myapp），目录级资源统计即按主机生效。</p>
           </div>
           <div class="gv-chart-box" id="gv-m-cmp-box" hidden>
-            <h4 class="gv-with-ctl">目录历史对比（CPU%）<span class="gv-hint">勾选目录叠加曲线</span></h4>
+            <h4 class="gv-with-ctl">目录历史对比（CPU%）<span class="gv-hint">勾选目录叠加曲线</span>
+              <button class="gv-mini-link" id="gv-cmp-all" type="button">全选</button>
+              <button class="gv-mini-link" id="gv-cmp-none" type="button">清空</button>
+            </h4>
             <div class="gv-compare-list" id="gv-m-compare"></div>
             <div id="gv-ch-cmp" class="gv-chart" hidden></div>
             <p class="gv-compare-empty" id="gv-m-cmp-empty">未选择目录 —— 勾选上方目录名，即可把多个应用的 CPU% 曲线叠在同一时间轴上对比。</p>

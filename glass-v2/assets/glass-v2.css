@@ -189,6 +189,9 @@ html[data-theme='light'] .gv-segmented { background: rgba(255, 255, 255, 0.4); }
 }
 .gv-minibtn:hover { color: var(--gv-text); border-color: var(--gv-hairline-strong); background: var(--gv-panel-strong); }
 .gv-minibtn.danger:hover { color: var(--gv-red); border-color: color-mix(in srgb, var(--gv-red) 45%, var(--gv-hairline)); }
+/* 目录对比「全选 / 清空」文字按钮 */
+.gv-mini-link { padding: 0 2px; border: 0; background: none; color: var(--gv-accent); font-size: 12px; cursor: pointer; }
+.gv-mini-link:hover { text-decoration: underline; }
 .gv-sync-error { color: var(--gv-red); font-size: 12.5px; }
 
 /* ===== 占位 / 骨架 ===== */
@@ -482,4 +485,6 @@ code { font-family: var(--gv-mono); font-size: 11.5px; background: var(--gv-pane
 .gv-dirs-empty { margin: 0; padding: 26px 8px; color: var(--gv-text-3); font-size: 12.5px; text-align: center; background: var(--gv-panel); border-radius: 8px; }
 
 /* 主机卡内跟踪目录编辑器 */
+.gv-he-dirs { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--gv-hairline); }
+
 .gv-he-dirs { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--gv-hairline); }

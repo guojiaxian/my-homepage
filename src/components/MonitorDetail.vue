@@ -16,6 +16,7 @@ const procsTotal = ref(0)
 const dirMetric = ref('mem')
 const dirFilter = ref('')
 const compareSet = reactive(new Set())
+const seededDirs = new Set() // 已默认勾选过的目录路径：15s 自刷只补勾新增目录，不重置用户手动取消的项
 const loading = ref(true)
 const err = ref('')
 
@@ -63,6 +64,10 @@ async function load() {
     procsList.value = p.procs || []
     procsTotal.value = p.procsTotal || 0
     dirsList.value = p.dirs || []
+    /* 目录历史对比默认全选：新目录补勾（首载即全选），用户手动取消的不会被自刷勾回 */
+    for (const d of dirsList.value) {
+      if (!seededDirs.has(d.path)) { seededDirs.add(d.path); compareSet.add(d.path) }
+    }
     loading.value = false
     await renderAll()
   } catch (e) {
@@ -189,6 +194,15 @@ async function toggleCompare(path) {
   renderCompare()
 }
 
+/* 全选 / 清空（清空不动 seededDirs：自刷不会把勾选强行加回来） */
+async function setAllCompare(on) {
+  compareSet.clear()
+  if (on) for (const d of dirsList.value) { compareSet.add(d.path); seededDirs.add(d.path) }
+  await nextTick()
+  if (compareSet.size && charts) inst('cmp', elCmp.value).resize()
+  renderCompare()
+}
+
 const filteredProcs = () =>
   procsList.value
     .filter((p) => !dirFilter.value || p.dir === dirFilter.value)
@@ -198,6 +212,7 @@ watch(range, load)
 watch(() => props.host?.id, () => {
   dirFilter.value = ''
   compareSet.clear()
+  seededDirs.clear() // 换主机：目录集不同，重新默认全选
   loading.value = true
   load()
 })
@@ -254,7 +269,10 @@ onBeforeUnmount(() => {
     </div>
 
     <div v-if="dirsList.length" class="chart-box">
-      <h4 class="with-ctl">目录历史对比（CPU%）<span class="hint">勾选目录叠加曲线</span></h4>
+      <h4 class="with-ctl">目录历史对比（CPU%）<span class="hint">勾选目录叠加曲线</span>
+        <button class="mini-link" @click="setAllCompare(true)">全选</button>
+        <button class="mini-link" @click="setAllCompare(false)">清空</button>
+      </h4>
       <div class="compare-list">
         <label v-for="d in dirsList" :key="d.path" class="dir-chip" :class="{ on: compareSet.has(d.path) }">
           <input type="checkbox" :checked="compareSet.has(d.path)" @change="toggleCompare(d.path)" />{{ d.name }}
@@ -355,6 +373,8 @@ onBeforeUnmount(() => {
 .mini-select { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
 
 .compare-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
+.mini-link { border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; padding: 0 2px; font-weight: 400; }
+.mini-link:hover { text-decoration: underline; }
 .compare-empty { margin: 0; padding: 14px 4px 10px; color: var(--gray); font-size: 12.5px; text-align: center; }
 .dir-chip {
   font-size: 12px; border: 1px solid var(--border); border-radius: 999px;

@@ -532,7 +532,7 @@
   const monitorModule = (() => {
     const state = {
       summary: null, detailHost: null, range: '1h', dirMetric: 'mem',
-      dirFilter: '', compareSet: new Set(),
+      dirFilter: '', compareSet: new Set(), seededDirs: new Set(),
       charts: {}, procsCache: [], procsTotal: 0, dirsList: [],
       entered: false, timer: null, histTimer: null, cfg: null,
     }
@@ -719,6 +719,7 @@
       state.detailHost = state.detailHost === hostId ? '' : hostId
       state.dirFilter = ''
       state.compareSet.clear()
+      state.seededDirs.clear() // 换主机：目录集不同，重新默认全选
       const host = state.summary?.hosts.find((x) => x.id === hostId)
       const detail = $('#gv-m-detail')
       detail.hidden = !state.detailHost
@@ -757,6 +758,10 @@
         state.procsCache = procs.procs || []
         state.procsTotal = procs.procsTotal || 0
         state.dirsList = procs.dirs || []
+        /* 目录历史对比默认全选：新目录补勾，自刷/重渲不重置用户手动取消的项 */
+        for (const d of state.dirsList) {
+          if (!state.seededDirs.has(d.path)) { state.seededDirs.add(d.path); state.compareSet.add(d.path) }
+        }
         $('#gv-m-detail-err').hidden = true
         $('#gv-ch-iface').textContent = (sn && sn.net?.iface) || '-'
         renderCharts()
@@ -882,6 +887,12 @@
       }))
       renderCompare()
     }
+    /* 全选 / 清空（清空不动 seededDirs：静默自刷不会把勾选强行加回来） */
+    function setAllCompare(on) {
+      state.compareSet.clear()
+      if (on) for (const d of state.dirsList || []) { state.compareSet.add(d.path); state.seededDirs.add(d.path) }
+      renderCompareList()
+    }
     async function renderCompare() {
       const dirs = [...state.compareSet]
       const chartEl = $('#gv-ch-cmp')
@@ -926,6 +937,8 @@
       </tr>`).join('') || '<tr><td colspan="11" class="gv-empty">无归属进程</td></tr>'
     }
     $('#gv-m-clear-filter').addEventListener('click', () => { state.dirFilter = ''; renderProcs() })
+    $('#gv-cmp-all').addEventListener('click', () => setAllCompare(true))
+    $('#gv-cmp-none').addEventListener('click', () => setAllCompare(false))
 
     /* ---------- 终端 ---------- */
     let term = null, termWs = null, termFit = null
@@ -1029,6 +1042,12 @@
               <label class="gv-fitem"><span>用户名</span><input type="text" data-k="username" value="${esc(h.username)}" /></label>
               <label class="gv-fitem"><span>认证</span><select data-k="authType"><option value="key"${h.authType === 'key' ? ' selected' : ''}>密钥</option><option value="password"${h.authType === 'password' ? ' selected' : ''}>密码</option></select></label>
               <label class="gv-fitem span2"><span>私钥路径（0600）</span><input type="text" data-k="keyPath" value="${esc(h.keyPath || '')}" /></label>
+              <label class="gv-fitem span2"><span>采集方式</span>
+                <select data-k="mode">
+                  <option value="ssh"${h.mode !== 'agent' ? ' selected' : ''}>SSH 拉取</option>
+                  <option value="agent"${h.mode === 'agent' ? ' selected' : ''}>Agent 推送</option>
+                </select>
+              </label>
             ` : `
               <label class="gv-fitem"><span>展示地址</span><input type="text" data-k="address" value="${esc(h.address || '')}" /></label>
               <label class="gv-fitem"><span>终端主机</span><input type="text" data-k="t_host" value="${esc(h.terminal?.host || '127.0.0.1')}" /></label>
