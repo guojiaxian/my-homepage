@@ -42,15 +42,14 @@
     },
     {
       "id": "netwatch",
-      "name": "NetWatch 服务器",
+      "name": "NetWatch 服务器 · centerserver",
       "type": "ssh",
       "group": "内网",
       "address": "10.8.14.200",
       "port": 22,
       "username": "root",
       "authType": "key",
-      "keyPath": "/root/applications/my-homepage/data/monitor/keys/netwatch",
-      "note": "密钥待分发：ssh-copy-id -i data/monitor/keys/netwatch.pub root@10.8.14.200"
+      "keyPath": "/root/applications/my-homepage/data/monitor/keys/netwatch"
     },
     {
       "id": "aliyun",
@@ -61,8 +60,18 @@
       "port": 22,
       "username": "root",
       "authType": "key",
-      "keyPath": "/root/applications/my-homepage/data/monitor/keys/aliyun",
-      "note": "密钥待分发：ssh-copy-id -i data/monitor/keys/aliyun.pub root@47.95.140.199"
+      "keyPath": "/root/applications/my-homepage/data/monitor/keys/aliyun"
+    },
+    {
+      "id": "lan-1103",
+      "name": "内网节点 · 113",
+      "type": "ssh",
+      "group": "内网",
+      "address": "10.8.11.3",
+      "port": 22,
+      "username": "root",
+      "authType": "key",
+      "keyPath": "/root/applications/my-homepage/data/monitor/keys/lan-1103"
     }
   ],
   "trackedDirs": []

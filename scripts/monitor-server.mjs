@@ -951,6 +951,7 @@ function setupTerminal(ws, req) {
   let cmdBuf = '';
   const cmds = [];
   let counted = false, closed = false, shellStream = null;
+  const pendingInput = []; // shell 就绪前到达的键盘输入（跨公网握手可达数秒），就绪后回放
   ws.idleTs = Date.now();
 
   const cleanup = (reason) => {
@@ -966,7 +967,12 @@ function setupTerminal(ws, req) {
 
   ws.on('message', (data) => {
     ws.idleTs = Date.now();
-    if (!shellStream) return;
+    if (!shellStream) {
+      // shell 未就绪：缓冲输入（上限 8KB，防止异常连接撑爆内存）
+      const q = Buffer.from(data);
+      if (q.length && pendingInput.length < 64 && pendingInput.reduce((a, b) => a + b.length, 0) < 8192) pendingInput.push(q);
+      return;
+    }
     const buf = Buffer.from(data);
     if (buf.length > 0 && buf[0] === 0x7b) {
       try {
@@ -1000,6 +1006,7 @@ function setupTerminal(ws, req) {
       counted = true;
       termSessions.set(hostId, (termSessions.get(hostId) || 0) + 1);
       audit('session_open', { sid: sessId, host: hostId, user: creds.username, ip });
+      while (pendingInput.length) shellStream.write(pendingInput.shift()); // 回放就绪前的输入
       stream.on('data', (d) => { if (ws.readyState === 1) ws.send(d); });
       stream.stderr.on('data', () => {});
       stream.on('close', () => { try { ws.close(4000, 'ssh_channel_closed'); } catch {} cleanup('ssh_close'); });
