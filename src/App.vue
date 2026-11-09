@@ -360,9 +360,9 @@ onBeforeUnmount(() => {
           <span
             class="brand-tab"
             :class="{ on: topView === 'apps' }"
-            :title="page.heroTitle || '我的应用'"
+            :title="page.heroTitle || '应用中心'"
             @click.prevent.stop="switchTop('apps')"
-          >{{ page.heroTitle || '我的应用' }}</span>
+          >{{ page.heroTitle || '应用中心' }}</span>
           <span
             class="brand-tab"
             :class="{ on: topView === 'monitor' }"

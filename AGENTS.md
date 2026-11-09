@@ -34,7 +34,7 @@
 | 前端栈 | Vue 3 + Vite 5，**无路由 / 无状态库 / 无 UI 组件库 / 零第三方运行时依赖** |
 | 构建产物体积 | gzip 后约 34KB（css ~2.5KB + js ~31KB） |
 | 设置 API | `127.0.0.1:8300`（仅回环监听，nginx 反代 `/api/`） |
-| 监控网关 | `127.0.0.1:8301`（仅回环，nginx 反代 `/api/monitor/` 与 `/api/terminal` WS）；看板在**主页内**（顶栏「我的应用 / 监控中心」标题切换，`#monitor` hash 可直达），`/monitor/` 仅剩重定向 stub + 终端弹窗页 |
+| 监控网关 | `127.0.0.1:8301`（仅回环，nginx 反代 `/api/monitor/` 与 `/api/terminal` WS）；看板在**主页内**（顶栏「应用中心 / 监控中心」标题切换，`#monitor` hash 可直达），`/monitor/` 仅剩重定向 stub + 终端弹窗页 |
 | 监控登录密码 | 首启随机生成于 `data/monitor/INITIAL_PASSWORD.txt`（0600），登录后请在设置中修改 |
 | 监控采集模式 | `hosts[].mode`：`ssh`（中心拉取，默认/公网机）或 `agent`（目标机推送，内网机）；netwatch=agent 实测中 |
 | 被监控主机 | 4 台：本机（local）+ netwatch(10.8.14.200, agent) + aliyun(47.95.140.199, ssh) + lan-1103(10.8.11.3, ssh)；均 ONLINE（2026-11-10） |
@@ -266,7 +266,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 ```json
 "page": {
   "siteName": "我的应用导航",       // 顶栏 + document.title + 页脚
-  "heroTitle": "我的应用",
+  "heroTitle": "应用中心",
   "heroSubtitle": "部署在这台服务器上的个人项目，…"
 }
 ```
@@ -444,7 +444,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 选型结论：**自研轻量网关**（Node 直读 `/proc` + ssh2 免 Agent 远程采集）而非 Prometheus/Grafana/Netdata——决定性理由是「**按目录归属进程资源**」这一核心诉求在成熟方案里都是 cmdline 模板分组（不支持 cwd 维度），而 cwd 归属自研只要几十行；Web SSH 选 **xterm.js + ssh2** 而非 ttyd/Wetty/GateOne（pty 直通架构无法做会话鉴权/凭据加密/审计；GateOne 已停维护）。完整对比表与架构见 `docs/monitor-terminal-blueprint.md`。
 
-**形态（2026-11-10 用户反馈后定稿）**：监控看板**不再是独立页面**——主站顶栏是双标题「我的应用 / 监控中心」（`.brand-tabs`，active 高亮胶囊，点击切换 `topView`，localStorage `my-homepage:topView` 持久化 + `#monitor` hash 直达）。两视图均**常驻 `v-show`**（不用 KeepAlive，原因见踩坑 #17），`MonitorView` 接收 `active` prop 自管「boot / 轮询启停」。首版独立静态页已退役：`monitor/index.html` 只剩重定向 stub，`monitor/terminal.html`（终端弹窗放大页）保留。
+**形态（2026-11-10 用户反馈后定稿）**：监控看板**不再是独立页面**——主站顶栏是双标题「应用中心 / 监控中心」（`.brand-tabs`，active 高亮胶囊，点击切换 `topView`，localStorage `my-homepage:topView` 持久化 + `#monitor` hash 直达；2026-11-10 由「我的应用」改名——标签 1 即 `page.heroTitle`，改名改该配置字段即可，glass-v2 标签为硬编码需同步）。active 高亮胶囊，点击切换 `topView`，localStorage `my-homepage:topView` 持久化 + `#monitor` hash 直达）。两视图均**常驻 `v-show`**（不用 KeepAlive，原因见踩坑 #17），`MonitorView` 接收 `active` prop 自管「boot / 轮询启停」。首版独立静态页已退役：`monitor/index.html` 只剩重定向 stub，`monitor/terminal.html`（终端弹窗放大页）保留。
 
 **组件结构**：`MonitorView.vue`（hero 统计胶囊 + 告警横幅 + 主机卡 grid；登录层已上移至 App.vue 全站门禁）→ `MonitorDetail.vue`（点卡片**内联展开**：4 趋势图一行 / 目录占比 + 目录对比 / 进程明细全宽，独立加载 history+procs，15s 自刷；详情头部 ⚙ 打开该主机的设置弹窗；**目录历史对比默认全选**——`seededDirs` 记录已补勾路径，只补新目录、自刷不重置用户手动取消项，标题旁有全选/清空按钮）→ `MonitorSettings.vue`（设置弹窗，**纳管主机为紧凑列表**：点击行弹出嵌套 `MonitorHostEdit.vue` 编辑弹窗）与 `MonitorTerm.vue`（终端抽屉 + 弹窗放大）。图表走 `src/lib/monitor-charts.js`（**echarts/core 按需注册**，动态 import → 独立 chunk 180KB gz，不占首屏；主包 56KB gz 基本不变）；xterm 同样动态分包（73KB gz）。
 

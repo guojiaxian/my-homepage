@@ -177,7 +177,7 @@
 
     const state = {
       apps: [],
-      page: { siteName: '我的应用导航', heroTitle: '我的应用', heroSubtitle: '部署在这台服务器上的个人项目，端口与运行状态由服务端定时自动探测。' },
+      page: { siteName: '我的应用导航', heroTitle: '应用中心', heroSubtitle: '部署在这台服务器上的个人项目，端口与运行状态由服务端定时自动探测。' },
       probedAt: '', loading: true, loadError: '',
       sortKey: 'default', sortDir: 1,
       customOrder: load(ORDER_KEY),
