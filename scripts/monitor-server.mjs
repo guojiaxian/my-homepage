@@ -75,6 +75,8 @@ function normalizeHost(h) {
   if (!h || typeof h !== 'object' || !h.id) return null;
   if (!HOST_ID_RE.test(String(h.id))) return null;
   const out = { id: String(h.id), name: String(h.name || h.id), type: h.type === 'local' ? 'local' : 'ssh', group: String(h.group || '内网') };
+  // 采集方式：ssh 中心主动拉取（默认） / agent 目标机常驻推送
+  out.mode = h.mode === 'agent' ? 'agent' : 'ssh';
   if (out.type === 'local') {
     out.address = String(h.address || '127.0.0.1');
     out.terminal = h.terminal && typeof h.terminal === 'object' ? {
@@ -199,6 +201,32 @@ function decSecret(blob) {
 }
 let credentials = {};
 try { credentials = JSON.parse(fs.readFileSync(CREDS_PATH, 'utf8')); } catch { /* 首次 */ }
+// CLI 子命令（--agent-install-cmd / --set-cred）会独立写此文件，热加载保持网关与 CLI 视图一致
+let credsWatchTimer = null;
+try {
+  fs.watch(DATA_DIR, (ev, fn) => {
+    if (fn !== path.basename(CREDS_PATH)) return;
+    clearTimeout(credsWatchTimer);
+    credsWatchTimer = setTimeout(() => {
+      try { credentials = JSON.parse(fs.readFileSync(CREDS_PATH, 'utf8')); log('凭据库热加载完成'); }
+      catch (e) { log('凭据库热加载失败（保留旧凭据）:', e.message); }
+    }, 600);
+  });
+} catch (e) { log('凭据库 fs.watch 不可用:', e.message); }
+function agentToken(hostId) {
+  credentials.agents = credentials.agents || {};
+  if (!credentials.agents[hostId]) {
+    credentials.agents[hostId] = crypto.randomBytes(24).toString('hex');
+    saveCredentials();
+    log('已为主机生成 agent token:', hostId);
+  }
+  return credentials.agents[hostId];
+}
+function hostByAgentToken(token) {
+  const agents = credentials.agents || {};
+  const hostId = Object.keys(agents).find((id) => agents[id] === token);
+  return hostId && config.hosts.find((h) => h.id === hostId) ? hostId : null;
+}
 function saveCredentials() {
   ensureDirSync(DATA_DIR);
   const tmp = CREDS_PATH + '.tmp';
@@ -949,12 +977,98 @@ function applyCollectors() {
     if (host.type === 'local') {
       collectorTimers.push(setInterval(() => tickLocal(host).catch(() => {}), (config.collect.localIntervalSec || 5) * 1000));
       setTimeout(() => tickLocal(host).catch(() => {}), 200);
+    } else if (host.mode === 'agent') {
+      // agent 推送模式：不主动连接；看门狗只判定静默掉线（推送到达由 push 端点驱动采集管线）
+      collectorTimers.push(setInterval(() => {
+        const st = stateOf(host.id);
+        if (st.online && Date.now() - st.lastOk > 70_000) {
+          st.online = false;
+          st.error = 'agent 未上报（>70 秒）';
+          pushHistoryOffline(host.id, Date.now());
+        }
+      }, 10_000));
     } else {
       collectorTimers.push(setInterval(() => tickRemote(host).catch(() => {}), (config.collect.remoteIntervalSec || 20) * 1000));
       setTimeout(() => tickRemote(host).catch(() => {}), 800 + Math.floor(Math.random() * 3000));
     }
   }
 }
+
+/* ============================ Agent 推送模式 ============================ */
+function localLanAddress() {
+  const local = config.hosts.find((h) => h.type === 'local');
+  if (local && local.address) return local.address;
+  const ifs = os.networkInterfaces();
+  for (const list of Object.values(ifs)) for (const i of list || []) if (i.family === 'IPv4' && !i.internal) return i.address;
+  return '127.0.0.1';
+}
+function agentPushUrl() { return `http://${localLanAddress()}/api/monitor/agent`; }
+
+function buildAgentInstaller(host, intervalSec) {
+  const token = agentToken(host.id);
+  const center = agentPushUrl();
+  // 采集体与 SSH 探测脚本同源（含 awk 的 $ 符号，必须以引用型 heredoc 原样落盘）
+  const collector = REMOTE_PROBE_AWK + REMOTE_PROBE_SHELL;
+  const body = [
+    '#!/bin/sh',
+    '# my-homepage 监控 agent（中心生成，勿手改）',
+    "CENTER='" + center + "'",
+    "TOKEN='" + token + "'",
+    'INTERVAL=' + (intervalSec || 20),
+    '',
+    'collect() {',
+    collector,
+    '}',
+    '',
+    'while :; do',
+    '  out=$(collect 2>/dev/null)',
+    '  if [ -n "$out" ]; then',
+    '    curl -fsS -m 10 -H "X-Agent-Token: $TOKEN" -H "Content-Type: text/plain" --data-binary "$out" "$CENTER/push" >/dev/null 2>&1 || :',
+    '  fi',
+    '  sleep "$INTERVAL"',
+    'done',
+    '',
+  ].join('\n');
+  return `#!/bin/sh
+# my-homepage 监控 agent 一键安装 · 主机 ${host.id} · 幂等可重装
+set -e
+cat > /usr/local/bin/my-homepage-agent.sh <<'AGENT_BODY'
+${body}
+AGENT_BODY
+chmod 700 /usr/local/bin/my-homepage-agent.sh
+
+if command -v systemctl >/dev/null 2>&1; then
+  cat > /etc/systemd/system/my-homepage-agent.service <<'UNIT_EOF'
+[Unit]
+Description=my-homepage monitor agent (push to center)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/bin/sh /usr/local/bin/my-homepage-agent.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+UNIT_EOF
+  systemctl daemon-reload
+  if systemctl cat my-homepage-agent.service >/dev/null 2>&1 && systemctl is-active --quiet my-homepage-agent.service; then
+    systemctl restart my-homepage-agent.service
+  else
+    systemctl enable --now my-homepage-agent.service
+  fi
+  echo "agent 服务已启动：systemctl status my-homepage-agent"
+else
+  pkill -f my-homepage-agent.sh 2>/dev/null || :
+  nohup /usr/local/bin/my-homepage-agent.sh >/dev/null 2>&1 &
+  (crontab -l 2>/dev/null | grep -v my-homepage-agent.sh; echo "@reboot /usr/local/bin/my-homepage-agent.sh >/dev/null 2>&1") | crontab -
+  echo "agent 已以 nohup + cron 方式常驻"
+fi
+`;
+}
+
 
 /* ============================ 终端网关（WS + ssh2 shell） ============================ */
 const wss = new WebSocketServer({ noServer: true });
@@ -1120,6 +1234,40 @@ async function route(req, res) {
 
   if (p === '/api/monitor/healthz') return sendJson(res, 200, { ok: true, t: nowIso() });
 
+  if (p === '/api/monitor/agent/push' && req.method === 'POST') {
+    const token = req.headers['x-agent-token'] || u.searchParams.get('token') || '';
+    const hostId = hostByAgentToken(String(token));
+    if (!hostId) { audit('agent_push_denied', { ip }); return sendJson(res, 401, { error: '无效 agent token' }); }
+    const host = config.hosts.find((h) => h.id === hostId);
+    if (!host) return sendJson(res, 404, { error: '主机不存在' });
+    const text = await readBody(req, 512 * 1024);
+    if (!text.trim()) return sendJson(res, 400, { error: '空载荷' });
+    const st = stateOf(host.id);
+    const t0 = Date.now();
+    try {
+      const counters = parseRemoteOutput(text);
+      const interval = st.prev ? Math.max(0.5, (t0 - (st.prev.t || t0)) / 1000) : 0;
+      const { snap, prev, detail } = buildSnapshot(host.id, counters, st.prev, interval, !st.prev, effectiveTrackedDirsFor(host));
+      prev.t = t0;
+      st.prev = prev;
+      finishTick(host, snap, detail);
+      return sendJson(res, 200, { ok: true });
+    } catch (e) {
+      st.online = false; st.error = String(e.message || e);
+      return sendJson(res, 500, { error: '解析失败' });
+    }
+  }
+
+  if (p === '/api/monitor/agent/install.sh' && req.method === 'GET') {
+    const token = String(u.searchParams.get('token') || '');
+    const hostId = hostByAgentToken(token);
+    if (!hostId) { res.writeHead(403, { 'Content-Type': 'text/plain; charset=utf-8' }); return res.end('无效 token'); }
+    const host = config.hosts.find((h) => h.id === hostId);
+    const interval = Math.min(300, Math.max(5, +u.searchParams.get('interval') || 20));
+    res.writeHead(200, { 'Content-Type': 'text/x-shellscript; charset=utf-8', 'Cache-Control': 'no-store' });
+    return res.end(buildAgentInstaller(host, interval));
+  }
+
   if (p === '/api/monitor/login' && req.method === 'POST') {
     if (rateLimited(ip)) { audit('auth_fail', { ip, reason: 'rate_limited' }); return sendJson(res, 429, { error: '尝试过于频繁，请稍后再试' }); }
     const body = JSON.parse((await readBody(req)) || '{}');
@@ -1214,6 +1362,11 @@ async function route(req, res) {
       const procs = dirFilter ? detail.procs.filter(x => x.dir === dirFilter) : detail.procs;
       return sendJson(res, 200, { hostId: host.id, online: true, t: st.lastSnap?.t, dirs: detail.dirs, procs, procsTotal: detail.procsTotal });
     }
+    if (sub === '/agent-install' && req.method === 'GET') {
+      const interval = Math.min(300, Math.max(5, +u.searchParams.get('interval') || 20));
+      const cmd = `curl -fsSL 'http://${localLanAddress()}/api/monitor/agent/install.sh?token=${agentToken(host.id)}&interval=${interval}' | sh`;
+      return sendJson(res, 200, { cmd, interval });
+    }
     if (sub === '/probe' && req.method === 'POST') {
       if (!guard(req, res)) return;
       if (host.type === 'local') setTimeout(() => tickLocal(host).catch(() => {}), 0);
@@ -1261,6 +1414,14 @@ async function main() {
     writePasswordHash(scryptHash(pw));
     sessions.clear();
     console.log('密码已更新');
+    process.exit(0);
+  }
+  if (args[0] === '--agent-install-cmd') {
+    const host = config.hosts.find((h) => h.id === args[1]);
+    if (!host) { console.error('主机不存在:', args[1]); process.exit(1); }
+    const interval = Math.min(300, Math.max(5, +args[args.indexOf('--interval') + 1] || 20));
+    console.log(`在目标服务器上以 root 执行：`);
+    console.log(`curl -fsSL 'http://${localLanAddress()}/api/monitor/agent/install.sh?token=${agentToken(host.id)}&interval=${interval}' | sh`);
     process.exit(0);
   }
   if (args[0] === '--set-cred') {

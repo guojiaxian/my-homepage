@@ -1,5 +1,6 @@
 <script setup>
-import { watch } from 'vue'
+import { ref, watch } from 'vue'
+import { monApi } from '../lib/monitor-api.js'
 
 /* 单主机编辑弹窗，两处复用：
    · MonitorSettings（草稿模式）：直接改传入的响应式对象，由面板底部「保存配置」统一提交；
@@ -21,9 +22,34 @@ watch(
     if (v && props.host?.type === 'local' && !props.host.terminal) {
       props.host.terminal = { host: '127.0.0.1', port: 22, username: 'root', authType: 'key', keyPath: '' }
     }
+    if (v && props.host?.type === 'ssh' && !props.host.mode) props.host.mode = 'ssh'
   },
   { immediate: true },
 )
+
+/* ---------- Agent 推送模式：一键安装命令 ---------- */
+const installCmd = ref('')
+const installTip = ref('')
+const installBusy = ref(false)
+async function genInstall() {
+  installBusy.value = true
+  installTip.value = ''
+  try {
+    const r = await monApi(`/api/monitor/hosts/${encodeURIComponent(props.host.id)}/agent-install`)
+    installCmd.value = r.cmd
+  } catch (e) { installTip.value = '生成失败：' + e.message } finally { installBusy.value = false }
+}
+async function copyInstall() {
+  try { await navigator.clipboard.writeText(installCmd.value); installTip.value = '已复制，到目标服务器以 root 执行 ✓' }
+  catch {
+    const ta = document.createElement('textarea')
+    ta.value = installCmd.value; ta.style.position = 'fixed'; ta.style.opacity = '0'
+    document.body.appendChild(ta); ta.select()
+    try { document.execCommand('copy'); installTip.value = '已复制，到目标服务器以 root 执行 ✓' } catch { installTip.value = '复制失败，请手动选择文本' }
+    ta.remove()
+  }
+  setTimeout(() => { installTip.value = '' }, 2500)
+}
 
 function addDir() {
   const h = props.host
@@ -64,6 +90,12 @@ function onDelete() {
                 <select v-model="host.authType"><option value="key">密钥</option><option value="password">密码</option></select>
               </label>
               <label class="fitem span2"><span>私钥路径（0600）</span><input v-model="host.keyPath" type="text" /></label>
+              <label class="fitem span2"><span>采集方式</span>
+                <select v-model="host.mode">
+                  <option value="ssh">SSH 拉取（中心每 20s 短连接采集，需密钥/凭据）</option>
+                  <option value="agent">Agent 推送（目标机常驻 agent，监控零 SSH 连接）</option>
+                </select>
+              </label>
             </template>
             <template v-else>
               <label class="fitem"><span>展示地址</span><input v-model="host.address" type="text" /></label>
@@ -90,8 +122,24 @@ function onDelete() {
             <button class="mini-btn" @click="addDir">＋添加目录</button>
           </div>
 
-          <p v-if="host.type === 'ssh'" class="sub cred-tip">
+          <div v-if="host.type === 'ssh' && host.mode === 'agent'" class="he-dirs">
+            <div class="sub" style="margin-bottom:4px">
+              Agent 一键安装（在目标服务器以 root 执行；安装后监控数据由 agent 推送，SSH 仅用于打开终端）
+            </div>
+            <div class="dir-row">
+              <span class="d-path">{{ installCmd || '尚未生成安装命令' }}</span>
+              <button class="mini-btn" :disabled="installBusy" @click="installCmd ? copyInstall() : genInstall()">
+                {{ installBusy ? '生成中…' : installCmd ? '复制' : '生成安装命令' }}
+              </button>
+            </div>
+            <p v-if="installTip" class="sub" :style="{ color: installTip.includes('复制') ? 'var(--green)' : 'var(--red)' }">{{ installTip }}</p>
+          </div>
+
+          <p v-if="host.type === 'ssh' && host.mode !== 'agent'" class="sub cred-tip">
             远程主机推荐密钥认证：先 <code>ssh-copy-id -i &lt;keyPath&gt;.pub {{ host.username }}@{{ host.address || 'host' }}</code> 分发公钥；密码认证经 AES-256-GCM 加密存储（CLI：<code>node scripts/monitor-server.mjs --set-cred {{ host.id }} --password-stdin</code>）。
+          </p>
+          <p v-if="host.type === 'ssh' && host.mode === 'agent'" class="sub cred-tip">
+            Agent 模式下终端仍走 SSH（复用下方认证方式）；监控数据推送断流 >70 秒会显示离线。
           </p>
         </div>
         <div class="mhe-foot">

@@ -419,6 +419,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - nginx：`/unslop` → 301 → `/unslop/`，两处 server 块各一个 location（`root /root/applications/my-homepage` + `try_files … /unslop/index.html` + no-cache），备份 `*.bak-unslop-20261106`。
 - 踩坑：Vue 模板习惯的自闭合 `<div />` 在原生 HTML 里是**未闭合标签**，曾把 footer 吞进 `#u-content` 内部，首次 `innerHTML` 渲染将其销毁、`renderPageText` 抛错中断整个渲染（见踩坑 #11）。
 
+**Agent 推送模式（2026-11-10）**：`hosts[].mode: 'agent'` 切换——目标机常驻零依赖 sh agent（采集代码与 SSH 探测**同源**，指标口径一致），每 20s `curl POST /api/monitor/agent/push`（X-Agent-Token 鉴权，token 存 credentials.json agents 段，CLI/凭据库 fs.watch 热同步）；中心复用 parseRemoteOutput→buildSnapshot 管线，**监控零 SSH 连接**（终端仍 SSH）；推送断流 >70s 看门狗判离线。一键安装：`GET /api/monitor/agent/install.sh?token=`（token 门禁）返回自带采集器/systemd 单元的幂等安装脚本（无 systemd 兜底 nohup+cron）；设置页主机弹窗「采集方式=Agent 推送」可生成/复制命令，CLI `--agent-install-cmd <hostId>` 同效。适用内网可达中心的机器；**公网不可内连的主机（如阿里云）保持 SSH 拉取模式**（中心 20s 短连接外连采集，即当前定制方案）。netwatch 已实测切换（推送驱动/掉线告警/恢复/终端不受影响）。
+
 ### 8.8 毛玻璃 v2 对比端点（`/glass-v2/`，2026-11-10，unslop skill 产出）
 
 应用导航 + 监控中心**双视图**的毛玻璃对比版（用户点名「毛玻璃、好看、炫酷、保留现页对比」），纯 HTML/CSS/JS 零构建，结构上 = `/glass/` 的设计语言 × 主站 SPA 的双视图功能：

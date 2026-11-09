@@ -65,6 +65,25 @@ echo '目标机密码' | node scripts/monitor-server.mjs --set-cred <hostId> --p
 
 ## 4. 目录跟踪
 
+### 4.1 采集方式：SSH 拉取 vs Agent 推送（2026-11-10）
+
+| | SSH 拉取（默认） | Agent 推送 |
+|---|---|---|
+| 连接 | 中心每 20s SSH 短连接 exec 采集 | 目标机 agent 每 20s curl POST 到中心 |
+| 前置 | 密钥/凭据 | 一条安装命令（自带 token） |
+| 适用 | 全部（含公网机，中心主动外连） | 内网可达中心的机器 |
+| 监控期 SSH 连接 | 每周期一次短连接 | **零**（SSH 仅用于终端） |
+| 掉线判定 | 探测失败 | 推送断流 >70s（看门狗） |
+
+一键安装（目标机 root 执行；设置页主机弹窗「采集方式=Agent 推送」可生成/复制，或 CLI）：
+
+```bash
+node scripts/monitor-server.mjs --agent-install-cmd <hostId>   # 打印命令
+curl -fsSL 'http://10.8.11.4/api/monitor/agent/install.sh?token=<token>&interval=20' | sh
+```
+
+安装动作：写 `/usr/local/bin/my-homepage-agent.sh`（0700，含 token）+ systemd 单元 `my-homepage-agent.service`（enable --now；无 systemd 兜底 nohup+cron）——**幂等可重装，不触碰目标机其它服务**。卸载：`systemctl disable --now my-homepage-agent && rm -f /etc/systemd/system/my-homepage-agent.service /usr/local/bin/my-homepage-agent.sh`。公网机（无法内连中心，如阿里云）保持 SSH 拉取模式。
+
 - **归属规则**：cwd → exe → cmdline → cgroup(容器 compose 工作目录) 四路匹配；未命中进程不入库。
 - **新增目录**：设置界面「＋添加目录」；或配置文件 `trackedDirs[]`；生效 ≤5s（本机）/≤20s（远程），历史从加入时刻起算。
 - **边界**：拒绝 `/` 全盘跟踪；容器按 compose 工作目录归组，无 compose 信息的按 `容器 <name>` 单列。
