@@ -3,6 +3,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { monApi, fmtMbs, fmtPct, fmtUptime } from '../lib/monitor-api.js'
 import MonitorDetail from './MonitorDetail.vue'
 import MonitorSettings from './MonitorSettings.vue'
+import MonitorHostEdit from './MonitorHostEdit.vue'
 import MonitorTerm from './MonitorTerm.vue'
 
 /* active：是否为当前顶层视图（App.vue v-show 常驻，由父级告知）。
@@ -87,6 +88,46 @@ function toggleDetail(h) {
 }
 function openTerm(h) { termHost.value = { id: h.id, name: h.name } }
 function onSaved() { refresh() }
+
+/* ---------- 详情页 ⚙：直连编辑单主机 ----------
+   拉全量配置 → 深拷贝出目标主机 → 弹窗编辑 → 保存时 PUT 整份配置（其余段原样带回） */
+const hostEdit = reactive({ open: false, host: null, cfg: null, saving: false, err: '' })
+async function openDirectEdit(h) {
+  hostEdit.err = ''
+  try {
+    const data = JSON.parse(JSON.stringify(await monApi('/api/monitor/config')))
+    const target = (data.hosts || []).find((x) => x.id === h.id)
+    if (!target) { alert(`配置中未找到主机 ${h.id}`); return }
+    hostEdit.cfg = data
+    hostEdit.host = target
+    hostEdit.open = true
+  } catch (e) { alert('加载配置失败：' + e.message) }
+}
+async function saveDirectEdit() {
+  const c = hostEdit.cfg
+  if (!c) { hostEdit.open = false; return }
+  hostEdit.saving = true
+  hostEdit.err = ''
+  try {
+    await monApi('/api/monitor/config', {
+      method: 'PUT',
+      body: {
+        hosts: c.hosts,
+        trackedDirs: c.trackedDirs,
+        thresholds: c.thresholds,
+        collect: c.collect,
+        terminal: c.terminal,
+        webhookUrl: c.webhookUrl?.trim() || '',
+      },
+    })
+    hostEdit.open = false
+    onSaved()
+    /* 阈值可能在本次保存中被修改，同步刷新图表阈值参考线 */
+    monApi('/api/monitor/config').then((x) => { thresholds.value = x.thresholds || {} }).catch(() => {})
+  } catch (e) {
+    hostEdit.err = '保存失败：' + e.message
+  } finally { hostEdit.saving = false }
+}
 
 /* ---------- 卡片渲染辅助 ---------- */
 function isPublic(h) { return /公网|public/i.test(h.group || '') }
@@ -213,11 +254,22 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
         :thresholds="thresholds"
         @term="openTerm(selectedHost)"
         @close="selectedId = ''"
+        @edit="openDirectEdit(selectedHost)"
       />
       <div v-if="selectedHost" style="height: 8px" />
 
     <!-- 设置弹窗 -->
     <MonitorSettings :open="settingsOpen" @close="settingsOpen = false" @saved="onSaved" />
+    <!-- 详情页 ⚙ 直连主机编辑弹窗（direct 模式：弹窗内「保存」直接 PUT 配置） -->
+    <MonitorHostEdit
+      :open="hostEdit.open"
+      :host="hostEdit.host || { type: 'ssh' }"
+      :direct="true"
+      :saving="hostEdit.saving"
+      :err="hostEdit.err"
+      @close="hostEdit.open = false"
+      @save="saveDirectEdit"
+    />
     <!-- 终端抽屉 -->
     <MonitorTerm v-if="termHost" :host-id="termHost.id" :host-name="termHost.name" @close="termHost = null" />
   </div>

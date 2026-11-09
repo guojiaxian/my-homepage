@@ -6,7 +6,7 @@ const props = defineProps({
   host: { type: Object, required: true }, // summary 里的主机条目（随父级轮询更新）
   thresholds: { type: Object, default: () => ({}) },
 })
-const emit = defineEmits(['term', 'close'])
+const emit = defineEmits(['term', 'close', 'edit'])
 
 const range = ref('1h')
 const hist = ref([])
@@ -228,6 +228,7 @@ onBeforeUnmount(() => {
       <div class="range-tabs">
         <button v-for="r in RANGES" :key="r.v" :class="{ on: range === r.v }" @click="range = r.v">{{ r.label }}</button>
       </div>
+      <button class="head-btn gear" title="设置该主机（连接 / 跟踪目录）" @click="emit('edit')">⚙</button>
       <button class="head-btn accent" @click="emit('term')">终端</button>
       <button class="head-btn" @click="emit('close')">收起</button>
     </div>
@@ -345,6 +346,7 @@ onBeforeUnmount(() => {
 .head-btn:hover { color: var(--text); background: var(--accent-soft); }
 .head-btn.accent { color: var(--accent); background: var(--accent-soft); font-weight: 500; }
 .head-btn.accent:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 2px 10px rgb(37 99 235 / 0.18); }
+.head-btn.gear { font-size: 15px; padding: 5px 11px; }
 
 /* 分段式时间窗（与主站 segmented 同族） */
 .range-tabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--bg-hover); }

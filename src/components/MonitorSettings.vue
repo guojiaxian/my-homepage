@@ -1,6 +1,7 @@
 <script setup>
 import { reactive, ref, watch } from 'vue'
 import { monApi, fmtTime } from '../lib/monitor-api.js'
+import MonitorHostEdit from './MonitorHostEdit.vue'
 
 const props = defineProps({ open: { type: Boolean, default: false } })
 const emit = defineEmits(['close', 'saved'])
@@ -9,6 +10,7 @@ const tip = ref('')
 const tipCls = ref('ok')
 const auditRows = ref([])
 const saving = ref(false)
+const editIdx = ref(-1) // 嵌套编辑弹窗：当前主机下标，-1 关闭
 
 const cfg = reactive({
   hosts: [],
@@ -24,6 +26,7 @@ function bad(msg) { tip.value = msg; tipCls.value = 'bad' }
 
 async function load() {
   tip.value = ''
+  editIdx.value = -1
   try {
     const c = await monApi('/api/monitor/config')
     const data = JSON.parse(JSON.stringify(c))
@@ -42,21 +45,16 @@ watch(() => props.open, (v) => { if (v) load() })
 
 function addHost() {
   cfg.hosts.push({ id: 'host-' + Math.random().toString(36).slice(2, 6), name: '新主机', type: 'ssh', group: '内网', address: '', port: 22, username: 'root', authType: 'key', keyPath: '', trackedDirs: [] })
+  editIdx.value = cfg.hosts.length - 1 // 创建后立即打开编辑弹窗
 }
-function addHostDir(i) {
-  const p = prompt(`输入 ${cfg.hosts[i].name || cfg.hosts[i].id} 上要跟踪的绝对目录路径（如 /opt/myapp）：`)
-  if (!p) return
-  if (!p.startsWith('/')) { alert('必须是绝对路径'); return }
-  if (p === '/') { alert('不允许跟踪根目录（不越界采集）'); return }
-  const clean = p.replace(/\/+$/, '')
-  const list = cfg.hosts[i].trackedDirs || (cfg.hosts[i].trackedDirs = [])
-  if (list.some((d) => d.path === clean)) { alert('该目录已在列表中'); return }
-  list.push({ path: clean, source: 'host' })
+function delHost(i) { cfg.hosts.splice(i, 1) }
+function hostSummary(h) {
+  const kind = h.type === 'local' ? '本机' : 'SSH 远程'
+  const addr = h.type === 'ssh' ? `${h.address || '未配置地址'}:${h.port || 22}` : (h.address || '127.0.0.1')
+  const n = (h.trackedDirs || []).length
+  return `${kind} · ${h.group || '未分组'} · ${addr}${n ? ` · ${n} 个跟踪目录` : ''}`
 }
-function delHostDir(i, di) { cfg.hosts[i].trackedDirs.splice(di, 1) }
-function delHost(i) {
-  if (confirm(`删除主机 ${cfg.hosts[i].id}？（保存后生效）`)) cfg.hosts.splice(i, 1)
-}
+
 function addDir() {
   const p = prompt('输入要跟踪的绝对目录路径（如 /opt/myapp）：')
   if (!p) return
@@ -111,55 +109,21 @@ async function changePw() {
         </div>
         <div class="mon-modal-body">
           <section class="msec">
-            <h3>纳管主机</h3>
-            <div v-for="(h, i) in cfg.hosts" :key="h.id" class="host-edit">
-              <div class="he-head">
-                <b>{{ h.id }}</b>
-                <span class="sub">{{ h.type === 'local' ? '本机' : 'SSH 远程' }}</span>
-                <span class="grow" />
-                <button v-if="h.type === 'ssh'" class="mini-btn danger" @click="delHost(i)">删除</button>
-                <span v-else class="sub">不可删除</span>
+            <h3>纳管主机 <span class="hcount">{{ cfg.hosts.length }}</span></h3>
+            <div class="host-list">
+              <div v-for="(h, i) in cfg.hosts" :key="h.id" class="host-row" :class="{ open: editIdx === i }" @click="editIdx = i">
+                <span class="hr-ico" :class="{ local: h.type === 'local' }">{{ h.type === 'local' ? '🖥' : '☁' }}</span>
+                <span class="hr-main">
+                  <span class="hr-name">{{ h.name || h.id }} <code>{{ h.id }}</code></span>
+                  <span class="hr-sum">{{ hostSummary(h) }}</span>
+                </span>
+                <span v-if="h.type === 'local'" class="hr-lock" title="本机主机不可删除">内置</span>
+                <span class="hr-arrow">›</span>
               </div>
-              <div class="form-grid">
-                <label class="fitem"><span>名称</span><input v-model="h.name" type="text" /></label>
-                <label class="fitem"><span>分组（内网=蓝 / 公网=橙）</span><input v-model="h.group" type="text" /></label>
-                <template v-if="h.type === 'ssh'">
-                  <label class="fitem"><span>地址</span><input v-model="h.address" type="text" /></label>
-                  <label class="fitem"><span>SSH 端口</span><input v-model.number="h.port" type="number" /></label>
-                  <label class="fitem"><span>用户名</span><input v-model="h.username" type="text" /></label>
-                  <label class="fitem"><span>认证</span>
-                    <select v-model="h.authType"><option value="key">密钥</option><option value="password">密码</option></select>
-                  </label>
-                  <label class="fitem span2"><span>私钥路径（0600）</span><input v-model="h.keyPath" type="text" /></label>
-                </template>
-                <template v-else>
-                  <label class="fitem"><span>展示地址</span><input v-model="h.address" type="text" /></label>
-                  <label class="fitem"><span>终端主机</span><input v-model="h.terminal.host" type="text" /></label>
-                  <label class="fitem"><span>终端端口</span><input v-model.number="h.terminal.port" type="number" /></label>
-                  <label class="fitem"><span>终端用户</span><input v-model="h.terminal.username" type="text" /></label>
-                  <label class="fitem"><span>认证</span>
-                    <select v-model="h.terminal.authType"><option value="key">密钥</option><option value="password">密码</option></select>
-                  </label>
-                  <label class="fitem span2"><span>私钥路径</span><input v-model="h.terminal.keyPath" type="text" /></label>
-                </template>
-              </div>
-              <p v-if="h.note" class="sub">{{ h.note }}</p>
-              <div class="he-dirs">
-                <div class="sub" style="margin-bottom:4px">
-                  该主机跟踪目录（目录级资源统计{{ h.type === 'local' ? '；主页登记的应用目录已自动并入' : '' }}）
-                </div>
-                <div v-for="(d, di) in h.trackedDirs" :key="d.path" class="dir-row">
-                  <span class="d-path">{{ d.path }}</span>
-                  <span class="d-src">主机目录</span>
-                  <button class="mini-btn danger" @click="delHostDir(i, di)">移除</button>
-                </div>
-                <button class="mini-btn" @click="addHostDir(i)">＋添加目录</button>
-              </div>
+              <p v-if="!cfg.hosts.length" class="sub" style="padding:8px 2px">暂无主机，点击下方添加。</p>
             </div>
-            <button class="mini-btn" @click="addHost">＋添加主机</button>
-            <p class="sub" style="margin:8px 0 0">
-              远程主机推荐密钥认证：先 <code>ssh-copy-id -i &lt;keyPath&gt;.pub user@host</code> 分发公钥；密码认证经 AES-256-GCM 加密存储（CLI：<code>node scripts/monitor-server.mjs --set-cred &lt;hostId&gt; --password-stdin</code>）。
-            </p>
+            <button class="mini-btn" style="margin-top:8px" @click="addHost">＋添加主机</button>
+            <p class="sub" style="margin:8px 0 0">点击主机条目编辑连接信息与跟踪目录；弹窗内修改为草稿，由底部「保存配置」统一提交。</p>
           </section>
 
           <section class="msec">
@@ -237,8 +201,21 @@ async function changePw() {
         </div>
       </div>
     </div>
+
+    <!-- 嵌套主机编辑弹窗（z-index 高于面板，草稿模式：修改留在 cfg，底部「保存配置」统一提交） -->
+    <MonitorHostEdit
+      :open="editIdx >= 0"
+      :host="editIdx >= 0 ? cfg.hosts[editIdx] : { type: 'ssh' }"
+      :deletable="editIdx >= 0 && cfg.hosts[editIdx]?.type === 'ssh'"
+      @close="editIdx = -1"
+      @del="delHost(editIdx); editIdx = -1"
+    />
   </Teleport>
 </template>
+
+<script>
+export default { name: 'MonitorSettings' }
+</script>
 
 <style scoped>
 .mon-modal-mask { position: fixed; inset: 0; background: rgb(16 24 40 / 0.45); z-index: 70; display: flex; align-items: flex-start; justify-content: center; padding: 40px 16px; overflow: auto; }
@@ -251,7 +228,7 @@ async function changePw() {
 .mon-modal-body { padding: 16px 18px 22px; max-height: calc(100vh - 160px); overflow: auto; }
 .msec { margin-bottom: 22px; }
 .msec h3 { font-size: 14px; margin: 0 0 10px; padding-bottom: 6px; border-bottom: 1px dashed var(--border); }
-.grow { flex: 1; }
+.hcount { font-size: 12px; color: var(--text-2); font-weight: 400; margin-left: 4px; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .fitem { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
 .fitem span { font-size: 12px; color: var(--text-2); }
@@ -259,9 +236,6 @@ async function changePw() {
 .fitem.span2 { grid-column: span 2; }
 .check-row { display: flex; align-items: center; gap: 6px; font-size: 13px; padding: 6px 0; }
 .check-row input { accent-color: var(--accent); }
-.host-edit { border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 10px; background: var(--bg); }
-.he-head { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-.he-head b { font-size: 13.5px; }
 .dir-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--bg); }
 .d-path { font-family: var(--mono); font-size: 12.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .d-src { font-size: 11px; border-radius: 999px; padding: 0 8px; background: var(--purple-soft); color: var(--purple); }
@@ -283,7 +257,24 @@ async function changePw() {
 .primary-btn:disabled { opacity: 0.6; cursor: default; }
 .sub { color: var(--text-2); font-size: 12px; }
 code { font-family: var(--mono); font-size: 11.5px; background: var(--bg-hover); border-radius: 4px; padding: 0 4px; }
-</style>
-<style scoped>
-.he-dirs { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+
+/* ===== 纳管主机紧凑列表（点击行 → 嵌套编辑弹窗） ===== */
+.host-list { display: flex; flex-direction: column; gap: 6px; }
+.host-row {
+  display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--border); border-radius: 10px;
+  padding: 9px 12px; background: var(--bg);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.host-row:hover { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--bg-soft); }
+.host-row.open { border-color: var(--accent); }
+.hr-ico { width: 30px; height: 30px; flex: none; display: flex; align-items: center; justify-content: center; border-radius: 8px; font-size: 15px; background: var(--amber-soft); color: var(--amber); }
+.hr-ico.local { background: var(--accent-soft); color: var(--accent); }
+.hr-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.hr-name { font-size: 13.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hr-name code { font-weight: 400; }
+.hr-sum { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hr-lock { font-size: 11px; border-radius: 999px; padding: 1px 8px; background: var(--bg-hover); color: var(--text-2); flex: none; }
+.hr-arrow { color: var(--text-2); font-size: 16px; flex: none; line-height: 1; }
 </style>
