@@ -69,7 +69,7 @@
     const next = isDark() ? 'light' : 'dark'
     root.dataset.theme = next
     try { localStorage.setItem('gv2:theme', next) } catch { /* 忽略 */ }
-    monitor.onThemeChange()
+    monitorModule.onThemeChange()
   })
 
   /* ============================ 视图切换 ============================ */
@@ -941,9 +941,11 @@
 
     /* ---------- 终端 ---------- */
     let term = null, termWs = null, termFit = null
-    function termStatus(txt, cls = '') { const el = $('#gv-term-status'); el.textContent = txt; el.className = 'gv-term-status ' + cls }
+    let termHostId = '' // 当前抽屉的目标主机 id（重连/弹窗都要用 id 而非名称）
+    function termStatus(txt, cls = '') { const el = $('#gv-term-status'); el.textContent = txt; el.className = 'gv-term-status ' + (cls || '') }
     function openTerm(hostId) {
       const h = state.summary?.hosts.find((x) => x.id === hostId)
+      termHostId = hostId
       $('#gv-term-drawer').hidden = false
       $('#gv-term-mask').hidden = false
       $('#gv-term-title').textContent = `终端 · ${h ? h.name : hostId}`
@@ -988,10 +990,9 @@
     }
     $('#gv-term-close').addEventListener('click', closeTerm)
     $('#gv-term-mask').addEventListener('click', closeTerm)
-    $('#gv-term-reconnect').addEventListener('click', () => { if ($('#gv-term-title').dataset.host) connectTerm($('#gv-term-title').dataset.host) })
+    $('#gv-term-reconnect').addEventListener('click', () => { if (termHostId) connectTerm(termHostId) })
     $('#gv-term-popout').addEventListener('click', () => {
-      const hostId = decodeURIComponent(($('#gv-term-title').textContent.match(/· (.+)$/) || [])[1] || '')
-      window.open(`/monitor/terminal.html?host=${encodeURIComponent(hostId)}`, '_blank', 'width=980,height=640')
+      if (termHostId) window.open(`/monitor/terminal.html?host=${encodeURIComponent(termHostId)}`, '_blank', 'width=980,height=640')
     })
     window.addEventListener('resize', () => { if (termFit) { try { termFit.fit() } catch { /* 忽略 */ } } Object.values(state.charts).forEach((c) => c && c.resize()) })
 
