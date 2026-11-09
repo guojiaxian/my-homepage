@@ -137,23 +137,36 @@ button {
   gap: 8px;
 }
 
-.monitor-entry {
+/* 顶栏双标题：我的应用 / 监控中心，点击切换顶层视图 */
+.brand-tabs {
   display: inline-flex;
   align-items: center;
-  height: 34px;
-  padding: 0 12px;
-  border-radius: 8px;
-  border: 1px solid var(--border);
-  background: var(--bg-soft);
-  color: var(--text-2);
-  font-size: 13.5px;
-  transition: all 0.15s ease;
+  gap: 2px;
+  margin-left: 2px;
 }
 
-.monitor-entry:hover {
+.brand-tab {
+  display: inline-flex;
+  align-items: center;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 8px;
+  color: var(--text-2);
+  font-size: 14.5px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.brand-tab:hover {
+  color: var(--text);
+  background: var(--bg-hover);
+}
+
+.brand-tab.on {
   color: var(--accent);
-  border-color: var(--accent);
-  text-decoration: none;
+  background: var(--accent-soft);
+  font-weight: 600;
 }
 
 .icon-btn {

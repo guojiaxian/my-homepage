@@ -4,7 +4,7 @@
   "auth": {
     "sessionTtlHours": 12,
     "maxFailPerMin": 5,
-    "passwordHash": "scrypt$25e4d6f7487e7e26787084f49021893e$e898b61e7bb2540098a2556fa348af6fec873c07254966e4de48f306b2e75fbe"
+    "passwordHash": "scrypt$408737972ffc4b13f89feda88ccef39e$8b31eee8685733e32beec4907527474ee4e82b95c9bfd9a07e27734b08939052"
   },
   "collect": {
     "localIntervalSec": 5,

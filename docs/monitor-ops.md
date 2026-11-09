@@ -2,7 +2,7 @@
 
 > 配套设计文档：`docs/monitor-terminal-blueprint.md`（选型对比 / 架构 / 安全设计）
 > 本文面向日常运维：部署、配置、扩缩容、排障。
-> 入口：`http://<本机IP>/monitor/`（默认浅色白底；API 仅回环 8301，对外一律经 nginx）
+> 入口：主页 `http://<本机IP>/` 顶栏「我的应用 / 监控中心」标题切换（`#monitor` 直达）；`/monitor/` 仅保留旧链接重定向与终端弹窗页（`/monitor/terminal.html?host=<id>`）。API 仅回环 8301，对外一律经 nginx。
 
 ---
 

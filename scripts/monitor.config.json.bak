@@ -1,0 +1,70 @@
+{
+  "$comment": "监控网关配置。hosts 为纳管主机（type: local 本机 / ssh 远程）；trackedDirs 为手工追加的跟踪目录（主页 apps[].directory 会自动并入，来源标记 homepage，无需在此重复）；thresholds 为告警阈值（sustainMin 持续分钟才触发）。改此文件 ≤2s 热加载；也可在 /monitor/ 界面配置。",
+  "port": 8301,
+  "auth": {
+    "sessionTtlHours": 12,
+    "maxFailPerMin": 5,
+    "passwordHash": "scrypt$25e4d6f7487e7e26787084f49021893e$e898b61e7bb2540098a2556fa348af6fec873c07254966e4de48f306b2e75fbe"
+  },
+  "collect": {
+    "localIntervalSec": 5,
+    "remoteIntervalSec": 20,
+    "retentionDays": 7,
+    "dockerRefreshSec": 30
+  },
+  "thresholds": {
+    "cpuPct": 85,
+    "memPct": 90,
+    "diskPct": 90,
+    "loadPerCore": 2,
+    "sustainMin": 3
+  },
+  "terminal": {
+    "idleTimeoutMin": 15,
+    "maxSessionMin": 240,
+    "maxSessionsPerHost": 2,
+    "recordCommands": true
+  },
+  "webhookUrl": "",
+  "hosts": [
+    {
+      "id": "local",
+      "name": "本机 · 应用宿主",
+      "type": "local",
+      "group": "内网",
+      "address": "10.8.11.4",
+      "terminal": {
+        "host": "127.0.0.1",
+        "port": 22,
+        "username": "root",
+        "authType": "key",
+        "keyPath": "/root/.ssh/id_rsa"
+      }
+    },
+    {
+      "id": "netwatch",
+      "name": "NetWatch 服务器",
+      "type": "ssh",
+      "group": "内网",
+      "address": "10.8.14.200",
+      "port": 22,
+      "username": "root",
+      "authType": "key",
+      "keyPath": "/root/applications/my-homepage/data/monitor/keys/netwatch",
+      "note": "密钥待分发：ssh-copy-id -i data/monitor/keys/netwatch.pub root@10.8.14.200"
+    },
+    {
+      "id": "aliyun",
+      "name": "阿里云 · StudyLog 公网版",
+      "type": "ssh",
+      "group": "公网",
+      "address": "47.95.140.199",
+      "port": 22,
+      "username": "root",
+      "authType": "key",
+      "keyPath": "/root/applications/my-homepage/data/monitor/keys/aliyun",
+      "note": "密钥待分发：ssh-copy-id -i data/monitor/keys/aliyun.pub root@47.95.140.199"
+    }
+  ],
+  "trackedDirs": []
+}

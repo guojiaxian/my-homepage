@@ -210,17 +210,17 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer
 
 `/etc/nginx/conf.d/default.conf` 指向 `/root/applications/my-homepage/www`（`listen 80 default_server`，SPA 回退 + gzip + 静态资源缓存）。原配置备份于 `/etc/nginx/conf.d/default.conf.bak`。
 
-## 监控中心 /monitor/
+## 监控中心（主页顶栏切换）
 
-`/monitor/` 是**服务器监控看板 + Web SSH 终端**（2026-11-10 新增）：
+**服务器监控看板 + Web SSH 终端**已并入主站：顶栏「我的应用 / 监控中心」两个标题点击即切（同一页面，无需跳转；`#monitor` 直达，选择会被记住）：
 
 - **多机纳管**：本机直读 `/proc`（5s），远程主机经 SSH 免 Agent 采集（20s），内网蓝 / 公网橙分组卡片 + CPU/内存/磁盘仪表环。
-- **应用资源占比与目录跟踪**：按目录归属聚合进程资源（cwd/exe/cmdline/cgroup 四路匹配），主页登记应用的目录自动纳入跟踪，无需重复配置；支持 CPU/内存/IO/线程/句柄维度、进程明细下钻、多目录历史对比（1 小时 / 24 小时 / 7 天）。
-- **Web 终端**：卡片点「⌨ 终端」直接进入目标机网页 SSH（xterm.js + ssh2，同一会话鉴权）；空闲 15 分钟 / 单会话 4 小时 / 每主机并发 2 上限，会话与命令入审计日志。
-- **告警**：CPU/内存/磁盘/负载阈值持续 3 分钟触发（可在设置调整），支持 webhook 通知。
-- **安全**：独立访问密码（scrypt 存储，首启随机密码在 `data/monitor/INITIAL_PASSWORD.txt`），会话 HttpOnly Cookie；远程凭据推荐密钥认证，密码凭据 AES-256-GCM 加密存储。
+- **应用资源占比与目录跟踪**：按目录归属聚合进程资源（cwd/exe/cmdline/cgroup 四路匹配），主页登记应用的目录自动纳入跟踪，无需重复配置；点击卡片内联展开详情——CPU/内存/网络/磁盘 IO 趋势、分区用量、目录占比（内存/CPU/IO/线程/句柄维度）、多目录历史对比（1 小时 / 24 小时 / 7 天）与进程明细下钻。
+- **Web 终端**：卡片点「⌨ 终端」侧边抽屉进入目标机网页 SSH（xterm.js + ssh2，同一会话鉴权），可弹出独立窗口；空闲 15 分钟 / 单会话 4 小时 / 每主机并发 2 上限，会话与命令入审计日志。
+- **告警**：CPU/内存/磁盘/负载阈值持续 3 分钟触发（可在设置调整），hero 区横幅展示，支持 webhook 通知。
+- **安全**：独立访问密码（scrypt 存储），会话 HttpOnly Cookie；远程凭据推荐密钥认证，密码凭据 AES-256-GCM 加密存储。
 
-架构与选型见 `docs/monitor-terminal-blueprint.md`，部署/配置/排障见 `docs/monitor-ops.md`。网关服务 `my-homepage-monitor.service`（`scripts/monitor-server.mjs`，仅回环 8301），已纳入 `scripts/start.sh / restart.sh / stop.sh` 管理。顶栏「监控中心」可从主页直达。
+架构与选型见 `docs/monitor-terminal-blueprint.md`，部署/配置/排障见 `docs/monitor-ops.md`。网关服务 `my-homepage-monitor.service`（`scripts/monitor-server.mjs`，仅回环 8301），已纳入 `scripts/start.sh / restart.sh / stop.sh` 管理。
 
 ## 设计对比端点 /unslop/
 

@@ -34,7 +34,7 @@
 | 前端栈 | Vue 3 + Vite 5，**无路由 / 无状态库 / 无 UI 组件库 / 零第三方运行时依赖** |
 | 构建产物体积 | gzip 后约 34KB（css ~2.5KB + js ~31KB） |
 | 设置 API | `127.0.0.1:8300`（仅回环监听，nginx 反代 `/api/`） |
-| 监控网关 | `127.0.0.1:8301`（仅回环，nginx 反代 `/api/monitor/` 与 `/api/terminal` WS）；看板静态页 `/monitor/` |
+| 监控网关 | `127.0.0.1:8301`（仅回环，nginx 反代 `/api/monitor/` 与 `/api/terminal` WS）；看板在**主页内**（顶栏「我的应用 / 监控中心」标题切换，`#monitor` hash 可直达），`/monitor/` 仅剩重定向 stub + 终端弹窗页 |
 | 监控登录密码 | 首启随机生成于 `data/monitor/INITIAL_PASSWORD.txt`（0600），登录后请在设置中修改 |
 | 探测定时器 | `my-homepage-probe-quick.timer` 每 3 分钟（`--no-fetch`）；`my-homepage-probe.timer` 每 5 分钟（完整，含 fetch） |
 | 前端轮询 | 主页每 60 秒拉一次 `apps.json`；监控看板每 5 秒拉 summary |
@@ -147,17 +147,25 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 │   └── components/
 │       ├── AppTable.vue       # 表格视图（可排序表头 + 拖拽手柄列）
 │       ├── AppCard.vue        # 卡片视图（上移/下移按钮 + 拖拽手柄）
-│       └── SettingsPanel.vue  # ★ 设置面板（页面信息 + 应用列表 + 点击弹窗编辑）
+│       ├── SettingsPanel.vue  # ★ 设置面板（页面信息 + 应用列表 + 点击弹窗编辑）
+│       ├── MonitorView.vue    # ★ 监控中心视图（顶栏「监控中心」标题切换进入；hero/主机卡/告警横幅/登录）
+│       ├── MonitorDetail.vue  # ★ 监控内联详情（4 趋势图 + 分区/目录占比 + 目录对比 + 进程明细）
+│       ├── MonitorSettings.vue# ★ 监控设置弹窗（主机/目录/阈值/终端/改密/审计）
+│       └── MonitorTerm.vue    # ★ Web 终端抽屉（xterm 动态分包；弹窗放大走 monitor/terminal.html）
+├── src/lib/
+│   ├── app-utils.js           # 纯函数（主页共用）
+│   ├── monitor-api.js         # 监控 API 封装 + 格式化
+│   └── monitor-charts.js      # ECharts 按需引入（echarts/core，动态 import 独立分包）
 ├── glass/                     # ★ 独立毛玻璃页面（纯 HTML/CSS/JS，不参与 Vite 构建）
 │   ├── index.html
 │   └── assets/glass.css, glass.js
 ├── unslop/                    # ★ 独立设计对比端点 /unslop/（主站重设计版，纯 HTML/CSS/JS，见 §8.6）
 │   ├── index.html
 │   └── assets/app.css, app.js
-├── monitor/                   # ★ 监控中心独立静态页 /monitor/（纯 HTML/CSS/JS + ECharts/xterm vendor，零构建，见 §8.7）
-│   ├── index.html             # 看板主页（登录/概览/详情/告警/设置/终端抽屉）
-│   ├── terminal.html          # 独立终端页（弹窗放大用，?host=<id>）
-│   └── assets/monitor.css, monitor.js, terminal.js, vendor/(echarts+xterm)
+├── monitor/                   # ★ 监控中心残留端点（看板本体已并入主站 SPA，见 §8.7）
+│   ├── index.html             # 仅重定向 stub → /#monitor（为旧链接/书签保留）
+│   ├── terminal.html          # 独立终端页（弹窗放大用，?host=<id>，自带 vendor xterm）
+│   └── assets/terminal.js, vendor/(xterm+xterm-addon-fit+xterm.css)
 ├── data/                      # 运行数据（已 gitignore，勿入库）
 │   └── monitor/               # history/*.jsonl 分钟历史 · audit.jsonl 审计 · alerts.jsonl 告警
 │                              # credentials.json(AES-GCM 凭据+主机指纹) · .secret(密钥) · keys/ 监控专用 SSH 密钥
@@ -410,11 +418,15 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - nginx：`/unslop` → 301 → `/unslop/`，两处 server 块各一个 location（`root /root/applications/my-homepage` + `try_files … /unslop/index.html` + no-cache），备份 `*.bak-unslop-20261106`。
 - 踩坑：Vue 模板习惯的自闭合 `<div />` 在原生 HTML 里是**未闭合标签**，曾把 footer 吞进 `#u-content` 内部，首次 `innerHTML` 渲染将其销毁、`renderPageText` 抛错中断整个渲染（见踩坑 #11）。
 
-### 8.7 监控中心与 Web 终端（`/monitor/` + `scripts/monitor-server.mjs`，2026-11-10）
+### 8.7 监控中心与 Web 终端（并入主站 SPA，2026-11-10；首版为独立 /monitor/ 页，同日按用户反馈合并）
 
 选型结论：**自研轻量网关**（Node 直读 `/proc` + ssh2 免 Agent 远程采集）而非 Prometheus/Grafana/Netdata——决定性理由是「**按目录归属进程资源**」这一核心诉求在成熟方案里都是 cmdline 模板分组（不支持 cwd 维度），而 cwd 归属自研只要几十行；Web SSH 选 **xterm.js + ssh2** 而非 ttyd/Wetty/GateOne（pty 直通架构无法做会话鉴权/凭据加密/审计；GateOne 已停维护）。完整对比表与架构见 `docs/monitor-terminal-blueprint.md`。
 
-**架构**：`monitor-server.mjs`（systemd 常驻，`127.0.0.1:8301`，依赖 ssh2+ws）同时承载 HTTP API 与终端 WebSocket；`monitor/` 是零构建静态页（同 glass/unslop 模式，vendor 里 echarts+xterm 随仓库提交）；nginx **两处 server 块**各加三个 location：`/monitor/`（静态）、`/api/monitor/`（反代）、`/api/terminal`（WS 升级，read_timeout 3600s）。备份 `*.bak-monitor-20261110`。
+**形态（2026-11-10 用户反馈后定稿）**：监控看板**不再是独立页面**——主站顶栏是双标题「我的应用 / 监控中心」（`.brand-tabs`，active 高亮胶囊，点击切换 `topView`，localStorage `my-homepage:topView` 持久化 + `#monitor` hash 直达）。两视图均**常驻 `v-show`**（不用 KeepAlive，原因见踩坑 #17），`MonitorView` 接收 `active` prop 自管「boot / 轮询启停」。首版独立静态页已退役：`monitor/index.html` 只剩重定向 stub，`monitor/terminal.html`（终端弹窗放大页）保留。
+
+**组件结构**：`MonitorView.vue`（hero 统计胶囊 + 告警横幅 + 主机卡 grid + 登录层）→ `MonitorDetail.vue`（点卡片**内联展开**：4 趋势图一行 / 分区用量+目录占比 5:7 一行 / 目录对比 / 进程明细全宽，独立加载 history+procs，15s 自刷）→ `MonitorSettings.vue`（设置弹窗）与 `MonitorTerm.vue`（终端抽屉 + 弹窗放大）。图表走 `src/lib/monitor-charts.js`（**echarts/core 按需注册**，动态 import → 独立 chunk 180KB gz，不占首屏；主包 56KB gz 基本不变）；xterm 同样动态分包（73KB gz）。
+
+**架构**：`monitor-server.mjs`（systemd 常驻，`127.0.0.1:8301`，依赖 ssh2+ws）同时承载 HTTP API 与终端 WebSocket；nginx **两处 server 块**各加三个 location：`/monitor/`（静态 stub+终端页）、`/api/monitor/`（反代）、`/api/terminal`（WS 升级，read_timeout 3600s）。备份 `*.bak-monitor-20261110`。echarts/@xterm 已移入 dependencies（SPA 打包需要），主站「前端零第三方运行时依赖」的说法仅对**首屏主包**成立。
 
 **采集与目录归属**：
 - 本机 5s 直读 `/proc`（cpu/meminfo/loadavg/net.dev/diskstats/statfs/每进程 stat+status+io+cwd+exe+cmdline+cgroup）；远程 20s 经 ssh2 `exec('sh -s')` 注入一段 POSIX sh 脚本（单个 awk 吃掉全部 procfs + 内建解析 cwd/fd，零逐进程子进程），输出**计数器口径**，网关差分算速率。
@@ -566,6 +578,12 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 
 16. **系统 `ssh` 免密 ≠ ssh2 单钥匙免密**
    排查终端「All configured authentication methods failed」时发现：CLI `ssh root@127.0.0.1` 会**依次尝试所有默认身份**（id_ed25519 → id_rsa），实际免密的是 `id_rsa`（id_ed25519 不在 authorized_keys）；而 ssh2 只用配置里指定的一把钥匙。给网关配 `keyPath` 前先 `grep "$(ssh-keygen -y -f <key>)" ~/.ssh/authorized_keys` 确认该公钥确实在列。
+
+17. **`<KeepAlive>` 放在 `v-if/v-else` 分支里 = 没有缓存**
+   监控视图首版用 `<template v-if>…</template><KeepAlive v-else><MonitorView/></KeepAlive>` 做视图切换，结果每次切回都重新 mounted（deactivated 触发了、但分支卸载时 KeepAlive 自身连同缓存一起被销毁）。视图切换要保状态：要么双方都 `v-show` 常驻（本页采用：`MonitorView` 接 `active` prop 自管轮询与首次 boot），要么 KeepAlive 常驻包 `<component :is>`。
+
+18. **临时替换鉴权材料必须有「先验证还原」的闭环**
+   联调监控登录时曾把 `monitor.config.json` 的 passwordHash 换成测试哈希，备份后又在验证还原**之前**就执行了 `rm` 备份文件（且本机 `cp` 带 `-i` 别名，非交互 shell 下覆盖被拒）——用户自设密码哈希丢失，只能临时密码过渡请用户重设。教训：动鉴权/凭据类文件，备份后**立即验证还原路径可用**，验证通过前不许清理；非交互 shell 用 `command -p cp -f` 绕过别名。
 
 ---
 

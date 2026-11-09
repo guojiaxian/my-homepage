@@ -1,0 +1,127 @@
+<script setup>
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+
+const props = defineProps({
+  hostId: { type: String, default: '' },
+  hostName: { type: String, default: '' },
+})
+const emit = defineEmits(['close'])
+
+const container = ref(null)
+const status = ref('')
+const statusCls = ref('')
+let term = null, ws = null, fit = null, loaded = false
+
+function setStatus(txt, cls = '') { status.value = txt; statusCls.value = cls }
+
+async function connect() {
+  if (!props.hostId) return
+  setStatsCleanup()
+  container.value.innerHTML = ''
+  setStatus('连接中…')
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
+  try {
+    if (!loaded) {
+      const [{ Terminal }, { FitAddon }] = await Promise.all([
+        import('@xterm/xterm'),
+        import('@xterm/addon-fit'),
+      ])
+      await import('@xterm/xterm/css/xterm.css')
+      loaded = true
+      globalThis.__xtermCtor = { Terminal, FitAddon }
+    }
+    const { Terminal, FitAddon } = globalThis.__xtermCtor
+    term = new Terminal({
+      fontFamily: "'Cascadia Code', Menlo, Consolas, monospace",
+      fontSize: 13.5,
+      theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#4493f8', selectionBackground: '#264f78' },
+      cursorBlink: !reducedMotion,
+      scrollback: 5000,
+    })
+    fit = new FitAddon()
+    term.loadAddon(fit)
+    term.open(container.value)
+    fit.fit()
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    ws = new WebSocket(`${proto}://${location.host}/api/terminal?host=${encodeURIComponent(props.hostId)}&cols=${term.cols}&rows=${term.rows}`)
+    ws.binaryType = 'arraybuffer'
+    ws.onopen = () => setStatus(`已连接 ${props.hostId}`, 'ok')
+    ws.onmessage = (ev) => {
+      if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return }
+      try {
+        const msg = JSON.parse(ev.data)
+        if (msg.type === 'error') { setStatus('错误：' + msg.message, 'bad'); term.writeln(`\r\n\x1b[31m${msg.message}\x1b[0m`) }
+      } catch { /* 普通输入 */ }
+    }
+    ws.onclose = (ev) => { if (ws) setStatus(ev.reason ? `已断开（${ev.reason}）` : '已断开', 'bad') }
+    ws.onerror = () => setStatus('连接失败（未登录或网关不可达）', 'bad')
+    term.onData((d) => { if (ws && ws.readyState === 1) ws.send(d) })
+    term.onResize(({ cols, rows }) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })) })
+    term.focus()
+  } catch (e) {
+    setStatus('终端加载失败：' + e.message, 'bad')
+  }
+}
+function setStatsCleanup() {
+  if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
+  if (term) { try { term.dispose() } catch { /* 已释放 */ } term = null }
+}
+function onKeydown(e) { if (e.key === 'Escape') emit('close') }
+function popout() {
+  emit('close')
+  window.open(`/monitor/terminal.html?host=${encodeURIComponent(props.hostId)}`, '_blank', 'width=980,height=640')
+}
+
+watch(() => props.hostId, (v) => { if (v) connect() })
+onMounted(() => connect())
+onBeforeUnmount(setStatsCleanup)
+
+function onResizeWin() { if (fit) { try { fit.fit() } catch { /* 忽略 */ } } }
+window.addEventListener('resize', onResizeWin)
+window.addEventListener('keydown', onKeydown)
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', onResizeWin)
+  window.removeEventListener('keydown', onKeydown)
+})
+</script>
+
+<template>
+  <Teleport to="body">
+    <div class="mon-term-mask" @click="emit('close')" />
+    <div class="mon-term-drawer">
+      <div class="mon-term-head">
+        <span class="t-title">终端 · {{ hostName || hostId }}</span>
+        <span class="t-status" :class="statusCls">{{ status }}</span>
+        <span class="spacer" />
+        <button class="mini-btn" @click="connect">重连</button>
+        <button class="mini-btn" @click="popout">弹出窗口</button>
+        <button class="mini-btn" @click="emit('close')">✕ 关闭</button>
+      </div>
+      <div ref="container" class="mon-term-body" />
+    </div>
+  </Teleport>
+</template>
+
+<style scoped>
+.mon-term-mask { position: fixed; inset: 0; background: rgb(16 24 40 / 0.35); z-index: 55; }
+.mon-term-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(920px, 96vw);
+  background: var(--bg-soft); z-index: 60; border-left: 1px solid var(--border);
+  box-shadow: -12px 0 40px rgb(16 24 40 / 0.18);
+  display: flex; flex-direction: column;
+  animation: monTermIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes monTermIn { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
+.mon-term-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
+.t-title { font-weight: 600; }
+.t-status { font-size: 12.5px; color: var(--text-2); }
+.t-status.ok { color: var(--green); }
+.t-status.bad { color: var(--red); }
+.spacer { flex: 1; }
+.mini-btn { border: 1px solid var(--border); background: var(--bg-soft); border-radius: 6px; padding: 2px 8px; font-size: 12.5px; cursor: pointer; color: var(--text-2); }
+.mini-btn:hover { border-color: var(--accent); color: var(--accent); }
+.mon-term-body { flex: 1; padding: 8px; background: #0d1117; }
+.mon-term-body :deep(.xterm) { height: 100%; }
+@media (prefers-reduced-motion: reduce) { .mon-term-drawer { animation: none; } }
+@media (max-width: 760px) { .mon-term-drawer { width: 100vw; } }
+</style>

@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from 'vu
 import AppTable from './components/AppTable.vue'
 import AppCard from './components/AppCard.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
+import MonitorView from './components/MonitorView.vue'
 
 /* ---------- 页面信息（可在首页设置面板中修改） ---------- */
 const page = ref({
@@ -16,6 +17,20 @@ watch(
     document.title = v || '我的应用导航'
   },
 )
+
+/* ---------- 顶层视图切换：我的应用 / 监控中心（同一页面，点击标题即切） ---------- */
+const topView = ref(
+  location.hash === '#monitor' || localStorage.getItem('my-homepage:topView') === 'monitor'
+    ? 'monitor'
+    : 'apps',
+)
+function switchTop(v) {
+  topView.value = v
+}
+watch(topView, (v) => {
+  localStorage.setItem('my-homepage:topView', v)
+  history.replaceState(null, '', v === 'monitor' ? '#monitor' : location.pathname)
+})
 
 /* ---------- 数据获取：apps.json 由探测器每 5 分钟生成，页面每 60 秒轮询 ---------- */
 const apps = shallowRef([])
@@ -288,7 +303,7 @@ onBeforeUnmount(() => {
 <template>
   <header class="topbar">
     <div class="topbar-inner">
-      <a class="brand" href="./">
+      <a class="brand" href="./" @click.prevent="switchTop('apps')">
         <span class="brand-mark" aria-hidden="true">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
             <rect x="0.5" y="0.5" width="6.5" height="6.5" rx="1.8" />
@@ -297,10 +312,22 @@ onBeforeUnmount(() => {
             <rect x="9" y="9" width="6.5" height="6.5" rx="1.8" opacity="0.55" />
           </svg>
         </span>
-        {{ page.siteName }}
+        <span class="brand-tabs">
+          <span
+            class="brand-tab"
+            :class="{ on: topView === 'apps' }"
+            :title="page.heroTitle || '我的应用'"
+            @click.prevent.stop="switchTop('apps')"
+          >{{ page.heroTitle || '我的应用' }}</span>
+          <span
+            class="brand-tab"
+            :class="{ on: topView === 'monitor' }"
+            title="服务器监控看板与 Web 终端"
+            @click.prevent.stop="switchTop('monitor')"
+          >监控中心</span>
+        </span>
       </a>
       <div class="topbar-actions">
-        <a class="monitor-entry" href="./monitor/" title="服务器监控看板与 Web 终端">监控中心</a>
         <a
           class="icon-btn"
           href="https://github.com/guojiaxian"
@@ -314,7 +341,7 @@ onBeforeUnmount(() => {
             />
           </svg>
         </a>
-        <button class="icon-btn" title="设置" @click="settingsOpen = true">
+        <button v-if="topView === 'apps'" class="icon-btn" title="设置" @click="settingsOpen = true">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
@@ -334,6 +361,7 @@ onBeforeUnmount(() => {
   </header>
 
   <main class="container">
+    <div v-show="topView === 'apps'">
     <section class="hero">
       <h1>{{ page.heroTitle }}</h1>
       <p class="sub">{{ page.heroSubtitle }}</p>
@@ -433,6 +461,9 @@ onBeforeUnmount(() => {
       <span>© {{ year }} {{ page.siteName }} · Powered by Vue</span>
       <span v-if="probedTimeText">{{ probedTimeText }} · 端口每 3 分钟 · git 每 5 分钟</span>
     </footer>
+    </div>
+
+    <MonitorView :active="topView === 'monitor'" />
   </main>
 
   <SettingsPanel :open="settingsOpen" @close="settingsOpen = false" @saved="onSaved" />
