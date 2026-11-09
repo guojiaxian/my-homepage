@@ -609,11 +609,24 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 18. **临时替换鉴权材料必须有「先验证还原」的闭环**
    联调监控登录时曾把 `monitor.config.json` 的 passwordHash 换成测试哈希，备份后又在验证还原**之前**就执行了 `rm` 备份文件（且本机 `cp` 带 `-i` 别名，非交互 shell 下覆盖被拒）——用户自设密码哈希丢失，只能临时密码过渡请用户重设。教训：动鉴权/凭据类文件，备份后**立即验证还原路径可用**，验证通过前不许清理；非交互 shell 用 `command -p cp -f` 绕过别名。
 
-19. **监控 UI 的 Playwright 验证不用登录：从 sessions.json 注入会话 cookie**
+19. **`@property` 注册自定义属性必须 `inherits: true` 才能被伪元素继承**
+   监控主机卡圆环 `conic-gradient(color calc(var(--v)*1%), …)` 画在 `.gauge::before` 上，`--v` 注册成 `inherits: false` → 伪元素看到的 `--v` 恒为 initial 0 → 整环只剩底轨（用户报「圆环没显示」）。`inherits: true` 后伪元素继承父元素上（含 Vue :style 绑定/过渡中的）值即恢复正常。取证方法：`getComputedStyle(el,'::before').backgroundImage` 直接看伪元素解析出的渐变。
+
+20. **echarts.init 的容器可能被 v-if 摘掉**
+   详情页图表容器加了 `v-if="dirsList.length"`（无目录收起）后，`echarts.init(elDirs.value)` 在 null 上崩（`getAttribute of null`）。凡是「存在性随数据变化」的容器，init/setOption 前必须判空返回；或改 v-show（注意 0 尺寸需 resize，见本文件既有处理）。
+
+21. **CLI 子命令与常驻服务写同一份文件时，常驻侧必须热加载**
+   `--agent-install-cmd` 在独立 node 进程生成 agent token 写 `credentials.json`，常驻网关内存里的 credentials 还是旧的 → push 校验 403。已对 credentials.json 加 fs.watch 防抖热加载（与 monitor.config.json 同款）。教训：任何「CLI 写、服务读」的文件都要么服务端 watch，要么收敛为单点写入。
+
+22. **归属/聚合逻辑不得依赖「只有一条采集路径才预计算」的字段**
+   目录归属最初只在本机采集时预计算 `p._dir`，`buildSnapshot` 直接消费 → 远程进程（无 `_dir`）全部漏归属，远程目录恒空。修复：buildSnapshot 内对无 `_dir` 的进程现场 `matchDirOf(cwd/exe/cmdline)`。多条采集路径共享一个加工函数时，加工函数不能假设某条路径已做过的预处理。
+
+23. **监控 UI 的 Playwright 验证不用登录：从 sessions.json 注入会话 cookie**
    全站门禁下 Playwright 新开浏览器会撞登录层。正确做法（**只读**，符合 #18 教训——绝不动鉴权材料）：读 `data/monitor/sessions.json`，取一个 `expires > now` 的 token，`context.addCookies([{ name: 'mh_mon', value: token, url: 'http://127.0.0.1' }])`。轮询页照例用 `domcontentloaded` + `waitForSelector`（见 #15）。现成脚本：`.verify/shot-hostedit.cjs`（主机设置弹窗三态）、`.verify/shot-cmpall.cjs`(目录对比默认全选/自刷/全选清空)。
 
-20. **配置「校验报错」类测试必须挑 SSH 主机，别用本机主机**
+24. **配置「校验报错」类测试必须挑 SSH 主机，别用本机主机**
    本机（type=local）的展示地址留空时 `normalizeHost` 会默认填 `127.0.0.1`——清空地址点「保存」不会触发 400，反而**把展示地址真实改掉**（实测把 `10.8.11.4` 改成了 `127.0.0.1`，靠同一条 PUT API 改回）。SSH 主机才有「缺 address → 400 `主机 xx 缺少 address`」的校验路径，且失败不落盘。
+
 
 ---
 
@@ -636,6 +649,11 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 内网蓝 / 公网橙 | 用户要求「内网和公网区分明显，可用颜色」 |
 | 3 行简介 + 固定行高 | 用户要求「简介过长换行、每行高度一致」；超 3 行截断（悬停看全文）是行高一致的必要代价 |
 | `/unslop/` 设计对比端点（2026-11-06） | 用户要求「unslop 主页，生成新端点、保留旧的对比」；按 glass/ 先例做独立静态页，零构建、零风险，旧主页一字未动。首版「机房仪表盘」方向被用户否掉（「还没有原来的好看」），v2 改为主站视觉 1:1 移植 + 仅 4 处净化修正 |
+| Agent 推送采集模式（2026-11-10） | 用户要求「免 SSH 常连监控，agent 定时上报，一键安装」；目标机零依赖 sh agent 与 SSH 采集同源（口径一致），监控零 SSH 连接（终端仍 SSH）；**阿里云公网不可内连中心 → 保留 SSH 拉取为定制方案**（agent 开关留好） |
+| 每主机跟踪目录（2026-11-10） | 用户要求「非本服务器也能选应用目录做目录监控」——`hosts[].trackedDirs[]`，归属集按主机合并；远程补 cmdline 采集，修复 buildSnapshot 只认本机预计算字段的漏归属 |
+| 登录层升级为全站门禁（2026-11-10） | 用户要求「登录层覆盖整个系统」：未鉴权登录层盖住应用+监控两视图（App.vue 持有状态，MonitorView unauth 事件上抛）；网关宕机 fail-open 不锁主页 |
+| 详情页删分区用量 + 布局/按钮重做（2026-11-10） | 用户反馈「圆环没显示（@property inherits 根因）、按钮丑、布局不合理」：目录占比全宽、无目录主机收起空盒、按钮统一软胶囊两档、时间窗分段控件、去 emoji |
+| 监控设置主机改紧凑列表+弹窗编辑（2026-11-10） | 沿用应用设置面板的紧凑列表交互：主机行点击弹 `MonitorHostEdit` 嵌套弹窗（草稿/直连双模式），节省空间 |
 | 监控选自研网关而非 Prometheus/Grafana/Netdata（2026-11-10） | 核心诉求「按目录归属进程资源」在成熟方案里均按 cmdline 模板分组、不支持 cwd 维度；且现有系统是零依赖/systemd/回环反代哲学，专业栈体量失衡。预留 `/metrics` 与 webhook 兜底专业栈价值 |
 | Web SSH 选 xterm.js + ssh2 自建网关（2026-11-10） | 需求要求会话鉴权/凭据加密/访问审计/超时——ttyd/Wetty 的 pty 直通架构四项全空白；GateOne 已停维护否决；与监控共用同一网关与鉴权体系 |
 | 目录跟踪默认复用主页 `apps[].directory` | 用户已在主页登记应用目录，监控侧零重复配置；自定义目录走 `trackedDirs[]`（界面/文件/API 三通道） |
@@ -664,6 +682,15 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | my-homepage | 我的应用导航（本站） | 本机（nginx 托管） | 80 | synced（已纳入 git） |
 
 > 状态会随时变化，以上仅为撰写时快照。以 `curl -s http://127.0.0.1/apps.json` 为准。
+
+**监控中心纳管主机清单（2026-11-10 上线）**：
+
+| id | 名称 | 地址 | 采集方式 | 跟踪目录 | 状态 |
+|---|---|---|---|---|---|
+| local | 本机 · 应用宿主 | 10.8.11.4 | 直读 /proc | 10（主页登记自动并入） | ONLINE |
+| netwatch | NetWatch 服务器 · centerserver | 10.8.14.200 | **agent 推送** | /root/network-monitor | ONLINE |
+| aliyun | 阿里云 · StudyLog 公网版 | 47.95.140.199 | SSH 拉取（公网机定制） | studylog + 顺丰账本×2 | ONLINE |
+| lan-1103 | 内网节点 · 113 | 10.8.11.3 | SSH 拉取 | /root/log_gpt_agent | ONLINE |
 
 **已知的应用侧问题**（不是主页的 bug，修应用即可，主页无需改动）：expense-assistant 根路径 500（`/docs` 正常）、wedding-plan 根路径 404（`/health` 正常）、network-monitor 根路径 404（其 UI 在 :8080）。
 
@@ -705,6 +732,13 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 - 2026-11-03 ③ systemd 单元改名为 `my-homepage-settings.service` / `my-homepage-probe.{service,timer}`（旧 `gjx-homepage-*` 单元已停用并删除），前端 localStorage 键改为 `my-homepage:appOrder`（**改键会重置浏览器里已保存的手动排序**，需重新拖拽一次）。
 
 > 旧路径 `/root/gjx-homepage` 是指向新目录的软链接，由使用者手动删除。
+
+**新增一台被监控服务器**（两种路径）
+- **内网机（推荐 Agent 推送）**：主页 ⚙ 监控设置 → 纳管主机「＋添加主机」→ 填 id/名称/地址/密钥 → 该主机弹窗「采集方式=Agent 推送」→ 点「生成安装命令」→ 复制到目标机 root 执行（幂等，只新增文件与服务）→ ≤70s 上线；SSH 密钥仅终端需要（可选）。CLI：`node scripts/monitor-server.mjs --agent-install-cmd <hostId>`
+- **公网机（SSH 拉取）**：加主机（mode 默认 ssh）→ `ssh-copy-id -i data/monitor/keys/<id>.pub root@<host>` 分发监控密钥 → ≤20s 上线
+- 两模式随时互切（设置里改「采集方式」保存即热加载）
+
+**为远程主机配置目录级监控** → ⚙ 监控设置 → 点该主机行 → 「该主机跟踪目录」＋添加目录（该机上的绝对路径）→ 保存热加载 → ≤20s 出「应用 / 目录资源占比」柱图与进程明细；归属靠该机进程 cwd+命令行
 
 **排查「页面没更新」**
 ```bash
@@ -748,6 +782,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - ❌ **不要把 `deploy.sh` 改成先构建后探测**。
 - ❌ **不要给整行/整卡加 `draggable`**——只能是拖拽手柄。
 - ❌ **不要在探测中执行 `git pull / checkout / reset / gc`**——只允许只读命令与 `fetch`。
+- ❌ **agent 相关**：agent token 存 `credentials.json`（gitignored），勿入库勿外传；目标机 `my-homepage-agent.service` 只做采集推送，**不要往里面加写操作**；agent 模式主机的采集由推送驱动，勿再手工起 SSH 定时器（双路会打架）；公网机（无法内连中心）保持 SSH 拉取模式。
 - ❌ **不要用 `readFileSync` 读 `/proc/<pid>/cwd`**。
 - ❌ **不要把监控网关 8301 改绑 0.0.0.0 / 不经会话鉴权暴露监控 API**——凭据与终端入口都在里面；公网暴露前必须上 TLS。
 - ❌ **不要把 `data/monitor/` 下任何内容（凭据/密钥/`.secret`/初始密码/审计）提交进 git**——`data/` 已整体 gitignore，保持。
