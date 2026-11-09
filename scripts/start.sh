@@ -16,6 +16,7 @@ systemctl daemon-reload
 systemctl enable --now my-homepage-settings.service
 systemctl enable --now my-homepage-probe.timer
 systemctl enable --now my-homepage-probe-quick.timer
+systemctl enable --now my-homepage-monitor.service
 
 say "立即探测一次（--no-fetch，约 0.3 秒）"
 node "$PROJECT_DIR/scripts/probe-apps.mjs" --no-fetch \
@@ -30,9 +31,12 @@ say "状态"
 printf '  %-34s %s / %s\n' my-homepage-settings.service "$(systemctl is-active my-homepage-settings.service)" "$(systemctl is-enabled my-homepage-settings.service 2>&1)"
 printf '  %-34s %s / %s\n' my-homepage-probe.timer "$(systemctl is-active my-homepage-probe.timer)" "$(systemctl is-enabled my-homepage-probe.timer 2>&1)"
 printf '  %-34s %s / %s\n' my-homepage-probe-quick.timer "$(systemctl is-active my-homepage-probe-quick.timer)" "$(systemctl is-enabled my-homepage-probe-quick.timer 2>&1)"
+printf '  %-34s %s / %s\n' my-homepage-monitor.service "$(systemctl is-active my-homepage-monitor.service)" "$(systemctl is-enabled my-homepage-monitor.service 2>&1)"
 printf '  %-34s %s / %s\n' nginx.service "$(systemctl is-active nginx.service)" "$(systemctl is-enabled nginx.service 2>&1)"
 
 echo
 say "检查可访问性"
 curl -s -o /dev/null -w "  主页 http://<本机IP>/        → HTTP %{http_code}\n" http://127.0.0.1/ || true
 curl -s -o /dev/null -w "  设置 API /api/config        → HTTP %{http_code}\n" http://127.0.0.1/api/config || true
+curl -s -o /dev/null -w "  监控看板 /monitor/           → HTTP %{http_code}\n" http://127.0.0.1/monitor/ || true
+curl -s -o /dev/null -w "  监控 API  /api/monitor/healthz → HTTP %{http_code}\n" http://127.0.0.1/api/monitor/healthz || true

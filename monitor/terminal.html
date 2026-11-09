@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>终端</title>
+  <link rel="stylesheet" href="assets/vendor/xterm.css" />
+  <link rel="stylesheet" href="assets/monitor.css" />
+  <style>
+    body, html { height: 100%; }
+    .term-page { display: flex; flex-direction: column; height: 100vh; }
+    #term-container { flex: 1; padding: 8px; background: #0d1117; }
+    #term-container .xterm { height: 100%; }
+  </style>
+</head>
+<body>
+  <div class="term-page">
+    <div class="term-head">
+      <span class="brand-mark" style="width:24px;height:24px;font-size:12px">⌨</span>
+      <span class="t-title" id="term-title">终端</span>
+      <span class="t-status" id="term-status">连接中…</span>
+      <span style="flex:1"></span>
+      <button class="mini-btn" id="term-reconnect">重连</button>
+      <button class="mini-btn" id="term-close">✕ 关闭</button>
+    </div>
+    <div id="term-container"></div>
+  </div>
+  <script src="assets/vendor/xterm.js"></script>
+  <script src="assets/vendor/xterm-addon-fit.js"></script>
+  <script src="assets/terminal.js"></script>
+</body>
+</html>

@@ -210,6 +210,18 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer
 
 `/etc/nginx/conf.d/default.conf` 指向 `/root/applications/my-homepage/www`（`listen 80 default_server`，SPA 回退 + gzip + 静态资源缓存）。原配置备份于 `/etc/nginx/conf.d/default.conf.bak`。
 
+## 监控中心 /monitor/
+
+`/monitor/` 是**服务器监控看板 + Web SSH 终端**（2026-11-10 新增）：
+
+- **多机纳管**：本机直读 `/proc`（5s），远程主机经 SSH 免 Agent 采集（20s），内网蓝 / 公网橙分组卡片 + CPU/内存/磁盘仪表环。
+- **应用资源占比与目录跟踪**：按目录归属聚合进程资源（cwd/exe/cmdline/cgroup 四路匹配），主页登记应用的目录自动纳入跟踪，无需重复配置；支持 CPU/内存/IO/线程/句柄维度、进程明细下钻、多目录历史对比（1 小时 / 24 小时 / 7 天）。
+- **Web 终端**：卡片点「⌨ 终端」直接进入目标机网页 SSH（xterm.js + ssh2，同一会话鉴权）；空闲 15 分钟 / 单会话 4 小时 / 每主机并发 2 上限，会话与命令入审计日志。
+- **告警**：CPU/内存/磁盘/负载阈值持续 3 分钟触发（可在设置调整），支持 webhook 通知。
+- **安全**：独立访问密码（scrypt 存储，首启随机密码在 `data/monitor/INITIAL_PASSWORD.txt`），会话 HttpOnly Cookie；远程凭据推荐密钥认证，密码凭据 AES-256-GCM 加密存储。
+
+架构与选型见 `docs/monitor-terminal-blueprint.md`，部署/配置/排障见 `docs/monitor-ops.md`。网关服务 `my-homepage-monitor.service`（`scripts/monitor-server.mjs`，仅回环 8301），已纳入 `scripts/start.sh / restart.sh / stop.sh` 管理。顶栏「监控中心」可从主页直达。
+
 ## 设计对比端点 /unslop/
 
 `/unslop/` 是主站首页的**净化对比版**：视觉与 `/` 完全同款（同一套配色、chips、emoji 图标与布局 1:1），仅做了几处不改变观感的优化（表头去大写、`transition: all` 收敛、h1 字重、键盘焦点环、动效降级）。它与主站读取同一份 `apps.json`，功能一致（表格/卡片、排序、手动拖拽、立刻同步、深浅主题）。纯 HTML/CSS/JS 静态页（`unslop/` 目录，不参与 Vite 构建），改完刷新即生效；设置入口链接回主站面板。旧主页 `/` 完全不受影响。

@@ -300,6 +300,7 @@ onBeforeUnmount(() => {
         {{ page.siteName }}
       </a>
       <div class="topbar-actions">
+        <a class="monitor-entry" href="./monitor/" title="服务器监控看板与 Web 终端">监控中心</a>
         <a
           class="icon-btn"
           href="https://github.com/guojiaxian"

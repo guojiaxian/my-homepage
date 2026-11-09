@@ -1,7 +1,7 @@
 # AGENTS.md · my-homepage 项目交接记忆
 
 > 面向接手本项目的 AI Agent / 开发者：读完这一份即可上手，无需再翻聊天记录。
-> 最后更新：2026-11-06 · 文档随代码演进，改功能时请同步更新本文。
+> 最后更新：2026-11-10 · 文档随代码演进，改功能时请同步更新本文。
 
 ---
 
@@ -11,7 +11,9 @@
 
 核心设计目标：**应用信息与状态全自动维护**——端口、上下线、源码同步情况由服务端定时探测，增删应用/改信息通过首页设置面板完成，日常无需登录服务器改文件。
 
-- 线上地址：`http://<本机IP>/`（本机 `10.8.11.4`，nginx 80 端口，`default_server`）
+2026-11-10 起新增两大能力（详见 §8.7）：**服务器监控看板 `/monitor/`**（多机指标采集 + 目录级资源归属 + 告警 + 历史）与 **Web SSH 终端**（看板点击主机直接进目标机终端）。
+
+- 线上地址：`http://<本机IP>/`（本机 `10.8.11.4`，nginx 80 端口，`default_server`）；监控看板 `http://<本机IP>/monitor/`
 - 项目根目录：`/root/applications/my-homepage`（已纳入 git，origin `github.com:guojiaxian/my-homepage`；改动请及时 commit/push）
 - 部署产物目录：`/root/applications/my-homepage/www`（项目内）
 - 旧路径 `/root/gjx-homepage`：为兼容保留的**软链接**，指向新目录；确认无人依赖后可 `rm /root/gjx-homepage`（若 shell 正停在该路径，先 `cd` 到别处）
@@ -32,9 +34,12 @@
 | 前端栈 | Vue 3 + Vite 5，**无路由 / 无状态库 / 无 UI 组件库 / 零第三方运行时依赖** |
 | 构建产物体积 | gzip 后约 34KB（css ~2.5KB + js ~31KB） |
 | 设置 API | `127.0.0.1:8300`（仅回环监听，nginx 反代 `/api/`） |
+| 监控网关 | `127.0.0.1:8301`（仅回环，nginx 反代 `/api/monitor/` 与 `/api/terminal` WS）；看板静态页 `/monitor/` |
+| 监控登录密码 | 首启随机生成于 `data/monitor/INITIAL_PASSWORD.txt`（0600），登录后请在设置中修改 |
 | 探测定时器 | `my-homepage-probe-quick.timer` 每 3 分钟（`--no-fetch`）；`my-homepage-probe.timer` 每 5 分钟（完整，含 fetch） |
-| 前端轮询 | 每 60 秒拉一次 `apps.json`；页面回到前台时立即刷新 |
+| 前端轮询 | 主页每 60 秒拉一次 `apps.json`；监控看板每 5 秒拉 summary |
 | 已登记应用 | 11 个（含 2 个离线应用（纯 APP）+ 1 个公网远程） |
+| 后端依赖 | 主站仍零依赖；监控网关新增 `ssh2`/`ws`（终端与远程采集），前端 vendor 库 echarts/xterm 随仓库提交 |
 
 **运行中的 systemd 单元（均已 enable）**
 
@@ -42,6 +47,7 @@
 systemctl status my-homepage-settings.service   # 设置 API，常驻
 systemctl status my-homepage-probe.timer        # 每 5 分钟完整探测（含 fetch）
 systemctl status my-homepage-probe-quick.timer  # 每 3 分钟快速探测（--no-fetch）
+systemctl status my-homepage-monitor.service    # 监控网关（指标采集 + Web 终端），常驻
 ```
 
 ---
@@ -59,10 +65,12 @@ npm run build          # 构建到 dist/
 
 curl -s http://127.0.0.1/apps.json | head -40     # 看探测结果
 curl -s http://127.0.0.1/api/config | head -40    # 看当前配置
+curl -s http://127.0.0.1/api/monitor/healthz      # 监控网关存活
 systemctl restart my-homepage-settings           # 改了 settings-server.mjs 后必须重启
+systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后必须重启（改配置文件不用，≤2s 热加载）
 
 ./scripts/start.sh      # 启用开机自启并启动（+ 立即探测一次）
-./scripts/restart.sh    # 重启两个服务（不改变自启状态）
+./scripts/restart.sh    # 重启各服务（不改变自启状态）
 ./scripts/stop.sh       # 停止 + 取消开机自启 = 永久关闭
 ```
 
@@ -117,14 +125,17 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 │   ├── apps.config.json.bak   # 设置面板每次保存前自动生成的备份
 │   ├── probe-apps.mjs         # ★★ 探测器（端口 + git 同步 + 远程健康），零依赖
 │   ├── settings-server.mjs    # ★★ 设置 API，零依赖，仅监听 127.0.0.1:8300
-│   ├── start.sh               # 手动启动：enable --now + 立即探测一次
+│   ├── monitor-server.mjs     # ★★ 监控网关（采集/目录归属/告警/终端/审计），依赖 ssh2+ws，仅监听 127.0.0.1:8301
+│   ├── monitor.config.json    # ★ 监控配置（主机/跟踪目录/阈值/终端限制；≤2s 热加载；.bak 自动备份）
+│   ├── start.sh               # 手动启动：enable --now 四个单元 + 立即探测一次
 │   ├── restart.sh             # 手动重启（不改变自启状态）
 │   ├── stop.sh                # 手动停止：disable --now = 永久关闭（重启不自启）
 │   └── move-project.sh        # 项目目录迁移（自动修正 systemd/文档/可选 webroot 路径）
 ├── systemd/
 │   ├── my-homepage-probe.service / .timer     # 每 5 分钟完整探测（含 git fetch）
 │   ├── my-homepage-probe-quick.service / .timer  # 每 3 分钟快速探测（--no-fetch）
-│   └── my-homepage-settings.service           # 设置 API 常驻
+│   ├── my-homepage-settings.service           # 设置 API 常驻
+│   └── my-homepage-monitor.service            # 监控网关常驻
 ├── public/
 │   ├── favicon.svg            # 四宫格蓝色图标（与顶栏 brand-mark 同源设计）
 │   └── apps.json              # 探测产物（构建时随 dist 拷贝）
@@ -143,6 +154,17 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 ├── unslop/                    # ★ 独立设计对比端点 /unslop/（主站重设计版，纯 HTML/CSS/JS，见 §8.6）
 │   ├── index.html
 │   └── assets/app.css, app.js
+├── monitor/                   # ★ 监控中心独立静态页 /monitor/（纯 HTML/CSS/JS + ECharts/xterm vendor，零构建，见 §8.7）
+│   ├── index.html             # 看板主页（登录/概览/详情/告警/设置/终端抽屉）
+│   ├── terminal.html          # 独立终端页（弹窗放大用，?host=<id>）
+│   └── assets/monitor.css, monitor.js, terminal.js, vendor/(echarts+xterm)
+├── data/                      # 运行数据（已 gitignore，勿入库）
+│   └── monitor/               # history/*.jsonl 分钟历史 · audit.jsonl 审计 · alerts.jsonl 告警
+│                              # credentials.json(AES-GCM 凭据+主机指纹) · .secret(密钥) · keys/ 监控专用 SSH 密钥
+│                              # INITIAL_PASSWORD.txt(首启密码，改密后可删)
+├── docs/
+│   ├── monitor-terminal-blueprint.md  # ★ 监控+终端 落地方案（选型对比/架构/安全/视觉）
+│   └── monitor-ops.md                 # ★ 监控运维手册（部署/配置/扩缩容/排障）
 ├── dist/                      # 构建输出（不手工编辑）
 ├── .verify/                   # 开发期截图与 Playwright 脚本（可删，不影响运行）
 └── node_modules/
@@ -155,8 +177,9 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 | `apps.config.json`（数据） | 设置面板保存，或 `npm run probe` |
 | `probe-apps.mjs` | 自动生效（下次定时探测）；也可 `npm run probe` |
 | `settings-server.mjs` | `systemctl restart my-homepage-settings` |
+| `monitor-server.mjs` | `systemctl restart my-homepage-monitor`（`monitor.config.json` 与看板设置界面改动 ≤2s 热加载，无需重启） |
 | `src/**`（前端） | `./deploy.sh`（须重新构建） |
-| `glass/**` / `unslop/**`（独立静态页） | 刷新即生效（nginx 直发，无需构建） |
+| `glass/**` / `unslop/**` / `monitor/**`（独立静态页） | 刷新即生效（nginx 直发，无需构建） |
 | `deploy.sh` / nginx | 直接执行 / `nginx -s reload` |
 
 ---
@@ -387,6 +410,29 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 - nginx：`/unslop` → 301 → `/unslop/`，两处 server 块各一个 location（`root /root/applications/my-homepage` + `try_files … /unslop/index.html` + no-cache），备份 `*.bak-unslop-20261106`。
 - 踩坑：Vue 模板习惯的自闭合 `<div />` 在原生 HTML 里是**未闭合标签**，曾把 footer 吞进 `#u-content` 内部，首次 `innerHTML` 渲染将其销毁、`renderPageText` 抛错中断整个渲染（见踩坑 #11）。
 
+### 8.7 监控中心与 Web 终端（`/monitor/` + `scripts/monitor-server.mjs`，2026-11-10）
+
+选型结论：**自研轻量网关**（Node 直读 `/proc` + ssh2 免 Agent 远程采集）而非 Prometheus/Grafana/Netdata——决定性理由是「**按目录归属进程资源**」这一核心诉求在成熟方案里都是 cmdline 模板分组（不支持 cwd 维度），而 cwd 归属自研只要几十行；Web SSH 选 **xterm.js + ssh2** 而非 ttyd/Wetty/GateOne（pty 直通架构无法做会话鉴权/凭据加密/审计；GateOne 已停维护）。完整对比表与架构见 `docs/monitor-terminal-blueprint.md`。
+
+**架构**：`monitor-server.mjs`（systemd 常驻，`127.0.0.1:8301`，依赖 ssh2+ws）同时承载 HTTP API 与终端 WebSocket；`monitor/` 是零构建静态页（同 glass/unslop 模式，vendor 里 echarts+xterm 随仓库提交）；nginx **两处 server 块**各加三个 location：`/monitor/`（静态）、`/api/monitor/`（反代）、`/api/terminal`（WS 升级，read_timeout 3600s）。备份 `*.bak-monitor-20261110`。
+
+**采集与目录归属**：
+- 本机 5s 直读 `/proc`（cpu/meminfo/loadavg/net.dev/diskstats/statfs/每进程 stat+status+io+cwd+exe+cmdline+cgroup）；远程 20s 经 ssh2 `exec('sh -s')` 注入一段 POSIX sh 脚本（单个 awk 吃掉全部 procfs + 内建解析 cwd/fd，零逐进程子进程），输出**计数器口径**，网关差分算速率。
+- 目录归属四路优先级：cwd → exe → cmdline 含路径 → cgroup 容器（compose label `working_dir` 命中则并入目录组，否则按 `容器 <name>` 单列，docker 映射每 30s 刷新）。**未命中跟踪目录的进程不入库不出接口**（/proc 枚举仅用于归属判定，不越界采集）。
+- 跟踪目录 = `monitor.config.json` 的 `trackedDirs[]`（自定义）∪ **主页 `apps[].directory` 自动并入**（source: homepage）——在主页登记过应用就自动被跟踪，零重复配置。
+- 主机凭证：推荐密钥（`data/monitor/keys/<id>` 0600 + 目标机 `ssh-copy-id`）；密码凭据 AES-256-GCM 存 `credentials.json`（主密钥 `.secret` 0600）。SSH 主机指纹 TOFU 校验（首连记录，变更拒绝，`credentials.json` 删 `hostFp` 可重置）。
+- 远程主机密钥分发需人工输一次密码：`ssh-copy-id -i data/monitor/keys/netwatch.pub root@10.8.14.200`（aliyun 同理）；分发后 ≤20s 自动转 ONLINE，无需重启。
+
+**存储与告警**：内存环形 5s×1h + 1min 降采样×24h；分钟点落 `data/monitor/history/<hostId>/<日期>.jsonl`（默认保留 7 天，重启回放恢复）。告警阈值（CPU 85/内存 90/磁盘 90/每核负载 2，持续 3 分钟，超阈值+10 或 95% 升级 crit）→ `alerts.jsonl` + webhook（可配）。审计 `audit.jsonl`：登录（含失败限速 5 次/分）、会话开/关（含命令行捕获——按回车切行 best-effort，不录全键盘流）、配置/凭据变更。
+
+**终端网关**：WS `/api/terminal?host=<id>` 升级时校验 HttpOnly 会话 Cookie + Origin 同源；ssh2 shell pty 桥接，支持 resize 控制帧（`{type:'resize'}`）；空闲 15min / 单会话 4h / 每主机并发 2（均可配）。前端抽屉（`monitor/index.html`）+ 独立弹窗页（`monitor/terminal.html?host=`）。命令白名单对全交互 PTY 不可靠（诚实边界），更强约束在目标机侧做（sudo 白名单/rbash），见蓝图 §5.5。
+
+**鉴权**：独立访问密码（scrypt N=16384，只存哈希；首启无密码时随机生成写 `data/monitor/INITIAL_PASSWORD.txt` 0600）。会话 12h 滑动（内存态，网关重启需重登）。除 `login`/`healthz` 外全部 API 需会话；写操作另需 `X-Requested-With: XMLHttpRequest`（CSRF 双保险）。改密后全部会话失效。CLI：`--set-password-stdin`、`--set-cred <hostId> --password-stdin`。
+
+**前端视觉**：白底（`--bg-soft #fff`），变量与 `src/style.css` 完全同源（`--accent #2563eb` 主蓝，深色为可选项，默认浅色）；内网蓝/公网橙沿用。动效（全部 `prefers-reduced-motion` 降级，只动 transform/opacity/box-shadow）：数字 rAF 滚动 260ms easeOutCubic、卡片 hover 抬升 160ms `cubic-bezier(.2,.8,.2,1)`、告警点脉冲 2s、ECharts smooth 0.3 + 渐变面积 + `animationDurationUpdate 300 cubicOut`、入场 fadeUp stagger 仅首次（`state.entered` 标记，同 glass 踩坑 #6 教训）、骨架屏 shimmer、brand mark 扫光一次。
+
+**实测基线**（2026-11-10）：网关常驻 ~35MB；本机 516 进程全扫 + 50 个归属进程聚合，单 tick <100ms；WS 终端端到端自检通过（`.verify/term-test.mjs`，审计正确记录命令）。
+
 ---
 
 ## 9. 设置 API（`scripts/settings-server.mjs`）
@@ -419,22 +465,22 @@ systemctl restart my-homepage-settings           # 改了 settings-server.mjs �
 
 ### 10.2 nginx 配置（两处！）
 
-**A. `/etc/nginx/conf.d/default.conf`** — `listen 80 default_server`，root `/root/applications/my-homepage/www`，含 SPA 回退、`/api/` 反代、`/assets/` 长缓存、`apps.json` no-cache，以及独立页面 `/glass/`、`/unslop/`（`root /root/applications/my-homepage`）。
+**A. `/etc/nginx/conf.d/default.conf`** — `listen 80 default_server`，root `/root/applications/my-homepage/www`，含 SPA 回退、`/api/` 反代、`/assets/` 长缓存、`apps.json` no-cache，独立页面 `/glass/`、`/unslop/`、`/monitor/`（`root /root/applications/my-homepage`），以及 `/api/monitor/` 反代与 `/api/terminal` WebSocket 反代（→ 127.0.0.1:8301）。
 
 **B. `/etc/nginx/nginx.conf` 内的 `server { listen 80; server_name 127.0.0.1; }`** — 这是 paraportal 遗留配置块，携带 `/Platform`、`/visualization`、`/pushservice` 等到 `127.0.0.1:8080` 的代理。原始 `root` 指向**不存在的** `/opt/paratera/paraportal/gui/webapps/ROOT`。
 
-已做的最小改动：`root` 改为 `/root/applications/my-homepage/www`，并补上 `/api/` 反代与 `/glass/`、`/unslop/` 独立页面 location。**不要删这个块**（会破坏 docker:8080 的代理路径）。
+已做的最小改动：`root` 改为 `/root/applications/my-homepage/www`，并补上 `/api/` 反代与 `/glass/`、`/unslop/`、`/monitor/` 独立页面 location 及 `/api/monitor/`、`/api/terminal` 反代。**不要删这个块**（会破坏 docker:8080 的代理路径）。
 
-> `/glass/`、`/unslop/` 必须两处都配：`Host: 127.0.0.1` 走 `nginx.conf` 的块，局域网 IP 走 `default.conf`，否则会出现「一个入口能开、另一个 404」。两处都用 `root`（不是 `alias`）+ `try_files $uri $uri/ /glass/index.html`（unslop 同理），`alias` 与 `try_files` 组合会导致静态资源 404。
+> `/glass/`、`/unslop/`、`/monitor/`、`/api/monitor/`、`/api/terminal` 必须两处都配：`Host: 127.0.0.1` 走 `nginx.conf` 的块，局域网 IP 走 `default.conf`，否则会出现「一个入口能开、另一个 404」。静态页两处都用 `root`（不是 `alias`）+ `try_files $uri $uri/ /<page>/index.html`，`alias` 与 `try_files` 组合会导致静态资源 404。WS location 需要 `proxy_http_version 1.1` + `Upgrade/Connection` 头 + 3600s 读超时。
 
-备份：`/etc/nginx/conf.d/default.conf.bak`、`/etc/nginx/nginx.conf.bak`（另有 `*.bak-glass-20261104`、`*.bak-unslop-20261106`）
+备份：`/etc/nginx/conf.d/default.conf.bak`、`/etc/nginx/nginx.conf.bak`（另有 `*.bak-glass-20261104`、`*.bak-unslop-20261106`、`*.bak-monitor-20261110`）
 
 ### 10.3 systemd
 
 ```bash
 cp systemd/*.service systemd/*.timer /etc/systemd/system/
 systemctl daemon-reload
-systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-homepage-settings.service
+systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-homepage-settings.service my-homepage-monitor.service
 ```
 
 服务文件里 `ExecStart` 用的是绝对路径 `/usr/local/bin/node`。
@@ -445,14 +491,14 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 
 | 脚本 | 对 systemd 的作用 | 语义 |
 |---|---|---|
-| `start.sh` | `enable --now` 三个单元 + 跑一次 `probe --no-fetch` | 恢复开机自启并立即运行 |
-| `restart.sh` | `restart` 三个单元 + 跑一次 `probe --no-fetch` | 重启，**不改自启状态**；若当前 disabled 会警告"重启后不会自启" |
-| `stop.sh` | `disable --now` 三个单元 + 停掉可能在跑的 probe oneshot | **永久关闭**：重启服务器也不自启 |
+| `start.sh` | `enable --now` 四个单元 + 跑一次 `probe --no-fetch` | 恢复开机自启并立即运行 |
+| `restart.sh` | `restart` 四个单元 + 跑一次 `probe --no-fetch` | 重启，**不改自启状态**；若当前 disabled 会警告"重启后不会自启" |
+| `stop.sh` | `disable --now` 四个单元 + 停掉可能在跑的 probe oneshot | **永久关闭**：重启服务器也不自启 |
 
 关键事实：
 
-- **主页是静态文件**，由共享 nginx（80 端口）托管，且同一 nginx 还承载 `/Platform` 等历史代理，因此 `stop.sh` **不动 nginx**。停止后页面仍能打开，但 `apps.json` 不再更新、设置面板保存失败（`/api/config` 返回 **502**）。
-- 当前四个服务（`my-homepage-settings`、`my-homepage-probe.timer`、`my-homepage-probe-quick.timer`、`nginx`）均为 `enabled`，开机自启已生效。核对：`systemctl is-enabled <unit>`。
+- **主页是静态文件**，由共享 nginx（80 端口）托管，且同一 nginx 还承载 `/Platform` 等历史代理，因此 `stop.sh` **不动 nginx**。停止后页面仍能打开，但 `apps.json` 不再更新、设置面板保存失败（`/api/config` 返回 **502**）、监控 API 返回 502、终端不可用。
+- 当前五个服务（`my-homepage-settings`、`my-homepage-probe.timer`、`my-homepage-probe-quick.timer`、`my-homepage-monitor`、`nginx`）均为 `enabled`，开机自启已生效。核对：`systemctl is-enabled <unit>`。
 - 设置服务停机时 `/api/config` 应返回 **502**。早期曾返回 404，原因是 `nginx.conf` 的 paraportal 块里 `error_page ... /50x.html` 配了 `root html;`（解析为不存在的 `/etc/nginx/html/50x.html`），错误页取不到导致状态码被降级；已改为 `root /usr/share/nginx/html;`。
 
 ---
@@ -509,6 +555,18 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 12. **元素重置选择器别带类型名，会压过单类组件样式**
    `glass.css` 的 `.fg-body button { border:0; background:none }`（0-1-1）曾压过 `.fg-iconbtn`/`.fg-syncbtn`/`.fg-minibtn`/`.fg-retry`（0-1-0），导致这些按钮的玻璃底整体失效、仅悬停闪现；分段控件幸存只因选择器恰好同为 0-1-1 且在源码顺序之后。重置只放 font/color/cursor 等无冲突属性，边框底色交给组件类自己定义；组件类若需要压过重置，就写完整选择器或提高特异性。（与踩坑 #10 同族：`hidden` 也是被更强的 display 声明顶掉）
 
+13. **`String.raw` 模板不转义 `${`**
+   `monitor-server.mjs` 的远程探测 shell 片段写在 `String.raw` 里，`${d##*/}` 仍被 JS 解析成模板插值 → `SyntaxError: Missing } in template expression`。`String.raw` 只禁用转义处理、**不禁用插值**；含 `${` 的段落要用普通模板串写 `\${`，或如本项目拆成 awk 段（String.raw）+ shell 段（普通模板）两段拼接。
+
+14. **`pkill -f <脚本名>` 会自杀**
+   在 bash 工具里跑 `pkill -f 'monitor-server.mjs'` 时，**当前 shell 的命令行本身**就包含该字符串，pkill 把执行命令的 shell 一起杀了，表现为「命令无输出」。按 PID kill（`kill $(cat pidfile)`）或用不会自匹配的模式。
+
+15. **Playwright `networkidle` 与前端轮询互斥**
+   监控看板每 5s 轮询 summary，`waitUntil: 'networkidle'` 永远等不到静默窗口而超时。轮询型页面用 `waitUntil: 'domcontentloaded'` + 显式 `waitForSelector`。主页/静态演示页无轮询才可用 networkidle。
+
+16. **系统 `ssh` 免密 ≠ ssh2 单钥匙免密**
+   排查终端「All configured authentication methods failed」时发现：CLI `ssh root@127.0.0.1` 会**依次尝试所有默认身份**（id_ed25519 → id_rsa），实际免密的是 `id_rsa`（id_ed25519 不在 authorized_keys）；而 ssh2 只用配置里指定的一把钥匙。给网关配 `keyPath` 前先 `grep "$(ssh-keygen -y -f <key>)" ~/.ssh/authorized_keys` 确认该公钥确实在列。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
@@ -530,6 +588,12 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 内网蓝 / 公网橙 | 用户要求「内网和公网区分明显，可用颜色」 |
 | 3 行简介 + 固定行高 | 用户要求「简介过长换行、每行高度一致」；超 3 行截断（悬停看全文）是行高一致的必要代价 |
 | `/unslop/` 设计对比端点（2026-11-06） | 用户要求「unslop 主页，生成新端点、保留旧的对比」；按 glass/ 先例做独立静态页，零构建、零风险，旧主页一字未动。首版「机房仪表盘」方向被用户否掉（「还没有原来的好看」），v2 改为主站视觉 1:1 移植 + 仅 4 处净化修正 |
+| 监控选自研网关而非 Prometheus/Grafana/Netdata（2026-11-10） | 核心诉求「按目录归属进程资源」在成熟方案里均按 cmdline 模板分组、不支持 cwd 维度；且现有系统是零依赖/systemd/回环反代哲学，专业栈体量失衡。预留 `/metrics` 与 webhook 兜底专业栈价值 |
+| Web SSH 选 xterm.js + ssh2 自建网关（2026-11-10） | 需求要求会话鉴权/凭据加密/访问审计/超时——ttyd/Wetty 的 pty 直通架构四项全空白；GateOne 已停维护否决；与监控共用同一网关与鉴权体系 |
+| 目录跟踪默认复用主页 `apps[].directory` | 用户已在主页登记应用目录，监控侧零重复配置；自定义目录走 `trackedDirs[]`（界面/文件/API 三通道） |
+| 远程采集免 Agent（ssh2 exec 注入脚本） | 目标机（NetWatch/阿里云）不想装常驻组件；探测脚本纯只读、计数器口径由网关差分，单次 <1.5s；Agent 推送模式留作扩展 |
+| 监控/终端独立访问密码而非复用主页 | 主页本无登录体系；监控持有服务器凭据必须独立鉴权，OIDC 统一登录留作扩展点 |
+| 白底视觉 + 同源变量（2026-11-10） | 用户明确要求监控看板「以白色底色为主、保持现有风格一致、适度炫酷」：全套复用 src/style.css 变量，动效只走合成层并 reduced-motion 降级 |
 
 ---
 
@@ -609,6 +673,20 @@ curl -s http://127.0.0.1/api/config | head -5      # 直连服务
 curl -s http://127.0.0.1/api/config | head -5      # 经 nginx（两处都要通）
 ```
 
+**监控/终端相关**
+```bash
+# 纳管一台远程主机（人工输一次目标机密码分发公钥，之后 ≤20s 自动上线）
+ssh-copy-id -i data/monitor/keys/<hostId>.pub root@<目标IP>
+# 忘记监控密码
+echo '新密码' | node scripts/monitor-server.mjs --set-password-stdin
+# 看会话审计 / 告警历史
+tail -5 data/monitor/audit.jsonl
+tail -5 data/monitor/alerts.jsonl
+# 终端端到端自检（需要已登录会话；脚本自动登录）
+node .verify/term-test.mjs
+# 排障速查表见 docs/monitor-ops.md §6
+```
+
 ---
 
 ## 15. 禁止事项 / 注意事项
@@ -618,7 +696,10 @@ curl -s http://127.0.0.1/api/config | head -5      # 经 nginx（两处都要通
 - ❌ **不要给整行/整卡加 `draggable`**——只能是拖拽手柄。
 - ❌ **不要在探测中执行 `git pull / checkout / reset / gc`**——只允许只读命令与 `fetch`。
 - ❌ **不要用 `readFileSync` 读 `/proc/<pid>/cwd`**。
+- ❌ **不要把监控网关 8301 改绑 0.0.0.0 / 不经会话鉴权暴露监控 API**——凭据与终端入口都在里面；公网暴露前必须上 TLS。
+- ❌ **不要把 `data/monitor/` 下任何内容（凭据/密钥/`.secret`/初始密码/审计）提交进 git**——`data/` 已整体 gitignore，保持。
+- ❌ **不要在网关日志/审计之外另存明文密码**——密码只存 scrypt 哈希与 AES-GCM 密文。
 - ⚠️ `apps.config.json` 的 `id` 必须与目录名一致，否则端口归属匹配不到（会退回 TCP 兜底，丢失附加端口信息）。
-- ⚠️ 改动前端后必须 `./deploy.sh`；只改配置/数据则 `npm run probe` 即可。
+- ⚠️ 改动前端后必须 `./deploy.sh`；只改配置/数据则 `npm run probe` 即可；改 `monitor-server.mjs` 后 `systemctl restart my-homepage-monitor`（改 `monitor.config.json` 不用，热加载）。
 - ⚠️ 本项目已纳入 git（origin `github.com:guojiaxian/my-homepage`），改完请 commit/push，保持主页「同步」列干净。
-- ⚠️ 本机 nginx 80 端口还承载其他历史代理路径，改 nginx 前务必 `nginx -t` 并保留 `.bak` 备份。
+- ⚠️ 本机 nginx 80 端口还承载其他历史代理路径，改 nginx 前务必 `nginx -t` 并保留 `.bak` 备份；`/monitor/`、`/api/monitor/`、`/api/terminal` 与其他独立页面一样**两处 server 块都要配**。

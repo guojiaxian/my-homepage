@@ -7,7 +7,8 @@
 #   · my-homepage-settings      首页设置面板的读写 API
 #   · my-homepage-probe         完整探测（端口/运行状态/git 同步，每 5 分钟）
 #   · my-homepage-probe-quick   快速探测（端口/运行状态，每 3 分钟，不 fetch）
-# 停止后页面仍可打开，但数据不再更新、设置面板保存会失败。
+#   · my-homepage-monitor       监控网关（指标采集 + Web 终端）
+# 停止后页面仍可打开，但数据不再更新、设置面板/监控看板保存会失败。
 set -euo pipefail
 
 say()  { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
@@ -22,6 +23,9 @@ systemctl disable --now my-homepage-probe-quick.timer
 say "停止设置 API 并取消开机自启"
 systemctl disable --now my-homepage-settings.service
 
+say "停止监控网关并取消开机自启"
+systemctl disable --now my-homepage-monitor.service
+
 # 若探测正好在跑（oneshot），一并停掉
 systemctl stop my-homepage-probe.service 2>/dev/null || true
 systemctl stop my-homepage-probe-quick.service 2>/dev/null || true
@@ -31,6 +35,7 @@ say "状态"
 printf '  %-34s %s / %s\n' my-homepage-settings.service "$(systemctl is-active my-homepage-settings.service)" "$(systemctl is-enabled my-homepage-settings.service 2>&1)"
 printf '  %-34s %s / %s\n' my-homepage-probe.timer "$(systemctl is-active my-homepage-probe.timer)" "$(systemctl is-enabled my-homepage-probe.timer 2>&1)"
 printf '  %-34s %s / %s\n' my-homepage-probe-quick.timer "$(systemctl is-active my-homepage-probe-quick.timer)" "$(systemctl is-enabled my-homepage-probe-quick.timer 2>&1)"
+printf '  %-34s %s / %s\n' my-homepage-monitor.service "$(systemctl is-active my-homepage-monitor.service)" "$(systemctl is-enabled my-homepage-monitor.service 2>&1)"
 
 echo
 warn "已永久关闭：重启服务器后不会自动启动。恢复请执行 ./scripts/start.sh"

@@ -1,0 +1,15 @@
+[Unit]
+Description=my-homepage monitor & web-terminal gateway
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/applications/my-homepage
+ExecStart=/usr/local/bin/node /root/applications/my-homepage/scripts/monitor-server.mjs
+Restart=always
+RestartSec=3
+User=root
+
+[Install]
+WantedBy=multi-user.target
