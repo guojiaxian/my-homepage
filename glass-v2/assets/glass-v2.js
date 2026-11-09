@@ -1039,10 +1039,33 @@
             `}
           </div>
           ${h.note ? `<p class="gv-sub" style="margin:6px 0 0">${esc(h.note)}</p>` : ''}
+          <div class="gv-he-dirs">
+            <div class="sub" style="margin-bottom:4px">该主机跟踪目录（目录级资源统计${h.type === 'local' ? '；主页登记的应用目录已自动并入' : ''}）</div>
+            ${(h.trackedDirs || []).map((d, di) => `<div class="gv-dir-row"><span class="gv-d-path">${esc(d.path)}</span>
+              <span class="gv-d-src">主机目录</span><button type="button" class="gv-minibtn" style="color:var(--gv-red)" data-del-hdir="${i}:${di}">移除</button></div>`).join('')}
+            <button type="button" class="gv-minibtn" data-add-hdir="${i}">＋添加目录</button>
+          </div>
         </div>`).join('')
       $$('#gv-set-hosts [data-del-host]').forEach((b) => b.addEventListener('click', () => {
         const i = +b.dataset.delHost
         if (confirm(`删除主机 ${setEdit.hosts[i].id}？（保存后生效）`)) { setEdit.hosts.splice(i, 1); renderSettings() }
+      }))
+      $$('#gv-set-hosts [data-del-hdir]').forEach((b) => b.addEventListener('click', () => {
+        const [hi, di] = b.dataset.delHdir.split(':').map(Number)
+        setEdit.hosts[hi].trackedDirs.splice(di, 1)
+        renderSettings()
+      }))
+      $$('#gv-set-hosts [data-add-hdir]').forEach((b) => b.addEventListener('click', () => {
+        const h = setEdit.hosts[+b.dataset.addHdir]
+        const p = prompt(`输入 ${h.name || h.id} 上要跟踪的绝对目录路径（如 /opt/myapp）：`)
+        if (!p) return
+        if (!p.startsWith('/')) { alert('必须是绝对路径'); return }
+        if (p === '/') { alert('不允许跟踪根目录（不越界采集）'); return }
+        const clean = p.replace(/\/+$/, '')
+        const list = h.trackedDirs || (h.trackedDirs = [])
+        if (list.some((d) => d.path === clean)) { alert('该目录已在列表中'); return }
+        list.push({ path: clean, source: 'host' })
+        renderSettings()
       }))
       $$('#gv-set-hosts input, #gv-set-hosts select').forEach((inp) => inp.addEventListener('change', () => {
         const h = setEdit.hosts[+inp.closest('.gv-host-edit').dataset.i]

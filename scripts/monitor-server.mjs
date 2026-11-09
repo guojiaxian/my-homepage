@@ -64,6 +64,13 @@ const DEFAULTS = {
 };
 const HOST_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
+const GENERIC_DIR_NAMES = new Set(['server', 'bin', 'dist', 'app', 'www', 'web', 'src', 'main', 'data']);
+function defaultDirName(p) {
+  const parts = String(p).split('/').filter(Boolean);
+  const base = parts[parts.length - 1] || p;
+  if (GENERIC_DIR_NAMES.has(base) && parts.length >= 2) return parts[parts.length - 2] + '/' + base;
+  return base;
+}
 function normalizeHost(h) {
   if (!h || typeof h !== 'object' || !h.id) return null;
   if (!HOST_ID_RE.test(String(h.id))) return null;
@@ -85,6 +92,11 @@ function normalizeHost(h) {
     out.keyPath = h.keyPath ? String(h.keyPath) : '';
   }
   if (h.note) out.note = String(h.note);
+  // 每主机跟踪目录：远程主机在此指定应用目录，目录级资源统计按主机维度生效
+  out.trackedDirs = (Array.isArray(h.trackedDirs) ? h.trackedDirs : [])
+    .map(d => (typeof d === 'string' ? { path: d } : d))
+    .filter(d => d && d.path && path.isAbsolute(d.path) && path.resolve(d.path) !== '/')
+    .map(d => ({ path: path.resolve(d.path), name: String(d.name || defaultDirName(d.path)), source: 'host' }));
   return out;
 }
 
@@ -119,6 +131,17 @@ function reloadHomepageDirs() {
 function effectiveTrackedDirs() {
   const map = new Map();
   for (const d of [...config.trackedDirs, ...homepageDirs]) {
+    if (!map.has(d.path)) map.set(d.path, d);
+  }
+  return [...map.values()];
+}
+/* 主机维度的跟踪目录集 = 全局自定义目录 + （仅本机）主页登记目录 + 该主机自己的目录 */
+function effectiveTrackedDirsFor(host) {
+  const map = new Map();
+  const lists = [config.trackedDirs];
+  if (host.type === 'local') lists.push(homepageDirs);
+  lists.push(host.trackedDirs || []);
+  for (const d of lists.flat()) {
     if (!map.has(d.path)) map.set(d.path, d);
   }
   return [...map.values()];
@@ -330,6 +353,16 @@ END {
   for (p in ut) print "PRC " p " " (rss[p] + 0) " " (thr[p] + 0) " " (ior[p] + 0) " " (iow[p] + 0) " " ut[p] " " st[p]
 }
 ' /proc/stat /proc/loadavg /proc/uptime /proc/meminfo /proc/net/dev /proc/diskstats /proc/mounts /proc/[0-9]*/stat /proc/[0-9]*/status /proc/[0-9]*/io /proc/[0-9]*/cgroup 2>/dev/null
+# cmdline（第二遍 awk，RS='\0' 拼参数；用于解释器脚本的目录归属与进程名）
+awk '
+BEGIN { RS = "\0" }
+FNR == 1 { pid = FILENAME; sub(/\/proc\//, "", pid); sub(/\/cmdline$/, "", pid); pid = pid + 0 }
+{ cmd[pid] = cmd[pid] $0 " " }
+END {
+  print "===CMD==="
+  for (p in cmd) print "CMD " p " " substr(cmd[p], 1, 160)
+}
+' /proc/[0-9]*/cmdline 2>/dev/null
 `;
 const REMOTE_PROBE_SHELL = `
 echo "===PWD==="
@@ -412,6 +445,7 @@ function parseRemoteOutput(text) {
   for (const line of text.split('\n')) {
     const t = line.trim();
     if (t === '===PROCS===') { section = 'PROCS'; continue; }
+    if (t === '===CMD===') { section = 'CMD'; continue; }
     if (t === '===PWD===') { section = 'PWD'; continue; }
     if (t === '===DF===') { section = 'DF'; continue; }
     if (t === '===OS===') { section = 'OS'; continue; }
@@ -428,6 +462,13 @@ function parseRemoteOutput(text) {
     } else if (section === 'PROCS') {
       const f = t.split(/\s+/);
       if (f[0] === 'PRC') c.procs.set(+f[1], { rssKb: +f[2] || 0, threads: +f[3] || 0, ioR: +f[4] || 0, ioW: +f[5] || 0, ut: +f[6] || 0, st: +f[7] || 0, cwd: '', exe: '', cmd: '', comm: '', fds: 0, cg: '' });
+    } else if (section === 'CMD') {
+      // 行格式：CMD <pid> <参数串...>（供解释器脚本的目录归属与进程名）
+      const f = t.split(/\s+/);
+      if (f[0] === 'CMD') {
+        const p = c.procs.get(+f[1]);
+        if (p) { p.cmd = t.slice(t.indexOf(' ') + 1).split(/\s+/).slice(1).join(' ').slice(0, 200); }
+      }
     } else if (section === 'PWD') {
       // 行格式：PWD <pid> <fds> <cwd...>（cwd 可含空格，取第四个空格之后）
       if (!t.startsWith('PWD ')) continue;
@@ -455,7 +496,7 @@ function parseRemoteOutput(text) {
 }
 
 /* ============================ 本机采集（直读 /proc，零子进程） ============================ */
-function readLocalCounters() {
+function readLocalCounters(trackedDirs) {
   const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], osName: '' };
   try {
     for (const line of fs.readFileSync('/proc/stat', 'utf8').split('\n')) {
@@ -497,7 +538,7 @@ function readLocalCounters() {
   }
 
   // 进程枚举（归属所需的 cwd/exe/cmd/status/io；fd 仅对命中目录的进程计数）
-  const dirs = effectiveTrackedDirs();
+  const dirs = trackedDirs;
   for (const name of fs.readdirSync('/proc')) {
     if (!/^[0-9]+$/.test(name)) continue;
     const pid = +name;
@@ -593,8 +634,7 @@ function cpuFromLines(lines, prevLines) {
   return { pct, total, perCore };
 }
 
-function buildSnapshot(hostId, counters, prev, intervalSec, isFirst) {
-  const dirsCfg = effectiveTrackedDirs();
+function buildSnapshot(hostId, counters, prev, intervalSec, isFirst, dirsCfg) {
   const dirMap = new Map(dirsCfg.map(d => [d.path, d]));
   const coreN = Math.max(1, counters.cpuLines.length - 1);
   const cpu = cpuFromLines(counters.cpuLines, prev?.cpuLines);
@@ -620,8 +660,14 @@ function buildSnapshot(hostId, counters, prev, intervalSec, isFirst) {
     }
     const cpuPct = cpu.total > CPU_DELTA_MIN ? (dCpu / cpu.total) * 100 : null;
     let groupName = null, groupPath = null, groupSource = null;
-    if (p._dir && dirMap.has(p._dir)) {
-      const dc = dirMap.get(p._dir);
+    // 远程进程无 _dir 预计算，现场按 cwd/exe/cmdline 归属（远程脚本无 exe，靠 cwd+cmd 兜底）
+    let dirPath = p._dir;
+    if (!dirPath) {
+      const hit = matchDirOf(p, dirsCfg);
+      if (hit) dirPath = hit.path;
+    }
+    if (dirPath && dirMap.has(dirPath)) {
+      const dc = dirMap.get(dirPath);
       groupName = dc.name; groupPath = dc.path; groupSource = dc.source;
     } else if (p.cg) {
       const info = dockerMap.get(p.cg.slice(0, 12));
@@ -863,9 +909,9 @@ async function tickLocal(host) {
   st.probing = true;
   const t0 = Date.now();
   try {
-    const counters = readLocalCounters();
+    const counters = readLocalCounters(effectiveTrackedDirsFor(host));
     const interval = st.prev ? Math.max(0.5, (t0 - (st.prev.t || t0)) / 1000) : 0;
-    const { snap, prev, detail } = buildSnapshot(host.id, counters, st.prev, interval, !st.prev);
+    const { snap, prev, detail } = buildSnapshot(host.id, counters, st.prev, interval, !st.prev, effectiveTrackedDirsFor(host));
     prev.t = t0;
     st.prev = prev;
     finishTick(host, snap, detail);
@@ -883,7 +929,7 @@ async function tickRemote(host) {
   try {
     const counters = await sshProbe(host);
     const interval = st.prev ? Math.max(0.5, (t0 - (st.prev.t || t0)) / 1000) : 0;
-    const { snap, prev, detail } = buildSnapshot(host.id, counters, st.prev, interval, !st.prev);
+    const { snap, prev, detail } = buildSnapshot(host.id, counters, st.prev, interval, !st.prev, effectiveTrackedDirsFor(host));
     prev.t = t0;
     st.prev = prev;
     finishTick(host, snap, detail);

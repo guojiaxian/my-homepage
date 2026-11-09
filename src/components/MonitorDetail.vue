@@ -249,7 +249,7 @@ onBeforeUnmount(() => {
         <span class="hint">点击条目过滤下方进程</span>
       </h4>
       <div v-if="dirsList.length" ref="elDirs" class="chart wide-tall" />
-      <p v-else class="dirs-empty">该主机没有命中跟踪目录（远程主机默认不跟踪目录）——目录级资源统计仅对已登记目录的主机展示。</p>
+      <p v-else class="dirs-empty">该主机暂无命中跟踪目录的进程 —— 可在「⚙ 监控设置 → 对应主机」中添加该机上的应用目录（如 /opt/myapp），目录级资源统计即按主机生效。</p>
     </div>
 
     <div v-if="dirsList.length" class="chart-box">

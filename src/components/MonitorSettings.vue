@@ -41,8 +41,19 @@ async function load() {
 watch(() => props.open, (v) => { if (v) load() })
 
 function addHost() {
-  cfg.hosts.push({ id: 'host-' + Math.random().toString(36).slice(2, 6), name: '新主机', type: 'ssh', group: '内网', address: '', port: 22, username: 'root', authType: 'key', keyPath: '' })
+  cfg.hosts.push({ id: 'host-' + Math.random().toString(36).slice(2, 6), name: '新主机', type: 'ssh', group: '内网', address: '', port: 22, username: 'root', authType: 'key', keyPath: '', trackedDirs: [] })
 }
+function addHostDir(i) {
+  const p = prompt(`输入 ${cfg.hosts[i].name || cfg.hosts[i].id} 上要跟踪的绝对目录路径（如 /opt/myapp）：`)
+  if (!p) return
+  if (!p.startsWith('/')) { alert('必须是绝对路径'); return }
+  if (p === '/') { alert('不允许跟踪根目录（不越界采集）'); return }
+  const clean = p.replace(/\/+$/, '')
+  const list = cfg.hosts[i].trackedDirs || (cfg.hosts[i].trackedDirs = [])
+  if (list.some((d) => d.path === clean)) { alert('该目录已在列表中'); return }
+  list.push({ path: clean, source: 'host' })
+}
+function delHostDir(i, di) { cfg.hosts[i].trackedDirs.splice(di, 1) }
 function delHost(i) {
   if (confirm(`删除主机 ${cfg.hosts[i].id}？（保存后生效）`)) cfg.hosts.splice(i, 1)
 }
@@ -133,6 +144,17 @@ async function changePw() {
                 </template>
               </div>
               <p v-if="h.note" class="sub">{{ h.note }}</p>
+              <div class="he-dirs">
+                <div class="sub" style="margin-bottom:4px">
+                  该主机跟踪目录（目录级资源统计{{ h.type === 'local' ? '；主页登记的应用目录已自动并入' : '' }}）
+                </div>
+                <div v-for="(d, di) in h.trackedDirs" :key="d.path" class="dir-row">
+                  <span class="d-path">{{ d.path }}</span>
+                  <span class="d-src">主机目录</span>
+                  <button class="mini-btn danger" @click="delHostDir(i, di)">移除</button>
+                </div>
+                <button class="mini-btn" @click="addHostDir(i)">＋添加目录</button>
+              </div>
             </div>
             <button class="mini-btn" @click="addHost">＋添加主机</button>
             <p class="sub" style="margin:8px 0 0">
@@ -261,4 +283,7 @@ async function changePw() {
 .primary-btn:disabled { opacity: 0.6; cursor: default; }
 .sub { color: var(--text-2); font-size: 12px; }
 code { font-family: var(--mono); font-size: 11.5px; background: var(--bg-hover); border-radius: 4px; padding: 0 4px; }
+</style>
+<style scoped>
+.he-dirs { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
 </style>

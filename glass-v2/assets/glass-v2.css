@@ -480,3 +480,6 @@ code { font-family: var(--gv-mono); font-size: 11.5px; background: var(--gv-pane
 
 /* 无跟踪目录时的目录占比占位 */
 .gv-dirs-empty { margin: 0; padding: 26px 8px; color: var(--gv-text-3); font-size: 12.5px; text-align: center; background: var(--gv-panel); border-radius: 8px; }
+
+/* 主机卡内跟踪目录编辑器 */
+.gv-he-dirs { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--gv-hairline); }

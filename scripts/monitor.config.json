@@ -38,7 +38,8 @@
         "username": "root",
         "authType": "key",
         "keyPath": "/root/.ssh/id_rsa"
-      }
+      },
+      "trackedDirs": []
     },
     {
       "id": "netwatch",
@@ -49,7 +50,14 @@
       "port": 22,
       "username": "root",
       "authType": "key",
-      "keyPath": "/root/applications/my-homepage/data/monitor/keys/netwatch"
+      "keyPath": "/root/applications/my-homepage/data/monitor/keys/netwatch",
+      "trackedDirs": [
+        {
+          "path": "/root/network-monitor",
+          "name": "network-monitor",
+          "source": "host"
+        }
+      ]
     },
     {
       "id": "aliyun",
@@ -60,7 +68,24 @@
       "port": 22,
       "username": "root",
       "authType": "key",
-      "keyPath": "/root/applications/my-homepage/data/monitor/keys/aliyun"
+      "keyPath": "/root/applications/my-homepage/data/monitor/keys/aliyun",
+      "trackedDirs": [
+        {
+          "path": "/root/applications/studylog",
+          "name": "studylog",
+          "source": "host"
+        },
+        {
+          "path": "/root/applications/shunfeng-ledger-wxmp/server",
+          "name": "shunfeng-ledger-wxmp/server",
+          "source": "host"
+        },
+        {
+          "path": "/root/applications/shunfeng-ledger/server",
+          "name": "shunfeng-ledger/server",
+          "source": "host"
+        }
+      ]
     },
     {
       "id": "lan-1103",
@@ -71,7 +96,14 @@
       "port": 22,
       "username": "root",
       "authType": "key",
-      "keyPath": "/root/applications/my-homepage/data/monitor/keys/lan-1103"
+      "keyPath": "/root/applications/my-homepage/data/monitor/keys/lan-1103",
+      "trackedDirs": [
+        {
+          "path": "/root/log_gpt_agent",
+          "name": "log_gpt_agent",
+          "source": "host"
+        }
+      ]
     }
   ],
   "trackedDirs": []
