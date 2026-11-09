@@ -441,7 +441,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **采集与目录归属**：
 - 本机 5s 直读 `/proc`（cpu/meminfo/loadavg/net.dev/diskstats/statfs/每进程 stat+status+io+cwd+exe+cmdline+cgroup）；远程 20s 经 ssh2 `exec('sh -s')` 注入一段 POSIX sh 脚本（单个 awk 吃掉全部 procfs + 内建解析 cwd/fd，零逐进程子进程），输出**计数器口径**，网关差分算速率。
-- 目录归属四路优先级：cwd → exe → cmdline 含路径 → cgroup 容器（compose label `working_dir` 命中则并入目录组，否则按 `容器 <name>` 单列，docker 映射每 30s 刷新）。**未命中跟踪目录的进程不入库不出接口**（/proc 枚举仅用于归属判定，不越界采集）。
+- 目录归属四路优先级：cwd → exe → cmdline 含路径 → cgroup 容器（compose label `working_dir` 命中则并入目录组，否则按 `容器 <name>` 单列，docker 映射每 30s 刷新）。**每主机跟踪目录**：`hosts[].trackedDirs[]`（⚙ 设置内每台主机可添加，2026-11-10 加）——远程主机借此获得目录级资源统计；归属集 = 全局 trackedDirs + （仅本机）主页登记目录 + 该主机目录；远程探测已补 cmdline 采集（第二遍 awk，RS='\0'），远程归属靠 cwd+cmdline（无 exe）；目录默认名对 server/bin 等通用名自动取「父目录/名」避免重名。**未命中跟踪目录的进程不入库不出接口**（/proc 枚举仅用于归属判定，不越界采集）。
 - 跟踪目录 = `monitor.config.json` 的 `trackedDirs[]`（自定义）∪ **主页 `apps[].directory` 自动并入**（source: homepage）——在主页登记过应用就自动被跟踪，零重复配置。
 - 主机凭证：推荐密钥（`data/monitor/keys/<id>` 0600 + 目标机 `ssh-copy-id`）；密码凭据 AES-256-GCM 存 `credentials.json`（主密钥 `.secret` 0600）。SSH 主机指纹 TOFU 校验（首连记录，变更拒绝，`credentials.json` 删 `hostFp` 可重置）。
 - 远程主机密钥分发需人工输一次密码：`ssh-copy-id -i data/monitor/keys/netwatch.pub root@10.8.14.200`（aliyun 同理）；分发后 ≤20s 自动转 ONLINE，无需重启。
