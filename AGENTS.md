@@ -439,7 +439,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **终端网关**：WS `/api/terminal?host=<id>` 升级时校验 HttpOnly 会话 Cookie + Origin 同源；ssh2 shell pty 桥接，支持 resize 控制帧（`{type:'resize'}`）；空闲 15min / 单会话 4h / 每主机并发 2（均可配）。前端抽屉（`monitor/index.html`）+ 独立弹窗页（`monitor/terminal.html?host=`）。命令白名单对全交互 PTY 不可靠（诚实边界），更强约束在目标机侧做（sudo 白名单/rbash），见蓝图 §5.5。
 
-**鉴权**：独立访问密码（scrypt N=16384，只存哈希；首启无密码时随机生成写 `data/monitor/INITIAL_PASSWORD.txt` 0600）。会话 12h 滑动（内存态，网关重启需重登）。除 `login`/`healthz` 外全部 API 需会话；写操作另需 `X-Requested-With: XMLHttpRequest`（CSRF 双保险）。改密后全部会话失效。CLI：`--set-password-stdin`、`--set-cred <hostId> --password-stdin`。
+**鉴权**：独立访问密码（scrypt N=16384，只存哈希于 `data/monitor/.password-hash` 0600——**配置文件不保存任何密码材料**，旧版哈希会在启动时自动迁移并从配置剥离；首启无密码时随机生成写 `data/monitor/INITIAL_PASSWORD.txt` 0600）。会话 12h 滑动（内存态，网关重启需重登）。除 `login`/`healthz` 外全部 API 需会话；写操作另需 `X-Requested-With: XMLHttpRequest`（CSRF 双保险）。改密后全部会话失效。CLI：`--set-password-stdin`、`--set-cred <hostId> --password-stdin`。
 
 **前端视觉**：白底（`--bg-soft #fff`），变量与 `src/style.css` 完全同源（`--accent #2563eb` 主蓝，深色为可选项，默认浅色）；内网蓝/公网橙沿用。动效（全部 `prefers-reduced-motion` 降级，只动 transform/opacity/box-shadow）：数字 rAF 滚动 260ms easeOutCubic、卡片 hover 抬升 160ms `cubic-bezier(.2,.8,.2,1)`、告警点脉冲 2s、ECharts smooth 0.3 + 渐变面积 + `animationDurationUpdate 300 cubicOut`、入场 fadeUp stagger 仅首次（`state.entered` 标记，同 glass 踩坑 #6 教训）、骨架屏 shimmer、brand mark 扫光一次。
 

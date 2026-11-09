@@ -36,6 +36,7 @@ const HISTORY_DIR = path.join(DATA_DIR, 'history');
 const AUDIT_PATH = path.join(DATA_DIR, 'audit.jsonl');
 const ALERTS_PATH = path.join(DATA_DIR, 'alerts.jsonl');
 const INITIAL_PW_PATH = path.join(DATA_DIR, 'INITIAL_PASSWORD.txt');
+const PW_HASH_PATH = path.join(DATA_DIR, '.password-hash'); // scrypt 哈希落 gitignored 数据目录，配置文件不存任何密码材料
 const COOKIE_NAME = 'mh_mon';
 const CPU_DELTA_MIN = 1; // 防 0 除的最小 jiffy 差
 
@@ -195,18 +196,37 @@ function verifyPassword(pw, stored) {
     return crypto.timingSafeEqual(calc, Buffer.from(hash, 'hex'));
   } catch { return false; }
 }
+function currentPasswordHash() {
+  try {
+    const h = fs.readFileSync(PW_HASH_PATH, 'utf8').trim();
+    if (h.startsWith('scrypt$')) return h;
+  } catch { /* 尚未生成 */ }
+  return config.auth && config.auth.passwordHash; // 兼容旧版：配置文件里遗留的哈希
+}
+function writePasswordHash(hash) {
+  ensureDirSync(DATA_DIR);
+  fs.writeFileSync(PW_HASH_PATH, hash + '\n', { mode: 0o600 });
+}
 function ensurePasswordHash() {
-  if (config.auth && config.auth.passwordHash) return;
+  if (currentPasswordHash()) {
+    // 迁移：把旧版存在配置文件里的哈希搬进数据目录，并从配置中剥离
+    if (config.auth && config.auth.passwordHash) {
+      writePasswordHash(config.auth.passwordHash);
+      const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+      if (raw.auth) delete raw.auth.passwordHash;
+      fs.writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2) + '\n');
+      config = loadConfigSync();
+      log('已将密码哈希迁移至', PW_HASH_PATH, '（配置文件不再保存密码材料）');
+    }
+    return;
+  }
   const alphabet = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKMNPQRSTUVWXYZ23456789';
   let pw = '';
   const buf = crypto.randomBytes(14);
   for (let i = 0; i < 14; i++) pw += alphabet[buf[i] % alphabet.length];
   ensureDirSync(DATA_DIR);
   fs.writeFileSync(INITIAL_PW_PATH, pw + '\n', { mode: 0o600 });
-  const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
-  raw.auth = { ...(raw.auth || {}), passwordHash: scryptHash(pw) };
-  fs.writeFileSync(CONFIG_PATH, JSON.stringify(raw, null, 2) + '\n');
-  config = loadConfigSync();
+  writePasswordHash(scryptHash(pw));
   log('首次启动：已生成随机初始密码 →', INITIAL_PW_PATH, '（请尽快登录后在设置中修改）');
 }
 ensurePasswordHash();
@@ -1026,7 +1046,7 @@ async function route(req, res) {
   if (p === '/api/monitor/login' && req.method === 'POST') {
     if (rateLimited(ip)) { audit('auth_fail', { ip, reason: 'rate_limited' }); return sendJson(res, 429, { error: '尝试过于频繁，请稍后再试' }); }
     const body = JSON.parse((await readBody(req)) || '{}');
-    if (!verifyPassword(body.password || '', config.auth.passwordHash)) { audit('auth_fail', { ip }); return sendJson(res, 401, { error: '密码错误' }); }
+    if (!verifyPassword(body.password || '', currentPasswordHash())) { audit('auth_fail', { ip }); return sendJson(res, 401, { error: '密码错误' }); }
     const token = createSession(ip);
     audit('auth_ok', { ip });
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${(config.auth.sessionTtlHours || 12) * 3600}` });
@@ -1045,9 +1065,9 @@ async function route(req, res) {
   if (p === '/api/monitor/password' && req.method === 'POST') {
     if (!guard(req, res)) return;
     const body = JSON.parse((await readBody(req)) || '{}');
-    if (!verifyPassword(body.oldPassword || '', config.auth.passwordHash)) return sendJson(res, 401, { error: '旧密码错误' });
+    if (!verifyPassword(body.oldPassword || '', currentPasswordHash())) return sendJson(res, 401, { error: '旧密码错误' });
     if (!body.newPassword || String(body.newPassword).length < 8) return sendJson(res, 400, { error: '新密码至少 8 位' });
-    saveConfig({ auth: { ...config.auth, passwordHash: scryptHash(body.newPassword) } });
+    writePasswordHash(scryptHash(body.newPassword));
     sessions.clear(); // 改密后全部会话失效
     audit('password_change', { ip });
     return sendJson(res, 200, { ok: true });
@@ -1161,7 +1181,7 @@ async function main() {
   if (args[0] === '--set-password-stdin') {
     const pw = fs.readFileSync(0, 'utf8').trim();
     if (pw.length < 8) { console.error('密码至少 8 位'); process.exit(1); }
-    saveConfig({ auth: { ...config.auth, passwordHash: scryptHash(pw) } });
+    writePasswordHash(scryptHash(pw));
     sessions.clear();
     console.log('密码已更新');
     process.exit(0);

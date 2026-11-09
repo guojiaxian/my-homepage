@@ -3,8 +3,7 @@
   "port": 8301,
   "auth": {
     "sessionTtlHours": 12,
-    "maxFailPerMin": 5,
-    "passwordHash": "scrypt$408737972ffc4b13f89feda88ccef39e$8b31eee8685733e32beec4907527474ee4e82b95c9bfd9a07e27734b08939052"
+    "maxFailPerMin": 5
   },
   "collect": {
     "localIntervalSec": 5,

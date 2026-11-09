@@ -22,3 +22,6 @@ data/
 
 # 临时 HTML 分享包
 .trae-html-share-packages/
+
+# 监控配置自动备份
+scripts/monitor.config.json.bak

@@ -35,7 +35,7 @@ cat data/monitor/INITIAL_PASSWORD.txt
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `port` | 8301 | 网关监听端口，**仅绑 127.0.0.1**；改后需同步 nginx `proxy_pass` |
-| `auth.sessionTtlHours` | 12 | 会话时长（滑动续期）；`passwordHash` 为 scrypt 哈希，勿手改 |
+| `auth.sessionTtlHours` | 12 | 会话时长（滑动续期）；密码哈希**不在本文件**，存于 `data/monitor/.password-hash`（0600，gitignored），改密/`--set-password-stdin` 自动更新 |
 | `collect.localIntervalSec` | 5 | 本机采集周期 |
 | `collect.remoteIntervalSec` | 20 | 远程 SSH 采集周期 |
 | `collect.retentionDays` | 7 | 历史 JSONL 保留天数（7 天约 35MB/3 主机） |
