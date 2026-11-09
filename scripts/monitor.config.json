@@ -2,7 +2,7 @@
   "$comment": "监控网关配置。hosts 为纳管主机（type: local 本机 / ssh 远程）；trackedDirs 为手工追加的跟踪目录（主页 apps[].directory 会自动并入，来源标记 homepage，无需在此重复）；thresholds 为告警阈值（sustainMin 持续分钟才触发）。改此文件 ≤2s 热加载；也可在 /monitor/ 界面配置。",
   "port": 8301,
   "auth": {
-    "sessionTtlHours": 12,
+    "sessionTtlHours": 8760,
     "maxFailPerMin": 5
   },
   "collect": {

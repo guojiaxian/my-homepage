@@ -35,7 +35,7 @@ cat data/monitor/INITIAL_PASSWORD.txt
 | 字段 | 默认 | 说明 |
 |---|---|---|
 | `port` | 8301 | 网关监听端口，**仅绑 127.0.0.1**；改后需同步 nginx `proxy_pass` |
-| `auth.sessionTtlHours` | 12 | 会话时长（滑动续期）；密码哈希**不在本文件**，存于 `data/monitor/.password-hash`（0600，gitignored），改密/`--set-password-stdin` 自动更新 |
+| `auth.sessionTtlHours` | 8760（=1 年） | 会话滑动时长；会话持久化在 `data/monitor/sessions.json`（网关重启不掉线），同浏览器登录一次即长期免密。密码哈希在 `data/monitor/.password-hash`（0600），无复杂度规则，`--set-password-stdin` 自动更新 |
 | `collect.localIntervalSec` | 5 | 本机采集周期 |
 | `collect.remoteIntervalSec` | 20 | 远程 SSH 采集周期 |
 | `collect.retentionDays` | 7 | 历史 JSONL 保留天数（7 天约 35MB/3 主机） |
@@ -85,7 +85,7 @@ echo '目标机密码' | node scripts/monitor-server.mjs --set-cred <hostId> --p
 | `/api/monitor/*` 502 | `systemctl status my-homepage-monitor` | 网关没起来：`journalctl -u my-homepage-monitor -n 50`；起后自愈 |
 | 主机卡片「未连通: All configured authentication methods failed」 | 密钥是否已 `ssh-copy-id`；`ssh -i <keyPath> root@host true` 手测 | 分发公钥；或确认 `keyPath` 指向**已在目标机 authorized_keys 里的**私钥（本机默认终端走 `~/.ssh/id_rsa`，id_ed25519 不在 authorized_keys） |
 | 主机指纹告警拒绝连接 | 目标机是否重装/换 IP 复用 | 确认合法后删 `data/monitor/credentials.json` 中该主机 `hostFp` |
-| 终端打不开（立刻断开 401） | 会话是否过期（12h） | 重新登录；浏览器 WS 被代理拦截时检查 nginx `/api/terminal` 的 Upgrade 头（两处 server 块都要有） |
+| 终端打不开（立刻断开 401） | 会话是否丢失（cookie 被清理 / 换了浏览器） | 重新登录一次即可（会话持久化在网关侧，重启不掉线）；浏览器 WS 被代理拦截时检查 nginx `/api/terminal` 的 Upgrade 头（两处 server 块都要有） |
 | 终端「该主机并发会话已达上限」 | `maxSessionsPerHost`（默认 2） | 关闭闲置会话或在设置中调大 |
 | 图表空白 | 该主机是否刚启用（首个周期前无速率数据） | 等一个周期；`curl -b cookie .../hosts/<id>/history?range=1h` 看点数 |
 | 告警不触发 | `sustainMin` 持续窗口未到 | 默认持续 3 分钟才触发，属预期 |

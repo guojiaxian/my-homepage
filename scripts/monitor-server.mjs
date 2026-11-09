@@ -54,7 +54,7 @@ function appendJsonl(file, obj) {
 /* ============================ 配置 ============================ */
 const DEFAULTS = {
   port: 8301,
-  auth: { sessionTtlHours: 12, maxFailPerMin: 5 },
+  auth: { sessionTtlHours: 8760, maxFailPerMin: 5 }, // 8760h = 1 年：同浏览器登录一次即长期免密（会话同时持久化到磁盘）
   collect: { localIntervalSec: 5, remoteIntervalSec: 20, retentionDays: 7, dockerRefreshSec: 30 },
   thresholds: { cpuPct: 85, memPct: 90, diskPct: 90, loadPerCore: 2, sustainMin: 3 },
   terminal: { idleTimeoutMin: 15, maxSessionMin: 240, maxSessionsPerHost: 2, recordCommands: true },
@@ -231,11 +231,33 @@ function ensurePasswordHash() {
 }
 ensurePasswordHash();
 
-const sessions = new Map(); // token -> { expires, ip, created }
+const sessions = new Map(); // token -> { expires, ip, created }；持久化到磁盘，网关重启不掉线
+const SESSIONS_PATH = path.join(DATA_DIR, 'sessions.json');
+let sessionsDirty = false;
+function markSessionsDirty() { sessionsDirty = true; }
+function persistSessions() {
+  if (!sessionsDirty) return;
+  sessionsDirty = false;
+  try {
+    const obj = {};
+    for (const [t, s] of sessions) obj[t] = s;
+    const tmp = SESSIONS_PATH + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(obj), { mode: 0o600 });
+    fs.renameSync(tmp, SESSIONS_PATH);
+  } catch (e) { sessionsDirty = true; log('会话持久化失败:', e.message); }
+}
+function loadSessions() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(SESSIONS_PATH, 'utf8'));
+    const now = Date.now();
+    for (const [t, s] of Object.entries(raw)) if (s && s.expires > now) sessions.set(t, s);
+  } catch { /* 首次或损坏则从空开始 */ }
+}
+const sessionTtlMs = () => (config.auth.sessionTtlHours || 8760) * 3600 * 1000;
 function createSession(ip) {
   const token = crypto.randomBytes(32).toString('hex');
-  const ttlMs = (config.auth.sessionTtlHours || 12) * 3600 * 1000;
-  sessions.set(token, { expires: Date.now() + ttlMs, ip, created: Date.now() });
+  sessions.set(token, { expires: Date.now() + sessionTtlMs(), ip, created: Date.now() });
+  markSessionsDirty();
   return token;
 }
 function getSession(req) {
@@ -243,12 +265,14 @@ function getSession(req) {
   if (!m) return null;
   const s = sessions.get(m[1]);
   if (!s) return null;
-  if (Date.now() > s.expires) { sessions.delete(m[1]); return null; }
-  s.expires = Date.now() + (config.auth.sessionTtlHours || 12) * 3600 * 1000; // 滑动续期
+  if (Date.now() > s.expires) { sessions.delete(m[1]); markSessionsDirty(); return null; }
+  s.expires = Date.now() + sessionTtlMs(); // 滑动续期
   return m[1];
 }
 setInterval(() => {
-  for (const [t, s] of sessions) if (Date.now() > s.expires) sessions.delete(t);
+  const now = Date.now();
+  for (const [t, s] of sessions) if (now > s.expires) { sessions.delete(t); markSessionsDirty(); }
+  persistSessions();
 }, 60_000).unref();
 
 const failCounter = new Map(); // ip -> {count, win}
@@ -1053,7 +1077,7 @@ async function route(req, res) {
   }
   if (p === '/api/monitor/logout' && req.method === 'POST') {
     const token = getSession(req);
-    if (token) sessions.delete(token);
+    if (token) { sessions.delete(token); markSessionsDirty(); }
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': `${COOKIE_NAME}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0` });
   }
 
@@ -1066,9 +1090,9 @@ async function route(req, res) {
     if (!guard(req, res)) return;
     const body = JSON.parse((await readBody(req)) || '{}');
     if (!verifyPassword(body.oldPassword || '', currentPasswordHash())) return sendJson(res, 401, { error: '旧密码错误' });
-    if (!body.newPassword || String(body.newPassword).length < 8) return sendJson(res, 400, { error: '新密码至少 8 位' });
+    if (!body.newPassword) return sendJson(res, 400, { error: '新密码不能为空' });
     writePasswordHash(scryptHash(body.newPassword));
-    sessions.clear(); // 改密后全部会话失效
+    // 按用户要求：改密后保留既有会话，同浏览器无需重新输入密码
     audit('password_change', { ip });
     return sendJson(res, 200, { ok: true });
   }
@@ -1180,7 +1204,7 @@ async function main() {
   const args = process.argv.slice(2);
   if (args[0] === '--set-password-stdin') {
     const pw = fs.readFileSync(0, 'utf8').trim();
-    if (pw.length < 8) { console.error('密码至少 8 位'); process.exit(1); }
+    if (!pw) { console.error('密码不能为空'); process.exit(1); }
     writePasswordHash(scryptHash(pw));
     sessions.clear();
     console.log('密码已更新');
@@ -1202,6 +1226,7 @@ async function main() {
 
   reloadHomepageDirs();
   ensureDirSync(HISTORY_DIR);
+  loadSessions();
   refreshDockerMap();
   setInterval(refreshDockerMap, (config.collect.dockerRefreshSec || 30) * 1000).unref();
   setInterval(cleanHistoryRetention, 6 * 3600 * 1000).unref();
@@ -1217,7 +1242,7 @@ async function main() {
   server.on('upgrade', handleUpgrade);
   server.listen(port, '127.0.0.1', () => log(`监控网关已启动 http://127.0.0.1:${port}（API: /api/monitor/*，终端 WS: /api/terminal）`));
 
-  const shutdown = () => { log('收到退出信号，关闭网关'); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); };
+  const shutdown = () => { log('收到退出信号，关闭网关'); persistSessions(); server.close(() => process.exit(0)); setTimeout(() => process.exit(0), 3000).unref(); };
   process.on('SIGTERM', shutdown);
   process.on('SIGINT', shutdown);
 }

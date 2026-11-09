@@ -131,7 +131,7 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
     <div v-if="active && !authed" class="mon-login-mask">
       <form class="mon-login" @submit.prevent="doLogin">
         <h1>监控中心</h1>
-        <p>服务器性能监控与 Web 终端，请输入访问密码</p>
+        <p>首次访问输入一次密码即可，本浏览器将长期记住，无需重复登录</p>
         <input v-model="loginPw" type="password" placeholder="访问密码" autocomplete="current-password" />
         <p class="login-err">{{ loginErr || loadErr }}</p>
         <button type="submit" class="login-btn" :disabled="loginBusy">{{ loginBusy ? '登录中…' : '登 录' }}</button>

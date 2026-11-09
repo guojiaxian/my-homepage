@@ -183,7 +183,7 @@ async function changePw() {
             <h3>修改访问密码</h3>
             <div class="form-grid">
               <label class="fitem"><span>旧密码</span><input v-model="oldPw" type="password" autocomplete="current-password" /></label>
-              <label class="fitem"><span>新密码（≥8 位）</span><input v-model="newPw" type="password" autocomplete="new-password" /></label>
+              <label class="fitem"><span>新密码</span><input v-model="newPw" type="password" autocomplete="new-password" /></label>
               <label class="fitem"><span>&nbsp;</span><button class="mini-btn" @click="changePw">修改密码</button></label>
             </div>
           </section>
