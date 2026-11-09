@@ -1,0 +1,1137 @@
+/* ============================================================
+   /glass-v2/ 毛玻璃对比版 · 应用导航 + 监控中心（同页切换）
+   数据源与主站一致：apps.json（60s）+ /api/monitor/*（5s）
+   会话 Cookie 与主站共享 —— 主站登录过此处自动鉴权
+   ============================================================ */
+;(function () {
+  'use strict'
+
+  /* ============================ 小工具 ============================ */
+  const $ = (sel) => document.querySelector(sel)
+  const $$ = (sel) => [...document.querySelectorAll(sel)]
+
+  function esc(v) {
+    return String(v ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]))
+  }
+  const attr = (name, value) => (value ? ` ${name}="${esc(value)}"` : '')
+
+  async function copyText(text) {
+    try { await navigator.clipboard.writeText(text); return true } catch { /* 回退 */ }
+    const ta = document.createElement('textarea')
+    ta.value = text
+    ta.style.position = 'fixed'
+    ta.style.opacity = '0'
+    document.body.appendChild(ta)
+    ta.select()
+    let ok = false
+    try { ok = document.execCommand('copy') } catch { ok = false }
+    ta.remove()
+    return ok
+  }
+  function store(key, value) { try { localStorage.setItem(key, JSON.stringify(value)) } catch { /* 忽略 */ } }
+  function load(key) {
+    try { const v = JSON.parse(localStorage.getItem(key)); return Array.isArray(v) ? v : [] } catch { return [] }
+  }
+
+  const fmtMb = (v) => (v == null || !isFinite(v) ? '-' : v >= 1024 ? (v / 1024).toFixed(1) + ' GB' : v.toFixed(0) + ' MB')
+  const fmtMbs = (v) => (v == null || !isFinite(v) ? '-' : v >= 100 ? v.toFixed(0) : v.toFixed(2))
+  const fmtPct = (v) => (v == null || !isFinite(v) ? '-' : v.toFixed(v >= 10 ? 0 : 1))
+  const fmtUptime = (s) => {
+    if (!s && s !== 0) return '-'
+    const d = Math.floor(s / 86400), h = Math.floor((s % 86400) / 3600), m = Math.floor((s % 3600) / 60)
+    return d ? `${d} 天 ${h} 时` : h ? `${h} 时 ${m} 分` : `${m} 分`
+  }
+  const cssVar = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim()
+  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+  function tickNum(el, to, fmt) {
+    const target = Number(to)
+    if (!isFinite(target)) { el.textContent = '-'; return }
+    const from = parseFloat(el.dataset.v ?? target) || 0
+    el.dataset.v = target
+    if (reducedMotion || Math.abs(target - from) < 0.005) { el.textContent = fmt(target); return }
+    cancelAnimationFrame(el._raf)
+    const t0 = performance.now()
+    const step = (t) => {
+      const k = Math.min(1, (t - t0) / 260), e = 1 - Math.pow(1 - k, 3)
+      el.textContent = fmt(from + (target - from) * e)
+      if (k < 1) el._raf = requestAnimationFrame(step)
+    }
+    el._raf = requestAnimationFrame(step)
+  }
+
+  /* ============================ 主题 ============================ */
+  const root = document.documentElement
+  const isDark = () => root.dataset.theme === 'dark'
+  $('#gv-theme').addEventListener('click', () => {
+    const next = isDark() ? 'light' : 'dark'
+    root.dataset.theme = next
+    try { localStorage.setItem('gv2:theme', next) } catch { /* 忽略 */ }
+    monitor.onThemeChange()
+  })
+
+  /* ============================ 视图切换 ============================ */
+  const tabApps = $('#gv-tab-apps')
+  const tabMonitor = $('#gv-tab-monitor')
+  const viewApps = $('#gv-view-apps')
+  const viewMonitor = $('#gv-view-monitor')
+
+  function switchView(v) {
+    const monitor = v === 'monitor'
+    tabApps.classList.toggle('is-active', !monitor)
+    tabMonitor.classList.toggle('is-active', monitor)
+    tabApps.setAttribute('aria-selected', String(!monitor))
+    tabMonitor.setAttribute('aria-selected', String(monitor))
+    viewApps.hidden = monitor
+    viewMonitor.hidden = !monitor
+    try { localStorage.setItem('gv2:view', v) } catch { /* 忽略 */ }
+    history.replaceState(null, '', monitor ? '#monitor' : location.pathname)
+    if (monitor) monitorModule.activate()
+    window.scrollTo({ top: 0, behavior: reducedMotion ? 'auto' : 'smooth' })
+  }
+  tabApps.addEventListener('click', () => switchView('apps'))
+  tabMonitor.addEventListener('click', () => switchView('monitor'))
+
+  /* ============================================================
+     模块 A：我的应用（逻辑与主站一致，来自 /unslop/ 成熟实现）
+     ============================================================ */
+  const apps = (() => {
+    const ORDER_KEY = 'gv2:appOrder'
+    const POLL_MS = 60_000
+
+    function buildAppUrl(app) {
+      if (app.url) return app.url
+      const port = app.port
+      if (!port) return ''
+      return `${app.https ? 'https' : 'http'}://${window.location.hostname || 'localhost'}:${port}`
+    }
+    const portText = (app) => app.port ?? app.expectedPort ?? '—'
+    function formatUptime(sec) {
+      if (!Number.isFinite(sec) || sec <= 0) return ''
+      const d = Math.floor(sec / 86400), h = Math.floor((sec % 3600) / 3600), m = Math.floor((sec % 3600) / 60)
+      if (d) return `${d} 天 ${h} 小时`
+      if (h) return `${h} 小时 ${m} 分`
+      return `${m} 分钟`
+    }
+    function remoteHealthTitle(app) {
+      const info = app.remoteInfo
+      if (!info) return ''
+      const parts = []
+      if (info.httpStatus != null) parts.push(`HTTP ${info.httpStatus}`)
+      if (info.responseMs != null) parts.push(`延迟 ${info.responseMs}ms`)
+      if (info.version) parts.push(`版本 ${info.version}`)
+      if (info.dbReady != null) parts.push(`数据库${info.dbReady ? '正常' : '未就绪'}`)
+      const up = formatUptime(info.uptimeSec)
+      if (up) parts.push(`已运行 ${up}`)
+      if (info.rssMb != null) parts.push(`内存 ${info.rssMb}MB`)
+      return parts.join(' · ')
+    }
+    function statusInfo(app) {
+      if (app.appOnly) return { text: '离线应用', cls: 'offline', title: '离线应用：纯 APP / 小程序，无 Web 服务，不做端口探测' }
+      if (app.status === 'running') return { text: '运行中', cls: 'ok', title: remoteHealthTitle(app) }
+      return { text: '未运行', cls: 'down', title: remoteHealthTitle(app) }
+    }
+    const KIND_LABELS = { web: 'Web', app: 'APP', miniapp: '小程序', tv: '电视', cli: 'CLI' }
+    function kindList(app) {
+      const list = Array.isArray(app.kinds) && app.kinds.length ? app.kinds : app.appOnly ? ['app'] : ['web']
+      return list.filter((k) => KIND_LABELS[k]).map((value) => ({ value, label: KIND_LABELS[value] }))
+    }
+    function stackText(app) {
+      return [(app.languages ?? []).join('/'), (app.frontend ?? []).join(' + '), (app.backend ?? []).join(' + ')].filter(Boolean).join(' · ')
+    }
+    function stackTitle(app) {
+      const parts = []
+      if (app.languages?.length) parts.push(`语言：${app.languages.join('、')}`)
+      if (app.frontend?.length) parts.push(`前端：${app.frontend.join('、')}`)
+      if (app.backend?.length) parts.push(`后端：${app.backend.join('、')}`)
+      return parts.join('；')
+    }
+    const isPublic = (app) => (app.env ? app.env === 'public' : Boolean(app.remote))
+    function envInfo(app) { return isPublic(app) ? { cls: 'net', label: '公网' } : { cls: 'lan', label: '内网' } }
+    function gitView(git) {
+      if (!git) return null
+      const branch = git.branch || '（detached）'
+      const counts = []
+      if (git.uncommitted) counts.push(`未提交 ${git.uncommitted}`)
+      if (git.ahead) counts.push(`未推送 ${git.ahead}`)
+      if (git.behind) counts.push(`未拉取 ${git.behind}`)
+      if (git.untracked) counts.push(`未跟踪 ${git.untracked}`)
+      if (git.remoteOk === false) counts.push('远端不可达，以上为上次快照')
+      const map = {
+        synced: { text: '已同步', cls: 'ok' },
+        dirty: { text: `未提交 ${git.uncommitted}`, cls: 'bad' },
+        ahead: { text: `未推送 ${git.ahead}`, cls: 'warn' },
+        behind: { text: `未拉取 ${git.behind}`, cls: 'warn' },
+        untracked: { text: `未跟踪 ${git.untracked}`, cls: 'warn' },
+        'no-repo': { text: '无 Git 仓库', cls: 'muted' },
+        'no-upstream': { text: '未关联远端', cls: 'muted' },
+        error: { text: '检查失败', cls: 'muted' },
+      }
+      const view = map[git.status] ?? { text: '检查失败', cls: 'muted' }
+      const detail = git.message ? git.message : counts.length ? counts.join(' · ') : `分支 ${branch} 与远端一致`
+      const title = git.repo ? `${git.repo}（${branch}）：${detail}` : `分支 ${branch}：${detail}`
+      return { ...view, title }
+    }
+
+    const state = {
+      apps: [],
+      page: { siteName: '我的应用导航', heroTitle: '我的应用', heroSubtitle: '部署在这台服务器上的个人项目，端口与运行状态由服务端定时自动探测。' },
+      probedAt: '', loading: true, loadError: '',
+      sortKey: 'default', sortDir: 1,
+      customOrder: load(ORDER_KEY),
+      view: 'table', viewPicked: false,
+      syncing: false, dragId: '', dragIdx: -1,
+    }
+
+    const RANK_GIT = { dirty: 0, 'no-repo': 1, ahead: 2, behind: 3, untracked: 4, error: 5, 'no-upstream': 6, synced: 9 }
+    const statusRank = (a) => (a.appOnly ? 2 : a.status === 'running' ? 0 : 1)
+    const byName = (a, b) => a.name.localeCompare(b.name, 'zh-Hans-CN')
+    function compareApps(a, b) {
+      switch (state.sortKey) {
+        case 'name': return byName(a, b)
+        case 'port': return (a.port ?? Infinity) - (b.port ?? Infinity)
+        case 'status': return statusRank(a) - statusRank(b) || byName(a, b)
+        case 'git': return (RANK_GIT[a.git?.status] ?? 9) - (RANK_GIT[b.git?.status] ?? 9) || byName(a, b)
+        default: return 0
+      }
+    }
+    function displayApps() {
+      const list = [...state.apps]
+      if (state.sortKey !== 'default') list.sort((a, b) => compareApps(a, b) * state.sortDir)
+      else if (state.customOrder.length) {
+        const rank = new Map(state.customOrder.map((id, i) => [id, i]))
+        list.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity))
+      }
+      return list
+    }
+    function setSort(key) {
+      if (key !== 'default' && state.sortKey === key) state.sortDir = -state.sortDir
+      else { state.sortKey = key; state.sortDir = 1 }
+      render()
+    }
+    function moveApp(id, delta) {
+      const ids = displayApps().map((a) => a.id)
+      const i = ids.indexOf(id), j = i + delta
+      if (i < 0 || j < 0 || j >= ids.length) return
+      ;[ids[i], ids[j]] = [ids[j], ids[i]]
+      state.customOrder = ids
+      store(ORDER_KEY, ids)
+      render()
+    }
+    function onDropRow(fromId, targetId) {
+      if (!fromId || fromId === targetId) return
+      const ids = displayApps().map((a) => a.id)
+      const fi = ids.indexOf(fromId)
+      if (fi < 0 || ids.indexOf(targetId) < 0) return
+      ids.splice(fi, 1)
+      ids.splice(ids.indexOf(targetId), 0, fromId)
+      state.customOrder = ids
+      store(ORDER_KEY, ids)
+      render()
+    }
+    function onDropCard(fromIdx, targetIdx) {
+      const list = displayApps()
+      if (fromIdx < 0 || fromIdx === targetIdx || fromIdx >= list.length) return
+      const ids = list.map((a) => a.id)
+      const [movedId] = ids.splice(fromIdx, 1)
+      ids.splice(targetIdx > fromIdx ? targetIdx - 1 : targetIdx, 0, movedId)
+      state.customOrder = ids
+      store(ORDER_KEY, ids)
+      render()
+    }
+
+    async function fetchApps(silent = false) {
+      if (!silent) { state.loading = true; state.loadError = ''; render() }
+      try {
+        const res = await fetch(`/apps.json?t=${Date.now()}`, { cache: 'no-store' })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const data = await res.json()
+        state.apps = data.apps ?? []
+        state.probedAt = data.probedAt ?? ''
+        if (data.page) state.page = { ...state.page, ...data.page }
+        state.loadError = ''
+      } catch (err) {
+        if (!silent) state.loadError = `加载应用数据失败：${err.message}`
+      } finally {
+        state.loading = false
+        renderPageText()
+        render()
+      }
+    }
+
+    const narrowMql = window.matchMedia('(max-width: 760px)')
+    function applyDefaultView() {
+      if (!state.viewPicked) { state.view = narrowMql.matches ? 'card' : 'table'; render() }
+    }
+    narrowMql.addEventListener?.('change', applyDefaultView)
+
+    function renderPageText() {
+      document.title = (state.page.siteName || '我的应用导航') + ' · 毛玻璃 v2'
+      $('#gv-hero-title').textContent = state.page.heroTitle
+      $('#gv-hero-sub').textContent = state.page.heroSubtitle
+      $('#gv-site-foot').textContent = state.page.siteName
+      $('#gv-year').textContent = new Date().getFullYear()
+      let probedLine = ''
+      if (state.probedAt) {
+        const t = new Date(state.probedAt).toLocaleTimeString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
+        probedLine = `最后探测 ${t}（北京时间）· 端口每 3 分钟 · git 每 5 分钟`
+      }
+      $('#gv-probe-text').textContent = probedLine
+
+      const list = state.apps
+      const running = list.filter((a) => a.status === 'running').length
+      const lan = list.filter((a) => !isPublic(a)).length
+      const net = list.filter((a) => isPublic(a)).length
+      const unsynced = list.filter((a) => a.git && a.git.status !== 'synced').length
+      tickNum($('#gv-count-apps'), list.length, (v) => String(Math.round(v)))
+      tickNum($('#gv-count-running'), running, (v) => String(Math.round(v)))
+      $('#gv-run-dot').style.background = running ? 'var(--gv-green)' : 'var(--gv-text-3)'
+      $('#gv-run-dot').classList.toggle('is-live', running > 0)
+      tickNum($('#gv-count-lan'), lan, (v) => String(Math.round(v)))
+      tickNum($('#gv-count-public'), net, (v) => String(Math.round(v)))
+      $('#gv-git-dot').style.background = unsynced ? 'var(--gv-amber)' : 'var(--gv-green)'
+      $('#gv-git-dot').classList.toggle('is-live', !unsynced)
+      $('#gv-git-text').textContent = unsynced ? `${unsynced} 个源码未同步` : '源码全部已同步'
+    }
+
+    const arrowHtml = (key) => (state.sortKey !== key ? '' : `<span class="gv-arrow">${state.sortDir === 1 ? '▲' : '▼'}</span>`)
+
+    function badgeHtml(app) {
+      const s = statusInfo(app)
+      return `<span class="gv-status ${s.cls}"${attr('title', s.title)}><span class="gv-dot${s.cls === 'ok' ? ' is-live' : ''}" style="background:currentColor"></span>${esc(s.text)}</span>`
+    }
+    function appCellHtml(app) {
+      const env = envInfo(app)
+      const version = app.remoteInfo?.version ? `<span class="gv-kind-chip"${attr('title', remoteHealthTitle(app))}>v${esc(app.remoteInfo.version)}</span>` : ''
+      const pending = app.pending ? '<span class="gv-kind-chip" style="color:var(--gv-amber)" title="请在 scripts/apps.config.json 中补充信息">待补充</span>' : ''
+      const kinds = kindList(app).map((k) => `<span class="gv-kind-chip k-${k.value}" title="应用形式：${esc(k.label)}">${esc(k.label)}</span>`).join('')
+      const stack = stackText(app)
+      return `<div class="gv-appcell">
+        <span class="gv-appicon ${env.cls === 'net' ? 'public' : 'lan'}" aria-hidden="true">${esc(app.icon || '·')}</span>
+        <div>
+          <div class="gv-appname"><span class="gv-env-chip ${env.cls === 'net' ? 'public' : 'lan'}">${env.label}</span>${esc(app.name)}${version}${pending}</div>
+          <div class="gv-stack"${attr('title', stackTitle(app))}>${kinds}<span${kinds ? ' style="margin-left:6px"' : ''}>${esc(stack)}</span></div>
+        </div>
+      </div>`
+    }
+    function portCellHtml(app) {
+      if (app.appOnly) return `<span class="gv-hint" title="该应用无 Web 服务入口">—</span>`
+      const url = buildAppUrl(app)
+      const extra = app.extraPorts?.length ? `<span class="gv-num gv-hint">+${esc(app.extraPorts.join(', '))}</span>` : ''
+      const local = app.port && !app.external ? `<span class="gv-kind-chip" title="该服务仅监听 127.0.0.1，仅本机可访问">仅本机</span>` : ''
+      if (app.port && url) return `<a class="gv-portlink" href="${esc(url)}" target="_blank" rel="noopener"${attr('title', url)}>:${esc(portText(app))} ↗</a>${extra}${local}`
+      return `<span class="gv-portlink" style="color:var(--gv-text-3)" title="未监听，不可访问">:${esc(portText(app))}</span>${extra}${local}`
+    }
+    function dirCellHtml(app) {
+      if (app.remote) {
+        const text = `${app.location ?? ''} · ${app.host ?? ''}`
+        return `<span class="gv-num" style="font-size:12px;color:var(--gv-text-2)"${attr('title', text)}>${esc(text)}</span>`
+      }
+      return `<span class="gv-dirlink" data-copy="${esc(app.directory ?? '')}"${attr('title', `${app.directory ?? ''}（点击复制）`)}>${esc(app.directory ?? '')}</span>`
+    }
+    function gitCellHtml(app) {
+      const g = gitView(app.git)
+      if (!g) return `<span class="gv-hint">—</span>`
+      return `<span class="gv-git-chip ${g.cls}"${attr('title', g.title)}>${esc(g.text)}</span>`
+    }
+    function rowAccent(app) {
+      if (app.appOnly) return 'var(--gv-text-3)'
+      return isPublic(app) ? 'var(--gv-amber)' : 'var(--gv-accent)'
+    }
+
+    function renderTable(list) {
+      const reorderable = state.sortKey === 'default'
+      $('#gv-thead').innerHTML = `<tr>
+        ${reorderable ? '<th style="width:28px" title="拖拽行调整顺序（保存在本浏览器）"></th>' : ''}
+        <th class="gv-sortable${state.sortKey === 'status' ? ' is-on' : ''}" data-sort="status" title="按运行状态排序（再次点击切换方向）">状态${arrowHtml('status')}</th>
+        <th class="gv-sortable${state.sortKey === 'name' ? ' is-on' : ''}" data-sort="name" title="按名称排序（再次点击切换方向）">应用${arrowHtml('name')}</th>
+        <th>简介</th>
+        <th class="gv-sortable${state.sortKey === 'port' ? ' is-on' : ''}" data-sort="port" title="按端口排序（再次点击切换方向）">访问地址${arrowHtml('port')}</th>
+        <th>服务器 / 目录</th>
+        <th class="gv-sortable${state.sortKey === 'git' ? ' is-on' : ''}" data-sort="git" title="按同步状态排序（未同步的在前，再次点击切换方向）">同步${arrowHtml('git')}</th>
+        <th>GitHub</th>
+      </tr>`
+      $('#gv-tbody').innerHTML = list.map((app) => `<tr data-id="${esc(app.id)}" style="--row-accent:${rowAccent(app)}" class="${state.dragId === app.id ? 'gv-dragging' : ''}">
+        ${reorderable ? `<td><span class="gv-drag-handle" draggable="true" title="按住拖拽调整顺序" aria-label="拖拽调整顺序">
+          <svg width="10" height="16" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="4" r="1.8"/><circle cx="11" cy="4" r="1.8"/><circle cx="5" cy="10" r="1.8"/><circle cx="11" cy="10" r="1.8"/><circle cx="5" cy="16" r="1.8"/><circle cx="11" cy="16" r="1.8"/></svg></span></td>` : ''}
+        <td>${badgeHtml(app)}</td>
+        <td>${appCellHtml(app)}</td>
+        <td><span class="gv-desc"${attr('title', app.description)}>${esc(app.description)}</span></td>
+        <td>${portCellHtml(app)}</td>
+        <td>${dirCellHtml(app)}</td>
+        <td>${gitCellHtml(app)}</td>
+        <td>${app.github ? `<a href="${esc(app.github)}" target="_blank" rel="noopener" title="查看源码">源码 ↗</a>` : `<span class="gv-hint">—</span>`}</td>
+      </tr>`).join('')
+
+      if (reorderable) {
+        $$('#gv-tbody .gv-drag-handle').forEach((grip) => {
+          grip.addEventListener('dragstart', (e) => {
+            state.dragId = grip.closest('tr').dataset.id
+            grip.closest('tr').classList.add('gv-dragging')
+            e.dataTransfer.effectAllowed = 'move'
+            try { e.dataTransfer.setData('text/plain', state.dragId) } catch { /* 忽略 */ }
+          })
+          grip.addEventListener('dragend', () => { state.dragId = ''; render() })
+        })
+        $$('#gv-tbody tbody tr, #gv-tbody tr').forEach((tr) => {
+          tr.addEventListener('dragover', (e) => e.preventDefault())
+          tr.addEventListener('drop', (e) => { e.preventDefault(); onDropRow(state.dragId, tr.dataset.id) })
+        })
+      }
+      $$('#gv-thead .gv-sortable').forEach((th) => th.addEventListener('click', () => setSort(th.dataset.sort)))
+    }
+
+    function renderCards(list) {
+      const reorderable = state.sortKey === 'default'
+      $('#gv-cards').innerHTML = list.map((app, idx) => {
+        const env = envInfo(app)
+        const version = app.remoteInfo?.version ? `<span class="gv-kind-chip"${attr('title', remoteHealthTitle(app))}>v${esc(app.remoteInfo.version)}</span>` : ''
+        const pending = app.pending ? '<span class="gv-kind-chip" style="color:var(--gv-amber)">待补充</span>' : ''
+        const ghShort = app.github ? app.github.replace('https://github.com/', '') : ''
+        const kinds = kindList(app).map((k) => `<span class="gv-kind-chip k-${k.value}" title="应用形式：${esc(k.label)}">${esc(k.label)}</span>`).join('')
+        return `<article class="gv-card gv-enter" data-idx="${idx}" style="--row-accent:${rowAccent(app)}">
+          <div class="gv-card-top">
+            ${reorderable ? `<span class="gv-drag-handle" draggable="true" title="按住拖拽调整顺序" aria-label="拖拽调整顺序">
+              <svg width="10" height="14" viewBox="0 0 16 20" fill="currentColor" aria-hidden="true"><circle cx="5" cy="4" r="1.8"/><circle cx="11" cy="4" r="1.8"/><circle cx="5" cy="10" r="1.8"/><circle cx="11" cy="10" r="1.8"/><circle cx="5" cy="16" r="1.8"/><circle cx="11" cy="16" r="1.8"/></svg></span>` : ''}
+            <span class="gv-appicon ${env.cls === 'net' ? 'public' : 'lan'}" aria-hidden="true">${esc(app.icon || '·')}</span>
+            <div style="min-width:0">
+              <div class="gv-card-name"><span class="gv-env-chip ${env.cls === 'net' ? 'public' : 'lan'}">${env.label}</span>${esc(app.name)}${version}${pending}</div>
+              ${badgeHtml(app)}
+            </div>
+            ${reorderable ? `<div class="gv-updown" style="margin-left:auto">
+              <button type="button" class="gv-minibtn" data-move="-1" data-id="${esc(app.id)}" title="上移"${idx === 0 ? ' disabled' : ''}>↑</button>
+              <button type="button" class="gv-minibtn" data-move="1" data-id="${esc(app.id)}" title="下移"${idx === list.length - 1 ? ' disabled' : ''}>↓</button>
+            </div>` : ''}
+          </div>
+          <p class="gv-desc" style="max-width:none;margin:0 0 10px">${esc(app.description)}</p>
+          <div class="gv-facts">
+            <div class="gv-fact"><span>访问</span><span>${portCellHtml(app)}</span></div>
+            <div class="gv-fact"><span>${app.remote ? '位置' : '目录'}</span><span>${dirCellHtml(app)}</span></div>
+            <div class="gv-fact"><span>技术栈</span><span class="gv-stack" style="-webkit-line-clamp:1"${attr('title', stackTitle(app))}>${esc(stackText(app)) || '—'}</span></div>
+            <div class="gv-fact"><span>同步</span><span>${gitCellHtml(app)}</span></div>
+            <div class="gv-fact"><span>源码</span><span>${app.github ? `<a href="${esc(app.github)}" target="_blank" rel="noopener">${esc(ghShort)} ↗</a>` : `<span class="gv-hint">—</span>`}</span></div>
+          </div>
+          ${kinds ? `<div class="gv-card-foot" style="border-top:0;padding-top:6px">${kinds}</div>` : ''}
+        </article>`
+      }).join('')
+
+      if (reorderable) {
+        $$('#gv-cards .gv-drag-handle').forEach((grip) => {
+          grip.addEventListener('dragstart', (e) => { state.dragIdx = +grip.closest('.gv-card').dataset.idx; e.dataTransfer.effectAllowed = 'move' })
+          grip.addEventListener('dragend', () => { state.dragIdx = -1; render() })
+        })
+        $$('#gv-cards .gv-card').forEach((card) => {
+          card.addEventListener('dragover', (e) => e.preventDefault())
+          card.addEventListener('drop', (e) => { e.preventDefault(); onDropCard(state.dragIdx, +card.dataset.idx) })
+        })
+        $$('#gv-cards [data-move]').forEach((btn) => btn.addEventListener('click', () => moveApp(btn.dataset.id, +btn.dataset.move)))
+      }
+      $$('#gv-cards .gv-dirlink[data-copy]').forEach((el) => el.addEventListener('click', async () => {
+        const ok = await copyText(el.dataset.copy)
+        const old = el.title
+        el.title = ok ? '已复制 ✓' : '复制失败'
+        setTimeout(() => { el.title = old }, 1200)
+      }))
+    }
+
+    function render() {
+      const loading = $('#gv-loading'), errBox = $('#gv-error'), empty = $('#gv-empty')
+      const tableWrap = $('#gv-table-wrap'), cards = $('#gv-cards')
+      if (state.loading) {
+        loading.hidden = false; errBox.hidden = true; empty.hidden = true; tableWrap.hidden = true; cards.hidden = true
+        return
+      }
+      loading.hidden = true
+      if (state.loadError) { errBox.hidden = false; $('#gv-error-text').textContent = state.loadError; tableWrap.hidden = true; cards.hidden = true; return }
+      errBox.hidden = true
+      const list = displayApps()
+      if (!list.length) { empty.hidden = false; tableWrap.hidden = true; cards.hidden = true; return }
+      empty.hidden = true
+      if (state.view === 'table') { tableWrap.hidden = false; cards.hidden = true; renderTable(list) }
+      else { tableWrap.hidden = true; cards.hidden = false; renderCards(list) }
+      $('#gv-sort').value = state.sortKey
+      $('#gv-sort-dir').hidden = state.sortKey === 'default'
+      $('#gv-sort-dir').textContent = state.sortDir === 1 ? '↑' : '↓'
+      $('#gv-reset-order').hidden = !(state.sortKey === 'default' && state.customOrder.length)
+    }
+
+    $('#gv-sort').addEventListener('change', (e) => setSort(e.target.value))
+    $('#gv-sort-dir').addEventListener('click', () => { state.sortDir = -state.sortDir; render() })
+    $('#gv-reset-order').addEventListener('click', () => { state.customOrder = []; store(ORDER_KEY, []); render() })
+    $$('.gv-segmented button').forEach((btn) => btn.addEventListener('click', () => {
+      state.view = btn.dataset.view
+      state.viewPicked = true
+      $$('.gv-segmented button').forEach((b) => { b.classList.toggle('is-active', b === btn); b.setAttribute('aria-selected', String(b === btn)) })
+      render()
+    }))
+    $('#gv-retry').addEventListener('click', () => fetchApps())
+    $('#gv-tbody').addEventListener('click', async (e) => {
+      const copyEl = e.target.closest('[data-copy]')
+      if (copyEl) {
+        const ok = await copyText(copyEl.dataset.copy)
+        const old = copyEl.title
+        copyEl.title = ok ? '已复制 ✓' : '复制失败'
+        setTimeout(() => { copyEl.title = old }, 1200)
+      }
+    })
+
+    /* 立刻同步 */
+    $('#gv-sync').addEventListener('click', async () => {
+      if (state.syncing) return
+      state.syncing = true
+      const btn = $('#gv-sync'), label = $('#gv-sync-label'), errEl = $('#gv-sync-error')
+      btn.disabled = true
+      label.textContent = '同步中…'
+      errEl.hidden = true
+      const startedAt = new Date().toISOString()
+      try {
+        await fetch('/api/probe', { method: 'POST', headers: { 'X-Requested-With': 'XMLHttpRequest' } })
+        let n = 0
+        const timer = setInterval(async () => {
+          n += 1
+          try {
+            const res = await fetch(`/apps.json?t=${Date.now()}`, { cache: 'no-store' })
+            const data = await res.json()
+            if (data.probedAt && data.probedAt > startedAt) {
+              clearInterval(timer)
+              state.apps = data.apps ?? []
+              state.probedAt = data.probedAt ?? ''
+              renderPageText()
+              render()
+              state.syncing = false
+              btn.disabled = false
+              label.textContent = '立刻同步'
+              return
+            }
+          } catch { /* 继续等 */ }
+          if (n > 90) { clearInterval(timer); state.syncing = false; btn.disabled = false; label.textContent = '立刻同步' }
+        }, 2000)
+      } catch (e) {
+        errEl.textContent = `触发失败：${e.message}`
+        errEl.hidden = false
+        state.syncing = false
+        btn.disabled = false
+        label.textContent = '立刻同步'
+      }
+    })
+
+    let pollTimer = null
+    function startPoll() { if (pollTimer) return; pollTimer = setInterval(() => fetchApps(true), POLL_MS) }
+
+    return {
+      boot() { applyDefaultView(); fetchApps(); startPoll() },
+      refresh() { return fetchApps(true) },
+    }
+  })()
+
+  /* ============================================================
+     模块 B：监控中心（API 与主站一致；会话 Cookie 共享）
+     ============================================================ */
+  const monitorModule = (() => {
+    const state = {
+      summary: null, detailHost: null, range: '1h', dirMetric: 'mem',
+      dirFilter: '', compareSet: new Set(),
+      charts: {}, procsCache: [], procsTotal: 0, dirsList: [],
+      entered: false, timer: null, histTimer: null, cfg: null,
+    }
+
+    async function api(path, opts = {}) {
+      const res = await fetch(path, {
+        method: opts.method || 'GET',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: opts.body ? JSON.stringify(opts.body) : undefined,
+        credentials: 'same-origin',
+      })
+      if (res.status === 401) { showLogin(); throw new Error('未登录') }
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      return data
+    }
+
+    /* ---------- 登录 ---------- */
+    function showLogin() { stopPoll(); $('#gv-login').hidden = false; setTimeout(() => $('#gv-login-pw').focus(), 50) }
+    $('#gv-login-form').addEventListener('submit', async (e) => {
+      e.preventDefault()
+      const btn = $('#gv-login-btn')
+      btn.disabled = true
+      try {
+        await api('/api/monitor/login', { method: 'POST', body: { password: $('#gv-login-pw').value } })
+        $('#gv-login-err').textContent = ''
+        $('#gv-login').hidden = true
+        $('#gv-login-pw').value = ''
+        boot()
+      } catch (err) {
+        $('#gv-login-err').textContent = err.message === '未登录' ? '密码错误' : err.message
+      } finally { btn.disabled = false }
+    })
+
+    /* ---------- 轮询（仅监控视图激活时） ---------- */
+    function startPoll() {
+      stopPoll()
+      state.timer = setInterval(refreshSummary, 5000)
+    }
+    function stopPoll() { if (state.timer) { clearInterval(state.timer); state.timer = null } }
+
+    async function refreshSummary() {
+      if (document.hidden || viewMonitor.hidden) return
+      try {
+        state.summary = await api('/api/monitor/summary')
+        if (!viewMonitor.hidden) { renderOverview(); renderAlerts() }
+      } catch (e) { /* 401 已处理；其余静默重试 */ }
+    }
+
+    let booted = false
+    function boot() {
+      if (booted) { startPoll(); refreshSummary(); return }
+      booted = true
+      api('/api/monitor/summary').then((s) => {
+        state.summary = s
+        renderOverview(); renderAlerts()
+        startPoll()
+        return api('/api/monitor/config')
+      }).then((c) => {
+        state.cfg = c
+        $('#gv-m-foot-retain').textContent = (c.collect?.retentionDays ?? 7) + ' 天'
+      }).catch(() => { /* 401 → 登录层已显示 */ })
+    }
+
+    /* ---------- 概览 ---------- */
+    function hostName(id) { const h = state.summary?.hosts.find((x) => x.id === id); return h ? h.name : id }
+    function isPublicGroup(g) { return /公网|public/i.test(g || '') }
+    function dotCls(h) { return h.online ? 'ok' : (h.credReady ? 'err' : 'off') }
+    function gauges(h) {
+      const s = h.snap || {}
+      const worst = (s.disks || []).filter((d) => d.pct != null).sort((a, b) => b.pct - a.pct)[0]
+      return [
+        { cap: 'CPU', v: s.cpu?.pct },
+        { cap: '内存', v: s.mem?.pct },
+        { cap: '磁盘', v: worst?.pct, title: worst ? `${worst.mnt} ${worst.pct}%` : '' },
+      ]
+    }
+    const gaugeCls = (v) => { const x = Number(v); return !isFinite(x) ? '' : x >= 88 ? 'crit' : x >= 70 ? 'warn' : '' }
+
+    function renderOverview() {
+      const s = state.summary
+      if (!s) return
+      const hosts = s.hosts
+      const online = hosts.filter((h) => h.online).length
+      tickNum($('#gv-m-hosts'), online, (v) => `${Math.round(v)}/${hosts.length}`)
+      $('#gv-m-host-dot').style.background = online === hosts.length && hosts.length ? 'var(--gv-green)' : 'var(--gv-amber)'
+      const alerts = s.alerts || []
+      $('#gv-m-alert-chip').hidden = alerts.length === 0
+      tickNum($('#gv-m-alerts'), alerts.length, (v) => String(Math.round(v)))
+      let dirMax = 0
+      hosts.forEach((h) => { if (h.online && h.snap) dirMax = Math.max(dirMax, (h.snap.dirs || []).length) })
+      $('#gv-m-dirs').textContent = dirMax || 0
+      $('#gv-m-containers').textContent = hosts.reduce((a, h) => a + (h.online && h.snap ? h.snap.containersCount || 0 : 0), 0)
+      $('#gv-m-updated').textContent = '更新于 ' + new Date().toLocaleTimeString('zh-CN', { hour12: false })
+      $('#gv-m-foot-time').textContent = new Date().toLocaleString('zh-CN', { hour12: false, timeZone: 'Asia/Shanghai' })
+
+      const groups = new Map()
+      hosts.forEach((h) => { if (!groups.has(h.group)) groups.set(h.group, []); groups.get(h.group).push(h) })
+      const wrap = $('#gv-m-hosts-wrap')
+      if (!state.entered) {
+        wrap.innerHTML = '<div class="gv-skeleton" style="max-width:760px"></div>'
+        state.entered = true
+        setTimeout(() => { if (state.summary) renderOverview() }, 150)
+        return
+      }
+      wrap.innerHTML = ''
+      for (const [group, list] of groups) {
+        const g = document.createElement('div')
+        g.className = 'gv-enter'
+        g.innerHTML = `<div class="gv-group-head"><span class="gv-dot${isPublicGroup(group) ? ' pub' : ''}" style="background:currentColor"></span>${esc(group)}
+          <span class="gv-sub">${list.filter((h) => h.online).length}/${list.length} 在线</span></div>
+          <div class="gv-host-grid">${list.map((h) => hostCardHtml(h)).join('')}</div>`
+        wrap.appendChild(g)
+      }
+      $$('.gv-host-card', wrap || document).forEach((card) => {
+        card.addEventListener('click', (e) => { if (e.target.closest('button')) return; toggleDetail(card.dataset.host) })
+        const t = card.querySelector('[data-term]')
+        if (t) t.addEventListener('click', () => openTerm(card.dataset.host))
+        const d = card.querySelector('[data-detail]')
+        if (d) d.addEventListener('click', () => toggleDetail(card.dataset.host))
+      })
+      // 仪表环数值过渡（CSS 自定义属性注册见下）
+      $$('.gv-gauge').forEach((el) => { el.style.setProperty('--v', el.dataset.v || 0) })
+    }
+
+    function hostCardHtml(h) {
+      const pub = isPublicGroup(h.group)
+      const sn = h.snap
+      const online = h.online && sn && sn.online
+      let body = ''
+      if (!h.credReady) body = `<div class="hc-offline"><p>待配置凭据：${esc(h.note || '在监控设置中添加密钥或密码后自动开始采集')}</p></div>`
+      else if (!online) body = `<div class="hc-offline"><p>采集中 / 未连通：${esc(h.error || '等待首个探测周期')}</p>
+        <button type="button" class="gv-minibtn" data-term>⌨ 仍要连接</button></div>`
+      else {
+        body = `
+          <div class="hc-main">
+            <div class="hc-gauges">
+              ${gauges(h).map((g) => `<div class="gv-gauge${gaugeCls(g.v)}" data-v="${isFinite(+g.v) ? +g.v : 0}"${attr('title', g.title || g.cap)}>
+                <span class="gv-gval">${fmtPct(g.v)}<i>%</i></span><span class="gv-gcap">${esc(g.cap)}</span></div>`).join('')}
+            </div>
+            <div class="hc-stats">
+              <div><span>负载</span><b>${sn.cpu?.load1 ?? '-'} <i>/ ${sn.cpu?.loadPerCore ?? '-'} 核</i></b></div>
+              <div><span>网络</span><b>↑ ${fmtMbs(sn.net?.outMbs)} <i>↓ ${fmtMbs(sn.net?.inMbs)} Mbps</i></b></div>
+              <div><span>运行</span><b>${fmtUptime(sn.uptimeSec)}</b></div>
+            </div>
+          </div>
+          <div class="hc-foot">
+            <span class="gv-hint">跟踪 ${(sn.dirs || []).length} 目录<template></template>${sn.containersCount ? ` · 容器 ${sn.containersCount}` : ''}</span>
+            <span class="gv-grow"></span>
+            <button type="button" class="gv-minibtn" data-detail>${state.detailHost === h.id ? '收起' : '详情'}</button>
+            <button type="button" class="gv-minibtn" data-term>⌨ 终端</button>
+          </div>`
+      }
+      return `<article class="gv-host-card gv-enter${pub ? ' public' : ''}${online ? '' : ' offline'}${state.detailHost === h.id ? ' selected' : ''}" data-host="${esc(h.id)}">
+        <div class="hc-top">
+          <span class="gv-dot ${dotCls(h)}" style="background:${h.online ? 'var(--gv-green)' : h.credReady ? 'var(--gv-red)' : 'var(--gv-text-3)'}"${h.credReady && !h.online ? ' data-live' : ''}></span>
+          <span class="hc-name">${esc(h.name)}</span>
+          <span class="gv-env-chip ${pub ? 'public' : 'lan'}">${esc(h.group)}</span>
+          <span class="hc-addr">${esc(h.address || '')}</span>
+        </div>
+        <div class="hc-os">${esc((sn && sn.os) || (h.credReady ? '' : 'SSH 凭据待配置'))}</div>
+        ${body}
+      </article>`
+    }
+
+    /* ---------- 告警 ---------- */
+    function renderAlerts() {
+      const alerts = state.summary?.alerts || []
+      const banner = $('#gv-m-alert-banner')
+      const section = $('#gv-m-alerts-section')
+      if (!alerts.length) { banner.hidden = true; section.hidden = true; return }
+      section.hidden = false
+      banner.hidden = false
+      banner.innerHTML = alerts.map((a) => `
+        <div class="gv-alert-item${a.level === 'warn' ? ' warn' : ''}">
+          <span class="gv-dot gv-dot--alert" style="background:currentColor"></span>
+          <b>${esc(a.label)}</b>
+          <span class="gv-sub">阈值 ${esc(a.threshold)} · ${esc(hostName(a.hostId))} · 自 ${esc(new Date(a.activeTs).toLocaleTimeString('zh-CN', { hour12: false }))}</span>
+        </div>`).join('')
+    }
+
+    /* ---------- 详情 ---------- */
+    function toggleDetail(hostId) {
+      state.detailHost = state.detailHost === hostId ? '' : hostId
+      state.dirFilter = ''
+      state.compareSet.clear()
+      const host = state.summary?.hosts.find((x) => x.id === hostId)
+      const detail = $('#gv-m-detail')
+      detail.hidden = !state.detailHost
+      if (state.detailHost && host) {
+        $('#gv-m-detail-name').textContent = host.name
+        $('#gv-m-detail-bar').className = 'gv-detail-bar' + (isPublicGroup(host.group) ? ' public' : '')
+        $$('#gv-m-range button').forEach((b) => b.classList.toggle('is-on', b.dataset.r === '1h'))
+        state.range = '1h'
+        loadDetail()
+        detail.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' })
+      }
+      renderOverview()
+    }
+    $('#gv-m-close-detail').addEventListener('click', () => { state.detailHost = ''; $('#gv-m-detail').hidden = true; renderOverview() })
+    $$('#gv-m-range button').forEach((b) => b.addEventListener('click', () => {
+      $$('#gv-m-range button').forEach((x) => x.classList.toggle('is-on', x === b))
+      state.range = b.dataset.r
+      loadDetail()
+    }))
+    $('#gv-m-term2').addEventListener('click', () => { if (state.detailHost) openTerm(state.detailHost) })
+    $('#gv-m-dir-metric').addEventListener('change', (e) => { state.dirMetric = e.target.value; renderDirs() })
+
+    async function loadDetail(silent) {
+      const host = state.summary?.hosts.find((x) => x.id === state.detailHost)
+      if (!host) return
+      const sn = host.snap
+      $('#gv-m-detail-meta').textContent = sn && sn.online
+        ? `${sn.os} · CPU ${fmtPct(sn.cpu?.pct)}% · 内存 ${fmtPct(sn.mem?.pct)}% · 运行 ${fmtUptime(sn.uptimeSec)}`
+        : (host.error || '等待探测')
+      try {
+        const [hist, procs] = await Promise.all([
+          api(`/api/monitor/hosts/${encodeURIComponent(state.detailHost)}/history?range=${state.range}`),
+          api(`/api/monitor/hosts/${encodeURIComponent(state.detailHost)}/procs`),
+        ])
+        state.hist = hist.points || []
+        state.procsCache = procs.procs || []
+        state.procsTotal = procs.procsTotal || 0
+        state.dirsList = procs.dirs || []
+        $('#gv-m-detail-err').hidden = true
+        $('#gv-ch-iface').textContent = (sn && sn.net?.iface) || '-'
+        renderCharts()
+        renderDirs()
+        renderCompareList()
+        renderProcs()
+      } catch (e) {
+        if (!silent) { $('#gv-m-detail-err').textContent = '加载失败：' + e.message; $('#gv-m-detail-err').hidden = false }
+      }
+    }
+
+    function inst(key, el) {
+      if (!state.charts[key]) state.charts[key] = echarts.init(el)
+      return state.charts[key]
+    }
+    function axisCommon() {
+      return {
+        axisLine: { lineStyle: { color: 'rgba(150,175,220,0.25)' } },
+        axisLabel: { color: cssVar('--gv-text-2'), fontSize: 11, hideOverlap: true },
+        splitLine: { lineStyle: { color: 'rgba(150,175,220,0.12)', type: 'dashed' } },
+      }
+    }
+    function baseOption(yFmt) {
+      const a = axisCommon()
+      return {
+        animationDuration: reducedMotion ? 0 : 400,
+        animationDurationUpdate: reducedMotion ? 0 : 300,
+        animationEasingUpdate: 'cubicOut',
+        backgroundColor: 'transparent',
+        grid: { left: 44, right: 14, top: 24, bottom: 26 },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'line' }, backgroundColor: 'rgba(15,24,42,0.94)', borderColor: 'rgba(150,175,220,0.3)', textStyle: { color: '#e9effa', fontSize: 12 } },
+        xAxis: { type: 'time', axisLine: a.axisLine, axisLabel: { ...a.axisLabel, formatter: state.range === '7d' ? '{MM}-{dd} {HH}:{mm}' : '{HH}:{mm}' } },
+        yAxis: { type: 'value', axisLabel: { ...a.axisLabel, formatter: yFmt }, splitLine: a.splitLine },
+      }
+    }
+    function areaColor(hex) {
+      return new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: hex + '40' }, { offset: 1, color: hex + '05' }])
+    }
+    function lineSeries(name, data, color, extra = {}) {
+      return { name, type: 'line', data, smooth: 0.3, showSymbol: false, connectNulls: false,
+        lineStyle: { width: 1.8, color }, itemStyle: { color }, areaStyle: extra.noArea ? undefined : { color: areaColor(color) }, ...extra }
+    }
+    function renderCharts() {
+      const pts = state.hist || []
+      const t = (p) => p.t
+      const accent = cssVar('--gv-accent'), amber = cssVar('--gv-amber'), purple = cssVar('--gv-purple')
+      const teal = cssVar('--gv-teal'), green = cssVar('--gv-green'), red = cssVar('--gv-red')
+      const th = state.cfg?.thresholds?.cpuPct ?? 85
+      inst('cpu', $('#gv-ch-cpu')).setOption({
+        ...baseOption('{value}%'), yAxis: { ...baseOption('{value}%').yAxis, max: 100 },
+        series: [
+          lineSeries('CPU %', pts.map((p) => [t(p), p.cpu]), accent, {
+            markLine: pts.length ? { silent: true, symbol: 'none', lineStyle: { color: red, type: 'dashed' }, label: { color: red, fontSize: 10, formatter: `${th}` }, data: [{ yAxis: th }] } : undefined,
+          }),
+          lineSeries('负载', pts.map((p) => [t(p), p.load]), amber, { noArea: true }),
+        ],
+      }, { notMerge: true })
+      inst('mem', $('#gv-ch-mem')).setOption({
+        ...baseOption('{value}%'), yAxis: { ...baseOption('{value}%').yAxis, max: 100 },
+        series: [
+          lineSeries('内存 %', pts.map((p) => [t(p), p.mem]), purple),
+          lineSeries('Swap %', pts.map((p) => [t(p), p.swap]), teal, { noArea: true }),
+        ],
+      }, { notMerge: true })
+      inst('net', $('#gv-ch-net')).setOption({
+        ...baseOption('{value}'),
+        series: [
+          lineSeries('下行 Mbps', pts.map((p) => [t(p), p.netI]), accent),
+          lineSeries('上行 Mbps', pts.map((p) => [t(p), p.netO]), green),
+        ],
+      }, { notMerge: true })
+      inst('dio', $('#gv-ch-dio')).setOption({
+        ...baseOption('{value}'),
+        series: [
+          lineSeries('读 MB/s', pts.map((p) => [t(p), p.dioR]), teal),
+          lineSeries('写 MB/s', pts.map((p) => [t(p), p.dioW]), amber),
+        ],
+      }, { notMerge: true })
+      const last = [...pts].reverse().find((p) => p.disks && p.disks.length) || { disks: [] }
+      const disks = last.disks || []
+      inst('disk', $('#gv-ch-disk')).setOption({
+        animationDuration: reducedMotion ? 0 : 400,
+        backgroundColor: 'transparent',
+        grid: { left: 120, right: 110, top: 8, bottom: 22 },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: 'rgba(15,24,42,0.94)', borderColor: 'rgba(150,175,220,0.3)', textStyle: { color: '#e9effa', fontSize: 12 } },
+        xAxis: { type: 'value', max: 100, axisLabel: { ...axisCommon().axisLabel, formatter: '{value}%' }, splitLine: axisCommon().splitLine },
+        yAxis: { type: 'category', data: disks.map((d) => d.mnt), axisLabel: { ...axisCommon().axisLabel, fontSize: 11, fontFamily: 'monospace' } },
+        series: [{ type: 'bar', barWidth: 14, data: disks.map((d) => ({
+          value: d.pct,
+          itemStyle: { color: d.pct >= 90 ? red : d.pct >= 75 ? amber : accent, borderRadius: 4 },
+          label: { show: true, position: 'right', formatter: `${d.pct}% · ${d.usedGb}/${d.totalGb}G`, color: cssVar('--gv-text-2'), fontSize: 11 },
+        })) }],
+      }, { notMerge: true })
+    }
+
+    const DIR_FIELD = { cpu: 'cpuPct', mem: 'memMb', ioR: 'ioReadMbs', ioW: 'ioWriteMbs', threads: 'threads', fds: 'fds' }
+    function renderDirs() {
+      const field = DIR_FIELD[state.dirMetric] || state.dirMetric
+      const top = [...state.dirsList].sort((a, b) => (b[field] || 0) - (a[field] || 0)).slice(0, 10)
+      const c = inst('dirs', $('#gv-ch-dirs'))
+      c.setOption({
+        animationDuration: reducedMotion ? 0 : 400, animationDurationUpdate: reducedMotion ? 0 : 300,
+        backgroundColor: 'transparent',
+        grid: { left: 150, right: 66, top: 8, bottom: 22 },
+        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: 'rgba(15,24,42,0.94)', borderColor: 'rgba(150,175,220,0.3)', textStyle: { color: '#e9effa', fontSize: 12 } },
+        xAxis: { type: 'value', axisLabel: { ...axisCommon().axisLabel }, splitLine: axisCommon().splitLine },
+        yAxis: { type: 'category', inverse: true, data: top.map((d) => d.name + (d.source === 'container' ? ' ⬛' : '')), axisLabel: { ...axisCommon().axisLabel, fontSize: 11.5 } },
+        series: [{ type: 'bar', barWidth: 14, data: top.map((d) => ({
+          value: +(d[field] || 0).toFixed(2), dirPath: d.path,
+          itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: cssVar('--gv-accent') + '99' }, { offset: 1, color: cssVar('--gv-accent') }]), borderRadius: 4 },
+          label: { show: true, position: 'right', formatter: (p) => p.value, color: cssVar('--gv-text-2'), fontSize: 11 },
+        })) }],
+      }, { notMerge: true })
+      c.off('click')
+      c.on('click', (params) => {
+        const dir = params.data && params.data.dirPath
+        if (!dir) return
+        state.dirFilter = state.dirFilter === dir ? '' : dir
+        renderProcs()
+      })
+    }
+
+    function renderCompareList() {
+      const wrap = $('#gv-m-compare')
+      const dirs = state.dirsList || []
+      wrap.innerHTML = dirs.length
+        ? dirs.map((d) => `<label class="gv-dir-chip${state.compareSet.has(d.path) ? ' is-on' : ''}">
+            <input type="checkbox" data-dir="${esc(d.path)}"${state.compareSet.has(d.path) ? ' checked' : ''} />${esc(d.name)}</label>`).join('')
+        : '<span class="gv-hint">该主机暂无目录命中</span>'
+      $$('input[data-dir]', wrap && document).forEach((cb) => cb.addEventListener('change', async () => {
+        const d = cb.dataset.dir
+        if (cb.checked) state.compareSet.add(d); else state.compareSet.delete(d)
+        cb.closest('.gv-dir-chip').classList.toggle('is-on', cb.checked)
+        await renderCompare()
+      }))
+      renderCompare()
+    }
+    async function renderCompare() {
+      const dirs = [...state.compareSet]
+      const chartEl = $('#gv-ch-cmp')
+      chartEl.hidden = !dirs.length
+      $('#gv-m-cmp-empty').hidden = !!dirs.length
+      const c = inst('cmp', chartEl)
+      if (!dirs.length) { c.setOption({ ...baseOption('{value}%'), series: [] }, { notMerge: true }); return }
+      if (chartEl.clientWidth === 0) c.resize()
+      try {
+        const res = await api(`/api/monitor/dirs/history?host=${encodeURIComponent(state.detailHost)}&range=${state.range}&dirs=${encodeURIComponent(dirs.join('|'))}`)
+        const palette = ['--gv-accent', '--gv-purple', '--gv-teal', '--gv-amber', '--gv-green', '--gv-red']
+        c.setOption({
+          ...baseOption('{value}%'),
+          legend: { top: 0, textStyle: { color: cssVar('--gv-text-2'), fontSize: 11 }, itemWidth: 14, itemHeight: 8 },
+          series: Object.entries(res.series).map(([path, rows], i) => lineSeries(
+            state.dirsList.find((d) => d.path === path)?.name || path,
+            rows.map((r) => [r.t, r.cpu]), cssVar(palette[i % palette.length]), { noArea: i > 0 },
+          )),
+        }, { notMerge: true })
+      } catch { /* 静默 */ }
+    }
+
+    function renderProcs() {
+      const rows = state.procsCache
+        .filter((p) => !state.dirFilter || p.dir === state.dirFilter)
+        .sort((a, b) => (b.cpuPct || 0) - (a.cpuPct || 0))
+      $('#gv-m-procs-sub').textContent = `归属进程 ${state.procsCache.length} / 主机总进程 ${state.procsTotal}` +
+        (state.dirFilter ? ` · 已过滤「${state.dirsList.find((d) => d.path === state.dirFilter)?.name || state.dirFilter}」` : '')
+      $('#gv-m-clear-filter').hidden = !state.dirFilter
+      $('#gv-m-procs-body').innerHTML = rows.map((p) => `<tr>
+        <td class="gv-num" title="${esc(p.cmd)}">${esc(p.name)}</td>
+        <td><span class="gv-dir-tag${p.dir && p.dir.startsWith('docker:') ? ' container' : ''}">${esc(p.dirName || '-')}</span></td>
+        <td class="gv-num">${p.pid}</td>
+        <td class="gv-num">${p.cpuPct == null ? '-' : p.cpuPct.toFixed(2)}</td>
+        <td class="gv-num">${fmtMb(p.memMb)}</td>
+        <td class="gv-num">${fmtMbs(p.ioReadMbs)}</td>
+        <td class="gv-num">${fmtMbs(p.ioWriteMbs)}</td>
+        <td class="gv-num">${p.threads}</td>
+        <td class="gv-num">${p.fds || '-'}</td>
+        <td>${esc(p.container || '-')}</td>
+        <td class="gv-proc-cmd" title="${esc(p.cmd)}">${esc(p.cmd)}</td>
+      </tr>`).join('') || '<tr><td colspan="11" class="gv-empty">无归属进程</td></tr>'
+    }
+    $('#gv-m-clear-filter').addEventListener('click', () => { state.dirFilter = ''; renderProcs() })
+
+    /* ---------- 终端 ---------- */
+    let term = null, termWs = null, termFit = null
+    function termStatus(txt, cls = '') { const el = $('#gv-term-status'); el.textContent = txt; el.className = 'gv-term-status ' + cls }
+    function openTerm(hostId) {
+      const h = state.summary?.hosts.find((x) => x.id === hostId)
+      $('#gv-term-drawer').hidden = false
+      $('#gv-term-mask').hidden = false
+      $('#gv-term-title').textContent = `终端 · ${h ? h.name : hostId}`
+      connectTerm(hostId)
+    }
+    function closeTerm() {
+      if (termState()) { try { termWs && termWs.close() } catch { /* 已关 */ } try { term && term.dispose() } catch { /* 已释放 */ } }
+      term = termWs = termFit = null
+      $('#gv-term-drawer').hidden = true
+      $('#gv-term-mask').hidden = true
+    }
+    function termState() { return term || termWs }
+    function connectTerm(hostId) {
+      if (termState()) { try { termWs && termWs.close() } catch { /* 已关 */ } try { term && term.dispose() } catch { /* 已释放 */ } term = termWs = termFit = null }
+      $('#gv-term-container').innerHTML = ''
+      termStatus('连接中…')
+      term = new Terminal({
+        fontFamily: "'Cascadia Code', Menlo, Consolas, monospace", fontSize: 13.5,
+        theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#4d9fff', selectionBackground: '#264f78' },
+        cursorBlink: !reducedMotion, scrollback: 5000,
+      })
+      termFit = new FitAddon.FitAddon()
+      term.loadAddon(termFit)
+      term.open($('#gv-term-container'))
+      termFit.fit()
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+      termWs = new WebSocket(`${proto}://${location.host}/api/terminal?host=${encodeURIComponent(hostId)}&cols=${term.cols}&rows=${term.rows}`)
+      termWs.binaryType = 'arraybuffer'
+      termWs.onopen = () => termStatus(`已连接 ${hostId}`, 'ok')
+      termWs.onmessage = (ev) => {
+        if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return }
+        try {
+          const msg = JSON.parse(ev.data)
+          if (msg.type === 'error') { termStatus('错误：' + msg.message, 'bad'); term.writeln(`\r\n\x1b[31m${msg.message}\x1b[0m`) }
+        } catch { /* 普通输入 */ }
+      }
+      termWs.onclose = (ev) => { if (termWs) termStatus(ev.reason ? `已断开（${ev.reason}）` : '已断开', 'bad') }
+      termWs.onerror = () => termStatus('连接失败', 'bad')
+      term.onData((d) => { if (termWs && termWs.readyState === 1) termWs.send(d) })
+      term.onResize(({ cols, rows }) => { if (termWs && termWs.readyState === 1) termWs.send(JSON.stringify({ type: 'resize', cols, rows })) })
+      term.focus()
+    }
+    $('#gv-term-close').addEventListener('click', closeTerm)
+    $('#gv-term-mask').addEventListener('click', closeTerm)
+    $('#gv-term-reconnect').addEventListener('click', () => { if ($('#gv-term-title').dataset.host) connectTerm($('#gv-term-title').dataset.host) })
+    $('#gv-term-popout').addEventListener('click', () => {
+      const hostId = decodeURIComponent(($('#gv-term-title').textContent.match(/· (.+)$/) || [])[1] || '')
+      window.open(`/monitor/terminal.html?host=${encodeURIComponent(hostId)}`, '_blank', 'width=980,height=640')
+    })
+    window.addEventListener('resize', () => { if (termFit) { try { termFit.fit() } catch { /* 忽略 */ } } Object.values(state.charts).forEach((c) => c && c.resize()) })
+
+    /* ---------- 设置弹窗 ---------- */
+    const setEdit = { hosts: [], trackedDirs: [], thresholds: {}, collect: {}, terminal: {}, webhookUrl: '' }
+    function setTip(msg, cls) { const el = $('#gv-set-tip'); el.textContent = msg; el.className = 'gv-save-tip ' + (cls || 'ok') }
+
+    $('#gv-m-open-settings').addEventListener('click', openSettings)
+    $('#gv-set-close').addEventListener('click', () => { $('#gv-settings').hidden = true })
+    $('#gv-set-cancel').addEventListener('click', () => { $('#gv-settings').hidden = true })
+    $('#gv-settings').addEventListener('click', (e) => { if (e.target === $('#gv-settings')) $('#gv-settings').hidden = true })
+
+    async function openSettings() {
+      $('#gv-settings').hidden = false
+      setTip('')
+      try {
+        const c = await api('/api/monitor/config')
+        const data = JSON.parse(JSON.stringify(c))
+        for (const h of data.hosts || []) {
+          if (h.type === 'local' && !h.terminal) h.terminal = { host: '127.0.0.1', port: 22, username: 'root', authType: 'key', keyPath: '' }
+        }
+        Object.assign(setEdit, data)
+        renderSettings()
+        const a = await api('/api/monitor/audit?limit=50')
+        $('#gv-set-audit').innerHTML = (a.rows || []).map((r) => `<tr>
+          <td class="gv-num">${esc((r.ts || '').replace('T', ' ').slice(0, 19))}</td><td>${esc(r.event)}</td>
+          <td>${esc(r.host || '-')}</td><td class="gv-num">${esc(r.ip || '-')}</td>
+          <td class="gv-num">${r.durationSec != null ? r.durationSec + 's' : '-'}</td>
+          <td>${esc(r.reason || (r.keys && r.keys.join(',')) || (r.commands && r.commands.slice(-3).join(' ; ')) || '')}</td>
+        </tr>`).join('') || '<tr><td colspan="6" class="gv-empty">暂无记录</td></tr>'
+      } catch (e) { setTip('加载失败：' + e.message, 'bad') }
+    }
+
+    function renderSettings() {
+      $('#gv-set-hosts').innerHTML = setEdit.hosts.map((h, i) => `
+        <div class="gv-host-edit" data-i="${i}">
+          <div class="gv-he-head"><b>${esc(h.id)}</b><span class="gv-sub">${h.type === 'local' ? '本机' : 'SSH 远程'}</span>
+            <span class="gv-grow"></span>
+            ${h.type === 'ssh' ? `<button type="button" class="gv-minibtn danger" data-del-host="${i}">删除</button>` : '<span class="gv-sub">不可删除</span>'}</div>
+          <div class="gv-form-grid">
+            <label class="gv-fitem"><span>名称</span><input type="text" data-k="name" value="${esc(h.name)}" /></label>
+            <label class="gv-fitem"><span>分组（内网=蓝 / 公网=橙）</span><input type="text" data-k="group" value="${esc(h.group)}" /></label>
+            ${h.type === 'ssh' ? `
+              <label class="gv-fitem"><span>地址</span><input type="text" data-k="address" value="${esc(h.address)}" /></label>
+              <label class="gv-fitem"><span>SSH 端口</span><input type="number" data-k="port" value="${h.port}" /></label>
+              <label class="gv-fitem"><span>用户名</span><input type="text" data-k="username" value="${esc(h.username)}" /></label>
+              <label class="gv-fitem"><span>认证</span><select data-k="authType"><option value="key"${h.authType === 'key' ? ' selected' : ''}>密钥</option><option value="password"${h.authType === 'password' ? ' selected' : ''}>密码</option></select></label>
+              <label class="gv-fitem span2"><span>私钥路径（0600）</span><input type="text" data-k="keyPath" value="${esc(h.keyPath || '')}" /></label>
+            ` : `
+              <label class="gv-fitem"><span>展示地址</span><input type="text" data-k="address" value="${esc(h.address || '')}" /></label>
+              <label class="gv-fitem"><span>终端主机</span><input type="text" data-k="t_host" value="${esc(h.terminal?.host || '127.0.0.1')}" /></label>
+              <label class="gv-fitem"><span>终端端口</span><input type="number" data-k="t_port" value="${h.terminal?.port || 22}" /></label>
+              <label class="gv-fitem"><span>终端用户</span><input type="text" data-k="t_username" value="${esc(h.terminal?.username || 'root')}" /></label>
+              <label class="gv-fitem"><span>认证</span><select data-k="t_authType"><option value="key"${h.terminal?.authType === 'key' ? ' selected' : ''}>密钥</option><option value="password"${h.terminal?.authType === 'password' ? ' selected' : ''}>密码</option></select></label>
+              <label class="gv-fitem"><span>私钥路径</span><input type="text" data-k="t_keyPath" value="${esc(h.terminal?.keyPath || '')}" /></label>
+            `}
+          </div>
+          ${h.note ? `<p class="gv-sub" style="margin:6px 0 0">${esc(h.note)}</p>` : ''}
+        </div>`).join('')
+      $$('#gv-set-hosts [data-del-host]').forEach((b) => b.addEventListener('click', () => {
+        const i = +b.dataset.delHost
+        if (confirm(`删除主机 ${setEdit.hosts[i].id}？（保存后生效）`)) { setEdit.hosts.splice(i, 1); renderSettings() }
+      }))
+      $$('#gv-set-hosts input, #gv-set-hosts select').forEach((inp) => inp.addEventListener('change', () => {
+        const h = setEdit.hosts[+inp.closest('.gv-host-edit').dataset.i]
+        const k = inp.dataset.k
+        if (k.startsWith('t_')) h.terminal = { ...(h.terminal || {}), [k.slice(2)]: k === 't_port' ? +inp.value : inp.value }
+        else if (k === 'port') h.port = +inp.value
+        else h[k] = inp.value
+      }))
+
+      $('#gv-set-dirs').innerHTML = setEdit.trackedDirs.length
+        ? setEdit.trackedDirs.map((d, i) => `<div class="gv-dir-row"><span class="gv-d-path">${esc(d.path)}</span>
+            <span class="gv-d-src">自定义</span><button type="button" class="gv-minibtn danger" data-del-dir="${i}">移除</button></div>`).join('')
+        : '<p class="gv-sub">暂无自定义跟踪目录</p>'
+      $$('#gv-set-dirs [data-del-dir]').forEach((b) => b.addEventListener('click', () => { setEdit.trackedDirs.splice(+b.dataset.delDir, 1); renderSettings() }))
+
+      const thFields = [['cpuPct', 'CPU %'], ['memPct', '内存 %'], ['diskPct', '磁盘 %'], ['loadPerCore', '每核负载'], ['sustainMin', '持续分钟']]
+      $('#gv-set-th').innerHTML = thFields.map(([k, label]) => `<label class="gv-fitem"><span>${label}</span><input type="number" step="0.1" data-th="${k}" value="${setEdit.thresholds[k]}" /></label>`).join('')
+      $$('#gv-set-th input').forEach((inp) => inp.addEventListener('change', () => { setEdit.thresholds[inp.dataset.th] = +inp.value }))
+
+      const coFields = [['localIntervalSec', '本机采集间隔(秒)'], ['remoteIntervalSec', '远程采集间隔(秒)'], ['retentionDays', '历史保留(天)'], ['dockerRefreshSec', '容器映射刷新(秒)']]
+      $('#gv-set-collect').innerHTML = coFields.map(([k, label]) => `<label class="gv-fitem"><span>${label}</span><input type="number" data-co="${k}" value="${setEdit.collect[k]}" /></label>`).join('')
+      $$('#gv-set-collect input').forEach((inp) => inp.addEventListener('change', () => { setEdit.collect[inp.dataset.co] = +inp.value }))
+      const teFields = [['idleTimeoutMin', '终端空闲超时(分)'], ['maxSessionMin', '单会话上限(分)'], ['maxSessionsPerHost', '每主机并发会话']]
+      $('#gv-set-term').innerHTML = teFields.map(([k, label]) => `<label class="gv-fitem"><span>${label}</span><input type="number" data-te="${k}" value="${setEdit.terminal[k]}" /></label>`).join('')
+        + `<label class="gv-fitem"><span>命令行审计</span><span style="display:flex;align-items:center;gap:6px;padding:6px 0"><input type="checkbox" id="gv-te-record" style="accent-color:var(--gv-accent)"${setEdit.terminal.recordCommands ? ' checked' : ''} /> 记录回车提交的命令</span></label>`
+      $$('#gv-set-term input[type=number]').forEach((inp) => inp.addEventListener('change', () => { setEdit.terminal[inp.dataset.te] = +inp.value }))
+      $('#gv-te-record').addEventListener('change', (e) => { setEdit.terminal.recordCommands = e.target.checked })
+      $('#gv-set-webhook').value = setEdit.webhookUrl || ''
+    }
+    $('#gv-set-host-add').addEventListener('click', () => {
+      setEdit.hosts.push({ id: 'host-' + Math.random().toString(36).slice(2, 6), name: '新主机', type: 'ssh', group: '内网', address: '', port: 22, username: 'root', authType: 'key', keyPath: '' })
+      renderSettings()
+    })
+    $('#gv-set-dir-add').addEventListener('click', () => {
+      const p = prompt('输入要跟踪的绝对目录路径（如 /opt/myapp）：')
+      if (!p) return
+      if (!p.startsWith('/')) { alert('必须是绝对路径'); return }
+      if (p === '/') { alert('不允许跟踪根目录（不越界采集）'); return }
+      if (setEdit.trackedDirs.some((d) => d.path === p)) { alert('该目录已在列表中'); return }
+      setEdit.trackedDirs.push({ path: p, name: p.split('/').filter(Boolean).pop() || p, source: 'custom' })
+      renderSettings()
+    })
+    $('#gv-set-save').addEventListener('click', async () => {
+      try {
+        await api('/api/monitor/config', { method: 'PUT', body: {
+          hosts: setEdit.hosts, trackedDirs: setEdit.trackedDirs, thresholds: setEdit.thresholds,
+          collect: setEdit.collect, terminal: setEdit.terminal, webhookUrl: $('#gv-set-webhook').value.trim(),
+        } })
+        setTip('已保存并热加载 ✓')
+        refreshSummary()
+      } catch (e) { setTip('保存失败：' + e.message, 'bad') }
+    })
+    $('#gv-pw-change').addEventListener('click', async () => {
+      try {
+        await api('/api/monitor/password', { method: 'POST', body: { oldPassword: $('#gv-pw-old').value, newPassword: $('#gv-pw-new').value } })
+        $('#gv-pw-old').value = ''; $('#gv-pw-new').value = ''
+        setTip('密码已修改（本浏览器保持登录）')
+      } catch (e) { setTip('修改失败：' + e.message, 'bad') }
+    })
+
+    function onThemeChange() {
+      Object.values(state.charts).forEach((c) => c && c.dispose())
+      state.charts = {}
+      if (state.detailHost) loadDetail(true)
+    }
+
+    return {
+      activate() { if (!booted) boot(); else { startPoll(); refreshSummary() } },
+      boot, onThemeChange,
+    }
+  })()
+
+  /* ============================ 启动 ============================ */
+  const startView = location.hash === '#monitor' || localStorage.getItem('gv2:view') === 'monitor' ? 'monitor' : 'apps'
+  apps.boot()
+  if (startView === 'monitor') {
+    // 直接进入监控视图（会话 Cookie 与主站共享，已登录则直接出数据）
+    switchView('monitor')
+  }
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) apps.refresh() })
+})()

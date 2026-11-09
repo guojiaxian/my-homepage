@@ -1,0 +1,315 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="我的应用导航 · 毛玻璃对比版：应用导航与监控中心双视图，同一页面切换。">
+  <meta name="theme-color" content="#0b1220">
+  <title>我的应用导航 · 毛玻璃 v2</title>
+  <link rel="stylesheet" href="./assets/glass-v2.css">
+  <script>
+    (function () {
+      var el = document.documentElement;
+      el.classList.add('gv-js');
+      try {
+        var t = localStorage.getItem('gv2:theme');
+        if (t === 'dark' || t === 'light') el.setAttribute('data-theme', t);
+      } catch (e) {}
+    })();
+  </script>
+</head>
+<body class="gv-body">
+  <a class="gv-skip" href="#gv-main">跳到主要内容</a>
+
+  <!-- 环境层：夜色底 + 科技蓝光斑 + 噪点（玻璃材质的底料） -->
+  <div class="gv-ambient" aria-hidden="true">
+    <div class="gv-ambient__wash"></div>
+    <div class="gv-blob gv-blob--blue"></div>
+    <div class="gv-blob gv-blob--cyan"></div>
+    <div class="gv-blob gv-blob--indigo"></div>
+    <div class="gv-ambient__grain"></div>
+  </div>
+
+  <div class="gv-app">
+    <header class="gv-topbar">
+      <div class="gv-topbar__inner">
+        <a class="gv-brand" href="/">
+          <span class="gv-brand__mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" class="gv-i"><use href="#gv-i-grid"></use></svg>
+          </span>
+        </a>
+        <nav class="gv-tabs" role="tablist" aria-label="视图切换">
+          <button type="button" class="gv-tab is-active" id="gv-tab-apps" role="tab" aria-selected="true">我的应用</button>
+          <button type="button" class="gv-tab" id="gv-tab-monitor" role="tab" aria-selected="false">监控中心</button>
+        </nav>
+        <div class="gv-topbar__actions">
+          <a class="gv-iconbtn" href="https://github.com/guojiaxian" target="_blank" rel="noopener" title="GitHub 主页" aria-label="GitHub 主页">
+            <svg viewBox="0 0 24 24" class="gv-i"><use href="#gv-i-github"></use></svg>
+          </a>
+          <a class="gv-iconbtn" href="/" title="回到主站（白底版）" aria-label="回到主站">
+            <svg viewBox="0 0 24 24" class="gv-i"><use href="#gv-i-home"></use></svg>
+          </a>
+          <button type="button" class="gv-iconbtn" id="gv-theme" title="切换浅色" aria-label="切换主题">
+            <svg viewBox="0 0 24 24" class="gv-i gv-i--sun"><use href="#gv-i-sun"></use></svg>
+            <svg viewBox="0 0 24 24" class="gv-i gv-i--moon"><use href="#gv-i-moon"></use></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <main class="gv-main" id="gv-main">
+      <!-- ══════════ 视图 A：我的应用（结构沿用主站） ══════════ -->
+      <section id="gv-view-apps">
+        <section class="gv-hero">
+          <h1 id="gv-hero-title">我的应用</h1>
+          <p class="gv-sub" id="gv-hero-sub">部署在这台服务器上的个人项目，端口与运行状态由服务端定时自动探测。</p>
+          <div class="gv-stats">
+            <span class="gv-stat-chip"><b id="gv-count-apps">—</b> 个应用</span>
+            <span class="gv-stat-chip">
+              <span class="gv-dot" id="gv-run-dot"></span>
+              <b id="gv-count-running">—</b> 个运行中
+            </span>
+            <span class="gv-stat-chip" title="按部署位置：内网 / 公网">
+              内网 <b class="gv-num-blue" id="gv-count-lan">—</b>
+              <span class="gv-stat-sep">·</span>
+              公网 <b class="gv-num-amber" id="gv-count-public">—</b>
+            </span>
+            <span class="gv-stat-chip" title="源码与 GitHub 仓库的同步状态">
+              <span class="gv-dot" id="gv-git-dot"></span>
+              <span id="gv-git-text">正在读取…</span>
+            </span>
+          </div>
+        </section>
+
+        <div class="gv-toolbar">
+          <div class="gv-sortbox">
+            <select class="gv-select" id="gv-sort" title="排序方式" aria-label="排序方式">
+              <option value="default">排序：手动 / 默认顺序</option>
+              <option value="name">排序：名称</option>
+              <option value="port">排序：端口</option>
+              <option value="status">排序：运行状态</option>
+              <option value="git">排序：同步状态</option>
+            </select>
+            <button type="button" class="gv-iconbtn gv-dirbtn" id="gv-sort-dir" title="切换正序 / 倒序" hidden>↑</button>
+            <button type="button" class="gv-iconbtn" id="gv-reset-order" title="清除手动排序，恢复默认顺序" aria-label="清除手动排序" hidden>↺</button>
+          </div>
+          <div class="gv-segmented" role="tablist" aria-label="视图切换">
+            <button type="button" class="is-active" data-view="table" role="tab" aria-selected="true">表格</button>
+            <button type="button" data-view="card" role="tab" aria-selected="false">卡片</button>
+          </div>
+          <button type="button" class="gv-syncbtn" id="gv-sync" title="立即重新探测所有应用：端口、git 同步与远程健康">
+            <svg viewBox="0 0 24 24" class="gv-i"><use href="#gv-i-refresh"></use></svg>
+            <span id="gv-sync-label">立刻同步</span>
+          </button>
+          <span class="gv-sync-error" id="gv-sync-error" hidden></span>
+        </div>
+
+        <div class="gv-placeholder" id="gv-loading" aria-busy="true">
+          <div class="gv-skeleton" style="max-width: 760px"></div>
+          <div class="gv-skeleton" style="max-width: 760px"></div>
+          <div class="gv-skeleton" style="max-width: 760px"></div>
+        </div>
+        <div class="gv-placeholder" id="gv-error" hidden>
+          <p id="gv-error-text">加载应用数据失败</p>
+          <button type="button" class="gv-retry" id="gv-retry">重试</button>
+        </div>
+        <p class="gv-placeholder" id="gv-empty" hidden>还没有应用，请检查 apps.json</p>
+
+        <div class="gv-table-wrap" id="gv-table-wrap" hidden>
+          <table class="gv-app-table" aria-label="应用清单">
+            <thead id="gv-thead"></thead>
+            <tbody id="gv-tbody"></tbody>
+          </table>
+        </div>
+        <div class="gv-cardgrid" id="gv-cards" hidden></div>
+
+        <footer class="gv-footer">
+          <span>© <span id="gv-year">2026</span> <span id="gv-site-foot">我的应用导航</span> · 毛玻璃 v2</span>
+          <span id="gv-probe-text"></span>
+        </footer>
+      </section>
+
+      <!-- ══════════ 视图 B：监控中心（结构沿用主站监控） ══════════ -->
+      <section id="gv-view-monitor" hidden>
+        <section class="gv-hero">
+          <h1>监控中心</h1>
+          <p class="gv-sub">本机与远程服务器实时指标 · 每 5 秒自动刷新 · 点击卡片展开详情并进入终端</p>
+          <div class="gv-stats">
+            <span class="gv-stat-chip"><span class="gv-dot gv-dot--amber" id="gv-m-host-dot"></span><b id="gv-m-hosts">—</b></span>
+            <span class="gv-stat-chip" id="gv-m-alert-chip" hidden><span class="gv-dot gv-dot--alert"></span><b id="gv-m-alerts">0</b> 个活跃告警</span>
+            <span class="gv-stat-chip">跟踪 <b id="gv-m-dirs">—</b> 个目录</span>
+            <span class="gv-stat-chip"><b id="gv-m-containers">—</b> 个容器</span>
+          </div>
+        </section>
+
+        <div id="gv-m-alert-banner" hidden></div>
+
+        <div class="gv-toolbar">
+          <h2 class="gv-m-title">主机</h2>
+          <span class="gv-sub">内网蓝 / 公网橙 · 点击卡片展开详情</span>
+          <span class="gv-grow"></span>
+          <span class="gv-sub gv-num" id="gv-m-updated"></span>
+          <button type="button" class="gv-minibtn" id="gv-m-open-settings">⚙ 监控设置</button>
+        </div>
+
+        <div id="gv-m-hosts-wrap"></div>
+
+        <div id="gv-m-detail" hidden>
+          <div class="gv-detail-head">
+            <span class="gv-detail-bar" id="gv-m-detail-bar"></span>
+            <div class="gv-detail-title">
+              <b id="gv-m-detail-name"></b>
+              <span class="gv-sub" id="gv-m-detail-meta"></span>
+            </div>
+            <div class="gv-range-tabs" id="gv-m-range">
+              <button type="button" data-r="1h" class="is-on">1 小时</button>
+              <button type="button" data-r="24h">24 小时</button>
+              <button type="button" data-r="7d">7 天</button>
+            </div>
+            <button type="button" class="gv-minibtn" id="gv-m-term2">⌨ 终端</button>
+            <button type="button" class="gv-minibtn" id="gv-m-close-detail">✕ 收起</button>
+          </div>
+          <p class="gv-detail-err" id="gv-m-detail-err" hidden></p>
+          <div class="gv-charts4">
+            <div class="gv-chart-box"><h4>CPU / 负载</h4><div id="gv-ch-cpu" class="gv-chart"></div></div>
+            <div class="gv-chart-box"><h4>内存 / Swap</h4><div id="gv-ch-mem" class="gv-chart"></div></div>
+            <div class="gv-chart-box"><h4>网络（<span id="gv-ch-iface" class="gv-num">-</span>）</h4><div id="gv-ch-net" class="gv-chart"></div></div>
+            <div class="gv-chart-box"><h4>磁盘 IO</h4><div id="gv-ch-dio" class="gv-chart"></div></div>
+          </div>
+          <div class="gv-charts2">
+            <div class="gv-chart-box"><h4>分区用量</h4><div id="gv-ch-disk" class="gv-chart gv-tall"></div></div>
+            <div class="gv-chart-box">
+              <h4 class="gv-with-ctl">应用 / 目录资源占比
+                <select id="gv-m-dir-metric" class="gv-select gv-mini">
+                  <option value="cpu">CPU %</option>
+                  <option value="mem" selected>内存 MB</option>
+                  <option value="ioR">IO 读 MB/s</option>
+                  <option value="ioW">IO 写 MB/s</option>
+                  <option value="threads">线程数</option>
+                  <option value="fds">句柄数</option>
+                </select>
+                <span class="gv-hint">点击条目过滤下方进程</span>
+              </h4>
+              <div id="gv-ch-dirs" class="gv-chart gv-tall"></div>
+            </div>
+          </div>
+          <div class="gv-chart-box">
+            <h4 class="gv-with-ctl">目录历史对比（CPU%）<span class="gv-hint">勾选目录叠加曲线</span></h4>
+            <div class="gv-compare-list" id="gv-m-compare"></div>
+            <div id="gv-ch-cmp" class="gv-chart" hidden></div>
+            <p class="gv-compare-empty" id="gv-m-cmp-empty">未选择目录 —— 勾选上方目录名，即可把多个应用的 CPU% 曲线叠在同一时间轴上对比。</p>
+          </div>
+          <div class="gv-chart-box">
+            <h4 class="gv-with-ctl">进程明细 <span class="gv-hint" id="gv-m-procs-sub"></span>
+              <button type="button" class="gv-minibtn" id="gv-m-clear-filter" hidden>清除过滤</button>
+            </h4>
+            <div class="gv-table-scroll">
+              <table class="gv-proc-table">
+                <thead><tr>
+                  <th>程序</th><th>归属</th><th class="gv-num">PID</th><th class="gv-num">CPU%</th><th class="gv-num">内存</th>
+                  <th class="gv-num">IO读 MB/s</th><th class="gv-num">IO写 MB/s</th><th class="gv-num">线程</th><th class="gv-num">句柄</th>
+                  <th>容器</th><th>命令行</th>
+                </tr></thead>
+                <tbody id="gv-m-procs-body"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <section id="gv-m-alerts-section" hidden>
+          <div class="gv-toolbar"><h2 class="gv-m-title">告警</h2><span class="gv-sub">持续超过阈值时长后触发</span></div>
+          <div id="gv-m-alerts-list"></div>
+        </section>
+
+        <footer class="gv-footer">
+          <span>最后探测 <span class="gv-num" id="gv-m-foot-time">-</span> · 历史保留 <span id="gv-m-foot-retain">-</span></span>
+          <span><a href="/">返回主站</a></span>
+        </footer>
+      </section>
+    </main>
+  </div>
+
+  <!-- 终端抽屉 -->
+  <div class="gv-term-mask" id="gv-term-mask" hidden></div>
+  <div class="gv-term-drawer" id="gv-term-drawer" hidden>
+    <div class="gv-term-head">
+      <span class="gv-term-title" id="gv-term-title">终端</span>
+      <span class="gv-term-status" id="gv-term-status"></span>
+      <span class="gv-grow"></span>
+      <button type="button" class="gv-minibtn" id="gv-term-reconnect">重连</button>
+      <button type="button" class="gv-minibtn" id="gv-term-popout">弹出窗口</button>
+      <button type="button" class="gv-minibtn" id="gv-term-close">✕ 关闭</button>
+    </div>
+    <div id="gv-term-container"></div>
+  </div>
+
+  <!-- 监控设置 -->
+  <div class="gv-modal-mask" id="gv-settings" hidden>
+    <div class="gv-modal">
+      <div class="gv-modal-head">
+        <h2>监控设置</h2><span class="gv-grow"></span>
+        <span class="gv-save-tip" id="gv-set-tip"></span>
+        <button type="button" class="gv-minibtn" id="gv-set-close">✕</button>
+      </div>
+      <div class="gv-modal-body">
+        <div class="gv-msec"><h3>纳管主机</h3><div id="gv-set-hosts"></div>
+          <button type="button" class="gv-minibtn" id="gv-set-host-add">＋添加主机</button>
+          <p class="gv-sub" style="margin:8px 0 0">远程主机推荐密钥认证：先 <code>ssh-copy-id -i &lt;keyPath&gt;.pub user@host</code> 分发公钥；密码认证经 AES-256-GCM 加密存储。</p>
+        </div>
+        <div class="gv-msec"><h3>跟踪目录（主页登记应用目录自动并入）</h3>
+          <div id="gv-set-dirs"></div>
+          <button type="button" class="gv-minibtn" id="gv-set-dir-add">＋添加目录</button>
+        </div>
+        <div class="gv-msec"><h3>告警阈值</h3><div class="gv-form-grid" id="gv-set-th"></div></div>
+        <div class="gv-msec"><h3>采集与终端</h3>
+          <div class="gv-form-grid" id="gv-set-collect"></div>
+          <div class="gv-form-grid" id="gv-set-term" style="margin-top:10px"></div>
+          <div class="gv-fitem" style="margin-top:10px"><span>告警 Webhook（POST JSON，留空关闭）</span><input type="text" id="gv-set-webhook" placeholder="https://..." /></div>
+        </div>
+        <div class="gv-msec"><h3>修改访问密码（本浏览器登录一次后长期免密）</h3>
+          <div class="gv-form-grid">
+            <label class="gv-fitem"><span>旧密码</span><input type="password" id="gv-pw-old" autocomplete="current-password" /></label>
+            <label class="gv-fitem"><span>新密码</span><input type="password" id="gv-pw-new" autocomplete="new-password" /></label>
+            <label class="gv-fitem"><span>&nbsp;</span><button type="button" class="gv-minibtn" id="gv-pw-change">修改密码</button></label>
+          </div>
+        </div>
+        <div class="gv-msec"><h3>最近审计记录（会话 / 鉴权 / 配置变更）</h3>
+          <div class="gv-table-scroll gv-low">
+            <table class="gv-audit-table"><thead><tr><th>时间</th><th>事件</th><th>主机</th><th>IP</th><th>时长</th><th>备注</th></tr></thead>
+            <tbody id="gv-set-audit"></tbody></table>
+          </div>
+        </div>
+        <div class="gv-modal-foot">
+          <button type="button" class="gv-minibtn" id="gv-set-cancel">取消</button>
+          <button type="button" class="gv-primarybtn" id="gv-set-save">保存配置</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 登录（仅未鉴权时出现） -->
+  <div class="gv-login-mask" id="gv-login" hidden>
+    <form class="gv-login" id="gv-login-form">
+      <h1>监控中心</h1>
+      <p>首次访问输入一次密码即可，本浏览器将长期记住，无需重复登录</p>
+      <input type="password" id="gv-login-pw" placeholder="访问密码" autocomplete="current-password" />
+      <div class="gv-login-err" id="gv-login-err"></div>
+      <button type="submit" class="gv-primarybtn" id="gv-login-btn">登 录</button>
+    </form>
+  </div>
+
+  <svg width="0" height="0" class="gv-sprite" aria-hidden="true" focusable="false">
+    <symbol id="gv-i-grid"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3.5" y="3.5" width="7" height="7" rx="2"/><rect x="13.5" y="3.5" width="7" height="7" rx="2"/><rect x="3.5" y="13.5" width="7" height="7" rx="2"/><rect x="13.5" y="13.5" width="7" height="7" rx="2"/></g></symbol>
+    <symbol id="gv-i-github"><g fill="currentColor" stroke="none"><path d="M12 .8C5.7.8.6 5.9.6 12.2c0 5 3.2 9.2 7.7 10.7.6.1.8-.3.8-.5v-1.9c-3 .6-3.7-1.4-3.7-1.4-.5-1.3-1.3-1.7-1.3-1.7-1-.8.1-.8.1-.8 1.1.1 1.7 1.1 1.7 1.1 1 1.7 2.6 1.3 3.2.9.1-.7.4-1.3.8-1.6-2.6-.3-5.3-1.3-5.3-5.9 0-1.3.5-2.4 1.3-3.2-.1-.3-.5-1.5.1-3.2 0 0 1-.3 3.3 1.2a11.3 11.3 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.7 1.7.3 2.8.1 3.2.8.8 1.3 1.9 1.3 3.2 0 4.6-2.7 5.6-5.3 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.6.8.5 4.5-1.5 7.7-5.8 7.7-10.7C23.4 5.9 18.3.8 12 .8Z"/></g></symbol>
+    <symbol id="gv-i-home"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11.2 12 4l8 7.2"/><path d="M6 10v9h12v-9"/></g></symbol>
+    <symbol id="gv-i-sun"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.6"/><path d="M12 3v2.2M12 18.8v2.2M3 12h2.2M18.8 12H21M5.6 5.6l1.6 1.6M16.8 16.8l1.6 1.6M18.4 5.6l-1.6 1.6M7.2 16.8l-1.6 1.6"/></g></symbol>
+    <symbol id="gv-i-moon"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 14.2A8.2 8.2 0 0 1 9.8 4 8.4 8.4 0 1 0 20 14.2Z"/></g></symbol>
+    <symbol id="gv-i-refresh"><g fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M20 12a8 8 0 0 1-13.5 5.8M4 12a8 8 0 0 1 13.5-5.8"/><path d="M20 4.5v5h-5M4 19.5v-5h5"/></g></symbol>
+  </svg>
+
+  <script src="./assets/vendor/echarts.min.js"></script>
+  <script src="./assets/vendor/xterm.js"></script>
+  <script src="./assets/vendor/xterm-addon-fit.js"></script>
+  <script src="./assets/glass-v2.js" defer></script>
+</body>
+</html>

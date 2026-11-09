@@ -418,6 +418,17 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - nginx：`/unslop` → 301 → `/unslop/`，两处 server 块各一个 location（`root /root/applications/my-homepage` + `try_files … /unslop/index.html` + no-cache），备份 `*.bak-unslop-20261106`。
 - 踩坑：Vue 模板习惯的自闭合 `<div />` 在原生 HTML 里是**未闭合标签**，曾把 footer 吞进 `#u-content` 内部，首次 `innerHTML` 渲染将其销毁、`renderPageText` 抛错中断整个渲染（见踩坑 #11）。
 
+### 8.8 毛玻璃 v2 对比端点（`/glass-v2/`，2026-11-10，unslop skill 产出）
+
+应用导航 + 监控中心**双视图**的毛玻璃对比版（用户点名「毛玻璃、好看、炫酷、保留现页对比」），纯 HTML/CSS/JS 零构建，结构上 = `/glass/` 的设计语言 × 主站 SPA 的双视图功能：
+
+- **方向**（unslop 五行）：个人服务器控制台；夜航仪表、冷静、透亮；机房夜色（深蓝黑 + 科技蓝光斑 + 噪点，暗色默认、浅色玻璃可切）；时刻=玻璃仪表环与彩色图表曲线；签名=呼吸状态点（`.gv-dot.is-live` 涟漪，在线/告警等活体指示，reduced-motion 关闭）。
+- **功能对齐主站**：双 tab 同页切换（localStorage `gv2:view` + `#monitor` hash）、表格/卡片/排序/拖拽/复制目录/立刻同步、监控 5s 轮询 + 内联详情（4 趋势图/分区/目录占比/目录对比/进程明细）+ 告警横幅 + 设置弹窗（含改密/审计）+ xterm 终端抽屉（弹窗放大复用 `/monitor/terminal.html`）。会话 Cookie 与主站共享——主站登录过此处自动鉴权。存储键 `gv2:appOrder` / `gv2:theme` / `gv2:view`。
+- **unslop 纪律**：4px 网格；三级文字角色；chrome 无 emoji（sprite SVG 图标，应用 emoji 图标属数据保留）；动效只走 transform/opacity + `@property --v` 注册的仪表环插值；入场动画仅首次（`state.entered` 同 glass 踩坑 #6 教训）；`prefers-reduced-motion` 全降级；≤760px 模糊降至 16px；`@supports` 无 backdrop-filter 时升级面板不透明度。
+- **文件**：`glass-v2/index.html` + `assets/glass-v2.css` + `assets/glass-v2.js`（应用逻辑移植自 `/unslop/` 成熟实现，监控逻辑移植自 git 历史版 monitor.js）+ `assets/vendor/`（echarts/xterm 自包含——**不要跨端点引用 /monitor/assets/vendor**，echarts.min.js 已在 SPA 化时从那里删除，会落 try_files 兜底返回 HTML）。
+- nginx：两处 server 块各一个 `/glass-v2/` location（`root` + `try_files`），备份 `*.bak-glassv2-20261110`。
+- 踩坑：`.gv-gauge` 忘写 `position: relative` → `::after` 内圆孔与 `.gv-gval` 数值锚到卡片上漂移；自定义属性过渡必须 `@property` 注册。
+
 ### 8.7 监控中心与 Web 终端（并入主站 SPA，2026-11-10；首版为独立 /monitor/ 页，同日按用户反馈合并）
 
 选型结论：**自研轻量网关**（Node 直读 `/proc` + ssh2 免 Agent 远程采集）而非 Prometheus/Grafana/Netdata——决定性理由是「**按目录归属进程资源**」这一核心诉求在成熟方案里都是 cmdline 模板分组（不支持 cwd 维度），而 cwd 归属自研只要几十行；Web SSH 选 **xterm.js + ssh2** 而非 ttyd/Wetty/GateOne（pty 直通架构无法做会话鉴权/凭据加密/审计；GateOne 已停维护）。完整对比表与架构见 `docs/monitor-terminal-blueprint.md`。
