@@ -28,7 +28,7 @@
   "hosts": [
     {
       "id": "local",
-      "name": "本机 · 应用宿主",
+      "name": "本机 · 应用中心",
       "type": "local",
       "group": "内网",
       "mode": "ssh",
@@ -44,7 +44,7 @@
     },
     {
       "id": "netwatch",
-      "name": "NetWatch 服务器 · centerserver",
+      "name": "NetWatch 服务器",
       "type": "ssh",
       "group": "内网",
       "mode": "agent",
@@ -53,11 +53,17 @@
       "username": "root",
       "authType": "key",
       "keyPath": "/root/applications/my-homepage/data/monitor/keys/netwatch",
-      "trackedDirs": []
+      "trackedDirs": [
+        {
+          "path": "/root/network-monitor",
+          "name": "network-monitor",
+          "source": "host"
+        }
+      ]
     },
     {
       "id": "aliyun",
-      "name": "阿里云 · StudyLog 公网版",
+      "name": "阿里云 · 公网版",
       "type": "ssh",
       "group": "公网",
       "mode": "ssh",
@@ -86,7 +92,7 @@
     },
     {
       "id": "lan-1103",
-      "name": "内网节点 · 113",
+      "name": "网络安全自动运维",
       "type": "ssh",
       "group": "内网",
       "mode": "agent",
