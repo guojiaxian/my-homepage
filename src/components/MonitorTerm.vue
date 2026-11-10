@@ -6,8 +6,12 @@ const props = defineProps({
   hostName: { type: String, default: '' },
   /* 抽屉显隐由父级控制：关闭仅隐藏，不销毁终端会话，重新打开保留上次内容 */
   open: { type: Boolean, default: true },
+  /* 多主机会话缓存：父级维护的页签列表 / 当前页签 / 各页签连接状态 */
+  tabs: { type: Array, default: () => [] },
+  activeId: { type: String, default: '' },
+  statuses: { type: Object, default: () => ({}) },
 })
-const emit = defineEmits(['close'])
+const emit = defineEmits(['close', 'switch', 'end', 'status'])
 
 const container = ref(null)
 const status = ref('')
@@ -15,7 +19,12 @@ const statusCls = ref('')
 const full = ref(false)
 let term = null, ws = null, fit = null, loaded = false, curHost = ''
 
-function setStatus(txt, cls = '') { status.value = txt; statusCls.value = cls }
+function setStatus(txt, cls = '') {
+  status.value = txt
+  statusCls.value = cls
+  emit('status', props.hostId, cls)
+}
+function endSession(id = props.hostId) { emit('end', id) }
 
 async function connect() {
   if (!props.hostId) return
@@ -71,7 +80,7 @@ function setStatsCleanup() {
   if (term) { try { term.dispose() } catch { /* 已释放 */ } term = null }
 }
 function onKeydown(e) {
-  if (e.key !== 'Escape') return
+  if (!props.open || e.key !== 'Escape') return // 非当前页签不响应
   if (!full.value) { emit('close'); return }
   e.preventDefault()
   e.stopPropagation()
@@ -85,11 +94,12 @@ async function toggleFull() {
   setTimeout(() => { try { fit && fit.fit(); term && term.focus() } catch { /* 忽略 */ } }, 80)
 }
 function popout() {
-  /* 弹出窗口需要独立会话：先释放抽屉会话，避免同一主机并发占用 */
+  /* 弹出窗口需要独立会话：先释放本页签会话并移除页签，避免同一主机并发占用 */
+  const id = props.hostId
   setStatsCleanup()
   curHost = ''
-  emit('close')
-  window.open(`/monitor/terminal.html?host=${encodeURIComponent(props.hostId)}`, '_blank', 'width=980,height=640')
+  emit('end', id)
+  window.open(`/monitor/terminal.html?host=${encodeURIComponent(id)}`, '_blank', 'width=980,height=640')
 }
 
 /* 重新显示时只重排/聚焦，不重连；会话已被服务端关闭（如空闲超时）时仍保留历史输出 */
@@ -109,7 +119,7 @@ watch(() => props.open, (v) => {
 onMounted(() => { if (props.open) connect() })
 onBeforeUnmount(setStatsCleanup)
 
-function onResizeWin() { if (fit) { try { fit.fit() } catch { /* 忽略 */ } } }
+function onResizeWin() { if (props.open && fit) { try { fit.fit() } catch { /* 忽略 */ } } }
 window.addEventListener('resize', onResizeWin)
 // 捕获阶段监听：xterm 的 textarea 会吞 Escape（冒泡阶段收不到）；全屏时 ESC 还原窗口
 window.addEventListener('keydown', onKeydown, true)
@@ -129,8 +139,23 @@ onBeforeUnmount(() => {
         <span class="spacer" />
         <button class="mini-btn" @click="connect">重连</button>
         <button class="mini-btn" @click="popout">弹出窗口</button>
-      <button class="mini-btn" @click="toggleFull">{{ full ? '还原窗口' : '全屏' }}</button>
+        <button class="mini-btn" @click="toggleFull">{{ full ? '还原窗口' : '全屏' }}</button>
+        <button class="mini-btn" title="关闭该主机的 shell 会话（界面历史一并移除）" @click="endSession(activeId)">结束会话</button>
         <button class="mini-btn" @click="emit('close')">✕ 关闭</button>
+      </div>
+      <div v-if="tabs.length > 1" class="mon-term-tabs">
+        <button
+          v-for="t in tabs"
+          :key="t.id"
+          class="term-tab"
+          :class="{ on: t.id === activeId }"
+          :title="`${t.name}（点击切换，会话保持后台运行）`"
+          @click="emit('switch', t.id)"
+        >
+          <span class="tab-dot" :class="statuses[t.id]" />
+          <span class="tab-name">{{ t.name }}</span>
+          <span class="tab-x" title="结束该会话" @click.stop="endSession(t.id)">×</span>
+        </button>
       </div>
       <div ref="container" class="mon-term-body" />
     </div>
@@ -155,7 +180,26 @@ onBeforeUnmount(() => {
 .spacer { flex: 1; }
 .mini-btn { border: 1px solid var(--border); background: var(--bg-soft); border-radius: 6px; padding: 2px 8px; font-size: 12.5px; cursor: pointer; color: var(--text-2); }
 .mini-btn:hover { border-color: var(--accent); color: var(--accent); }
-.mon-term-body { flex: 1; padding: 8px; background: #0d1117; }
+.mon-term-tabs {
+  display: flex; align-items: center; gap: 6px; flex: none;
+  padding: 7px 14px; border-bottom: 1px solid var(--border);
+  overflow-x: auto; scrollbar-width: thin;
+}
+.term-tab {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text-2);
+  border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.term-tab:hover { border-color: var(--border-strong); color: var(--text); }
+.term-tab.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gray); flex: none; }
+.tab-dot.ok { background: var(--green); }
+.tab-dot.bad { background: var(--red); }
+.tab-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-x { margin-left: 2px; font-size: 14px; line-height: 1; color: var(--text-2); }
+.tab-x:hover { color: var(--red); }
+.mon-term-body { flex: 1; padding: 8px; background: #0d1117; min-height: 0; }
 .mon-term-drawer.full { inset: 0; width: 100vw; height: 100vh; border-left: 0; }
 .mon-term-body :deep(.xterm) { height: 100%; }
 @media (prefers-reduced-motion: reduce) { .mon-term-drawer { animation: none; } }

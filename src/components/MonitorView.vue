@@ -23,8 +23,12 @@ const emit = defineEmits(['unauth', 'update:settingsOpen'])
 const summary = ref(null)
 const loadErr = ref('')
 const selectedId = ref('')
-const termHost = ref(null) // { id, name }；关闭抽屉仅隐藏，保留上次终端会话
+/* 终端页签：关闭抽屉仅隐藏，不同主机会话并行保留（最多 3 台，LRU 淘汰最久未用） */
+const TERM_TABS_MAX = 3
+const termTabs = ref([]) // [{ id, name }]，最后一项为最近使用
+const termActive = ref('')
 const termOpen = ref(false)
+const termStatus = reactive({}) // hostId -> '' | 'ok' | 'bad'（页签状态点）
 const batchPickerOpen = ref(false)
 const batchOpen = ref(false)
 const batchSel = reactive(new Set())
@@ -119,10 +123,37 @@ function toggleDetail(h) {
   selectedId.value = selectedId.value === h.id ? '' : h.id
 }
 function openTerm(h) {
-  // 同一主机再次打开不重建组件，沿用上次的 WS 会话与滚动内容
-  if (!termHost.value || termHost.value.id !== h.id) termHost.value = { id: h.id, name: h.name }
+  // 已有该主机页签：切过去即可，沿用原 WS 会话与滚动内容
+  if (termTabs.value.some((t) => t.id === h.id)) { switchTerm(h.id); return }
+  // 超出上限先淘汰最久未使用且非当前页签的会话
+  while (termTabs.value.length >= TERM_TABS_MAX) {
+    const victim = termTabs.value.find((t) => t.id !== termActive.value)
+    if (!victim) break
+    endTerm(victim.id)
+  }
+  termTabs.value.push({ id: h.id, name: h.name || h.id })
+  termActive.value = h.id
   termOpen.value = true
 }
+function switchTerm(id) {
+  const i = termTabs.value.findIndex((t) => t.id === id)
+  if (i < 0) return
+  const [t] = termTabs.value.splice(i, 1)
+  termTabs.value.push(t) // 最近使用排到最后，淘汰时优先释放最久未用
+  termActive.value = id
+  termOpen.value = true
+}
+function endTerm(id) {
+  const i = termTabs.value.findIndex((t) => t.id === id)
+  if (i < 0) return
+  termTabs.value.splice(i, 1)
+  delete termStatus[id]
+  if (termActive.value !== id) return
+  const last = termTabs.value[termTabs.value.length - 1]
+  if (last) termActive.value = last.id
+  else { termActive.value = ''; termOpen.value = false }
+}
+function onTermStatus(id, cls) { termStatus[id] = cls || '' }
 function onSaved() { refresh() }
 
 /* ---------- 详情页 ⚙：直连编辑单主机 ----------
@@ -335,13 +366,20 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
       @save="saveDirectEdit"
       @saved="onSaved"
     />
-    <!-- 终端抽屉 -->
+    <!-- 终端抽屉：每个主机一个常驻实例，最多 3 个（LRU） -->
     <MonitorTerm
-      v-if="termHost"
-      :host-id="termHost.id"
-      :host-name="termHost.name"
-      :open="termOpen"
+      v-for="t in termTabs"
+      :key="t.id"
+      :host-id="t.id"
+      :host-name="t.name"
+      :open="termOpen && termActive === t.id"
+      :tabs="termTabs"
+      :active-id="termActive"
+      :statuses="termStatus"
       @close="termOpen = false"
+      @switch="switchTerm"
+      @end="endTerm"
+      @status="onTermStatus"
     />
   </div>
 </template>
