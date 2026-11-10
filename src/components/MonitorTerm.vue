@@ -22,6 +22,7 @@ const containerRef = ref(null)
 const rootEl = ref(null)
 let term = null, ws = null, fit = null, loaded = false
 let retryTimer = null, retryCount = 0, curHost = ''
+let connectGen = 0 // 重入保护：每次 connect 递增，异步返回后校验
 
 function setStatus(txt, cls = '') {
   status.value = txt
@@ -33,8 +34,10 @@ function clearRetry() { if (retryTimer) { clearTimeout(retryTimer); retryTimer =
 
 async function connect() {
   if (!props.hostId) return
+  const gen = ++connectGen
   curHost = props.hostId
   clearRetry()
+  if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
   if (term) { try { term.dispose() } catch { /* 已释放 */ } term = null }
   if (!loaded) {
     const [{ Terminal }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')])
@@ -44,7 +47,7 @@ async function connect() {
   }
   const { Terminal, FitAddon } = window.__monTermLib
   const container = containerRef.value
-  if (!container) return
+  if (!container || gen !== connectGen) return // 已被更新的 connect 取代
   container.innerHTML = ''
   setStatus('连接中…')
   const t = new Terminal({
@@ -60,11 +63,14 @@ async function connect() {
   f.fit()
   term = t; fit = f
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  if (gen !== connectGen) return // 等待 libs 期间已被更新的 connect 取代
   const socket = new WebSocket(`${proto}://${location.host}/api/terminal?host=${encodeURIComponent(props.hostId)}&cols=${t.cols}&rows=${t.rows}`)
+  if (gen !== connectGen) { try { socket.close() } catch {} return }
   ws = socket
   socket.binaryType = 'arraybuffer'
-  socket.onopen = () => { setStatus('已连接', 'ok'); retryCount = 0 }
+  socket.onopen = () => { setStatus('已连接', 'ok'); retryCount = 0; socket.idleTs = Date.now() }
   socket.onmessage = (ev) => {
+    ws.idleTs = Date.now() // 服务端输出也算活跃（tail -f / top 不应被判空闲）
     if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return }
     try {
       const msg = JSON.parse(ev.data)
@@ -99,9 +105,8 @@ async function connect() {
 
 function reconnect() { connect() }
 function popout() {
-  /* 弹出窗口需要独立会话：先释放本窗格会话 */
+  /* 弹出窗口需要独立会话：释放本窗格，父级负责 window.open */
   emit('popout', props.sessionKey, props.hostId)
-  window.open(`/monitor/terminal.html?host=${encodeURIComponent(props.hostId)}`, '_blank', 'width=980,height=640')
 }
 function endSession() { emit('end', props.sessionKey) }
 
@@ -127,7 +132,9 @@ onBeforeUnmount(() => {
   clearRetry()
   window.removeEventListener('resize', onResizeWin)
   if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
+  if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
   if (term) { try { term.dispose() } catch { /* 已释放 */ } term = null }
+  fit = null
 })
 </script>
 

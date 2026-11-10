@@ -250,7 +250,6 @@ async function save() {
   saving.value = true
   error.value = ''
   savedOk.value = false
-  const savedAt = Date.now()
   try {
     const res = await fetch('/api/config', {
       method: 'POST',
@@ -261,7 +260,9 @@ async function save() {
     if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`)
 
     // 配置已写入，探测在后台执行（--no-fetch，1~2 秒完成）：立即反馈并关闭，
-    // 父组件轮询 apps.json 的 probedAt，变化后自动刷新页面
+    // 父组件轮询 apps.json 的 probedAt，变化后自动刷新页面。
+    // savedAt 用服务端时钟：与 apps.json 的 probedAt（服务端 ISO）比较不受浏览器时钟偏差影响
+    const savedAt = Number.isFinite(data.serverTime) ? data.serverTime : Date.now()
     saving.value = false
     savedOk.value = true
     emit('saved', savedAt)

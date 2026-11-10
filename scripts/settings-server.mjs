@@ -342,7 +342,8 @@ const server = createServer(async (req, res) => {
       // 探测转后台执行：保存立即返回，前端轮询 apps.json 感知更新
       runProbe({ noFetch: true })
       syncHostsToApps() // 自愈：整表保存若覆盖掉 appSync 同步条目，立即补齐（无 diff 不写盘）
-      send(res, 200, { ok: true, probeStarted: true })
+      // serverTime：前端保存后轮询 probedAt 用服务端时钟比较，避免浏览器时钟偏差导致白等
+      send(res, 200, { ok: true, probeStarted: true, serverTime: Date.now() })
       return
     }
     if (req.method === 'POST' && url === '/api/probe') {

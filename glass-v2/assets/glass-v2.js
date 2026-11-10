@@ -1097,6 +1097,9 @@
                   <option value="agent"${h.mode === 'agent' ? ' selected' : ''}>Agent 推送</option>
                 </select>
               </label>
+              <label class="gv-fitem span2"><span>同步到应用中心</span>
+                <span style="display:flex;align-items:center;gap:6px;padding:6px 0"><input type="checkbox" data-k="appSync"${h.appSync ? ' checked' : ''} style="accent-color:var(--gv-accent);width:14px;height:14px;margin:0;flex:none" /> 勾选后在应用中心自动创建/更新同名远程应用（取消勾选不删除已创建条目）</span>
+              </label>
             ` : `
               <label class="gv-fitem"><span>展示地址</span><input type="text" data-k="address" value="${esc(h.address || '')}" /></label>
               <label class="gv-fitem"><span>终端主机</span><input type="text" data-k="t_host" value="${esc(h.terminal?.host || '127.0.0.1')}" /></label>
@@ -1177,6 +1180,7 @@
         if (!k) return
         if (k.startsWith('t_')) h.terminal = { ...(h.terminal || {}), [k.slice(2)]: k === 't_port' ? +inp.value : inp.value }
         else if (k === 'port') h.port = +inp.value
+        else if (inp.type === 'checkbox') h[k] = inp.checked // appSync 等布尔勾选
         else h[k] = inp.value
       }))
 

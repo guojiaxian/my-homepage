@@ -463,7 +463,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - 踩坑：`.gv-gauge` 忘写 `position: relative` → `::after` 内圆孔与 `.gv-gval` 数值锚到卡片上漂移；自定义属性过渡必须 `@property` 注册。
 - 顶栏标题防跳（2026-11-10）：激活 tab 的呼吸点 `::before` 曾只加在 `.gv-tab.is-active` 上，导致激活 tab 比非激活宽 15px（103 vs 88），切换时两个标题左右跳。改为 `.gv-tab::before` 常驻占位 + 非激活 `visibility:hidden`；两 tab 固定同宽，实测 x 坐标切换前后一致。
 - 页面宽度防抖：`html, body { scrollbar-gutter: stable }`（主站 `src/style.css` 同步加），避免应用列表（长页）与监控（短页）切换时滚动条出现/消失造成整页横向位移。
-- **与主站的同步状态（2026-11-10）**：目录历史对比默认全选 + 全选/清空（`state.seededDirs`、`#gv-cmp-all/#gv-cmp-none`）**已同步**；主站主机设置改紧凑列表 + `MonitorHostEdit.vue` 双通道后，此端点的设置弹窗**未同步**（仍为主机平铺表单版）——如需对齐，照 `glass-v2.js` 既有「渲染函数 + addEventListener」模式移植，勿引 Vue。
+- **与主站的同步状态（2026-11-10；2026-11-11 更新）**：目录历史对比默认全选 + 全选/清空（`state.seededDirs`、`#gv-cmp-all/#gv-cmp-none`）**已同步**；主站主机设置改紧凑列表 + `MonitorHostEdit.vue` 双通道后，此端点的设置弹窗**布局未跟进**（仍为主机平铺表单版），但功能层面已在 SSH 主机表单补上「同步到应用中心」勾选（`data-k="appSync"`，见 §18.3）——如需布局对齐，照 `glass-v2.js` 既有「渲染函数 + addEventListener」模式移植，勿引 Vue。
 
 ### 8.7 监控中心与 Web 终端（并入主站 SPA，2026-11-10；首版为独立 /monitor/ 页，同日按用户反馈合并）
 
@@ -943,12 +943,16 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 3. 设置面板 POST /api/config 会丢弃顶层 `order` 字段（§6.4 文档化功能）——改与 `$comment` 同款保留机制：请求未携带时兜底保留、显式 `order: []` 可删除、GET /api/config 现在返回 order。
 4. 登录 Set-Cookie 回退值 `|| 12` 与会话 TTL 8760h 不一致 → 统一用 `sessionTtlMs()`。
 
-### 18.3 已知空缺 / 优化候选（未动手，待需求驱动）
+### 18.3 优化项执行（2026-11-11 第二轮，全部已落地并回归）
 
-- **远程主机容器归属未实现**：采集 awk 收集了 `cg[]` 但 END 块的 PRC 行未携带，远程进程 `p.cg` 恒空——远程 docker 容器目录/容器计数不生效（当前三台远程机无此需求；支持时需改 awk 输出 + parseRemoteOutput 回填）。
-- **删除主机后历史文件残留**：`cleanHistoryRetention` 只遍历内存 history keys，已删主机的 `data/monitor/history/<id>/` 永不清理；可改为遍历 HISTORY_DIR。
-- **离线期间分钟点缺失**：`pushHistoryOffline` 不做分钟滚动，JSONL 离线段有空洞（图表 connectNulls=false 表现为断线，可接受）。
-- **JSON 解析异常统一 500**：login/provision/password 与 POST /api/config 的 `JSON.parse` 抛错走 route 兜底 500（语义应为 400），影响仅排障体验。
-- **onSaved 时钟基准**：保存后轮询用客户端 `savedAt` 与服务端 `probedAt` 比较，浏览器时钟偏差时靠 40 次上限兜底；POST /api/config 返回服务端时间戳可彻底对齐（「立刻同步」已如此）。
-- **glass-v2 设置弹窗未同步**：主站监控设置已改紧凑列表 + 双向同步勾选，glass-v2 仍是平铺表单版（§8.8 已注明）。
+- **远程主机容器归属（已实现）**：采集 awk END 块 PRC 行追加第 8 列 `cg`（docker cgroup id），shell 段新增 `===DOCKER===`（`docker ps -a --format`，无 docker 静默跳过）；`parseRemoteOutput` 回填 `p.cg` 并解析容器表（id12→{name,image,dir}，compose working_dir 同本机口径）；`buildSnapshot` 改用主机感知映射 `dmap = counters.docker ?? 全局 dockerMap`（本机采集体无 docker 字段 → 仍走中心表）。**生效范围**：SSH 拉取主机（aliyun）下一轮 20s 探测即生效（实测新脚本对 aliyun 实跑输出结构完整）；agent 主机需重装采集器才上报 cg/容器表——**当前三台远程机均无容器（netwatch 无 docker、aliyun/1103 有 docker 0 容器），暂不重装**，旧 agent 7 列 PRC 向后兼容（cg 留空）。
+- **历史清理改为遍历磁盘**（`cleanHistoryRetention`）：`readdirSync(HISTORY_DIR)` 逐主机清过期 `.jsonl`，清空的目录 `rmdirSync`，已删主机残留随之按保留期清除；`applyCollectors` 同时释放已删主机的内存态（history/hostState/procDetailCache）。
+- **离线分钟点补齐**：抽出 `rollMinute(h, upToTs, hostId)` 共享助手（正常路径聚合窗口均值，语义与原实现一致；空窗口产出全 null 分钟点），`pushHistory`/`pushHistoryOffline` 共用——离线期间 JSONL 保持连续（图表断线可见而非整段缺失）；**>24h 空洞直接快进**不批量补 null。
+- **坏 JSON 统一 400**：monitor-server 新增 `readJsonBody(req, res)`，login/provision/password/config PUT 四个写路由不再把解析错误抛成 500（settings-server 外层 catch 本就返 400，无需改）。
+- **保存轮询改用服务端时钟**：POST /api/config 响应增加 `serverTime`，SettingsPanel `savedAt = data.serverTime ?? Date.now()`——与 probedAt（服务端 ISO）比较不再受浏览器时钟偏差影响。
+- **glass-v2 补 appSync 勾选**：SSH 主机表单「采集方式」下新增「同步到应用中心」（`data-k="appSync"`，checkbox 分支 `h[k] = inp.checked`），保存随 hosts 原样 PUT、`normalizeHost` 白名单落盘；布局仍为平铺表单版（紧凑列表重构继续搁置，见 §8.8）。
 - 主包 gzip 68.9KB（较 §2 基线 56KB 增长来自 SyncCheckPanel/批量终端等新增组件），仍在轻量范围内。
+
+### 18.4 仍搁置的（低价值/需需求驱动）
+
+- glass-v2 设置弹窗的**紧凑列表重构**（与主站 MonitorSettings/MonitorHostEdit 完全对齐）——功能层面已补齐 appSync，纯布局 parity 留待该端点有实际使用诉求时再做。

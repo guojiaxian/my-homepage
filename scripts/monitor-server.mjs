@@ -561,7 +561,7 @@ FILENAME ~ /\/proc\/[0-9]+\/cgroup$/ {
 }
 END {
   print "===PROCS==="
-  for (p in ut) print "PRC " p " " (rss[p] + 0) " " (thr[p] + 0) " " (ior[p] + 0) " " (iow[p] + 0) " " ut[p] " " st[p]
+  for (p in ut) print "PRC " p " " (rss[p] + 0) " " (thr[p] + 0) " " (ior[p] + 0) " " (iow[p] + 0) " " ut[p] " " st[p] " " cg[p]
 }
 ' /proc/stat /proc/loadavg /proc/uptime /proc/meminfo /proc/net/dev /proc/diskstats /proc/mounts /proc/[0-9]*/stat /proc/[0-9]*/status /proc/[0-9]*/io /proc/[0-9]*/cgroup 2>/dev/null
 # cmdline（第二遍 awk，RS='\0' 拼参数；用于解释器脚本的目录归属与进程名）
@@ -590,6 +590,8 @@ echo "===OS==="
 grep -m2 -E '^(NAME|VERSION_ID)=' /etc/os-release 2>/dev/null
 echo "===CPUINFO==="
 grep -m1 -E '^(model name|Hardware|Model)[[:space:]]*:' /proc/cpuinfo 2>/dev/null
+echo "===DOCKER==="
+command -v docker >/dev/null 2>&1 && docker ps -a --format '{{.ID}}\\t{{.Names}}\\t{{.Image}}\\t{{.Labels}}' 2>/dev/null
 echo "===END==="
 `;
 const REMOTE_PROBE_SCRIPT = REMOTE_PROBE_AWK + REMOTE_PROBE_SHELL;
@@ -654,7 +656,7 @@ async function sshProbe(host) {
 /* ============================ 远程输出解析 → 计数器 ============================ */
 const REAL_FS = new Set(['ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'f2fs', 'vfat', 'fuseblk', 'jfs', 'reiserfs']);
 function parseRemoteOutput(text) {
-  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], osName: '', cpuModel: '' };
+  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], osName: '', cpuModel: '', docker: new Map() };
   let section = 'MAIN';
   for (const line of text.split('\n')) {
     const t = line.trim();
@@ -664,6 +666,7 @@ function parseRemoteOutput(text) {
     if (t === '===DF===') { section = 'DF'; continue; }
     if (t === '===OS===') { section = 'OS'; continue; }
     if (t === '===CPUINFO===') { section = 'CPUINFO'; continue; }
+    if (t === '===DOCKER===') { section = 'DOCKER'; continue; }
     if (t === '===END===' || t === '') continue;
     if (section === 'MAIN') {
       const f = t.split(/\s+/);
@@ -676,7 +679,8 @@ function parseRemoteOutput(text) {
       else if (f[0] === 'MNT') c.mnts.push(f.slice(1).join(' '));
     } else if (section === 'PROCS') {
       const f = t.split(/\s+/);
-      if (f[0] === 'PRC') c.procs.set(+f[1], { rssKb: +f[2] || 0, threads: +f[3] || 0, ioR: +f[4] || 0, ioW: +f[5] || 0, ut: +f[6] || 0, st: +f[7] || 0, cwd: '', exe: '', cmd: '', comm: '', fds: 0, cg: '' });
+      // 第 8 列 = docker cgroup id（旧版 agent/SSH 脚本无此列 → cg 留空，向后兼容）
+      if (f[0] === 'PRC') c.procs.set(+f[1], { rssKb: +f[2] || 0, threads: +f[3] || 0, ioR: +f[4] || 0, ioW: +f[5] || 0, ut: +f[6] || 0, st: +f[7] || 0, cwd: '', exe: '', cmd: '', comm: '', fds: 0, cg: String(f[8] || '').slice(0, 64) });
     } else if (section === 'CMD') {
       // 行格式：CMD <pid> <参数串...>（供解释器脚本的目录归属与进程名）
       const f = t.split(/\s+/);
@@ -700,6 +704,17 @@ function parseRemoteOutput(text) {
       if (f[0] === 'Filesystem' || f[0] === '文件系统' || f.length < 7) continue;
       if (!REAL_FS.has(f[1])) continue;
       c.df.push({ fs: f[0], type: f[1], totalKb: +f[2] || 0, usedKb: +f[3] || 0, mnt: f.slice(6).join(' ') });
+    } else if (section === 'DOCKER') {
+      // 行格式：ID \t Names \t Image \t Labels（docker ps -a --format，\t 分隔）
+      const parts = t.split('\t');
+      const id = String(parts[0] || '').slice(0, 12);
+      if (!/^[0-9a-f]{12}$/.test(id)) continue;
+      let dir = '';
+      for (const kv of String(parts.slice(3).join('\t') || '').split(',')) {
+        const eq = kv.indexOf('=');
+        if (eq > 0 && kv.slice(0, eq) === 'com.docker.compose.project.working_dir') { dir = kv.slice(eq + 1); break; }
+      }
+      if (!c.docker.has(id)) c.docker.set(id, { name: parts[1] || id, image: parts[2] || '', dir });
     } else if (section === 'OS') {
       const kv = t.split('=', 2);
       if (kv[0] === 'NAME' && kv[1]) c.osName = kv[1].replace(/"/g, '');
@@ -856,6 +871,8 @@ function cpuFromLines(lines, prevLines) {
 
 function buildSnapshot(hostId, counters, prev, intervalSec, isFirst, dirsCfg) {
   const dirMap = new Map(dirsCfg.map(d => [d.path, d]));
+  // 容器映射按主机取：远程/agent 采集体自带 DOCKER 段（c.docker）；本机采集体无此字段 → 用中心的 dockerMap
+  const dmap = counters.docker instanceof Map ? counters.docker : dockerMap;
   const coreN = Math.max(1, counters.cpuLines.length - 1);
   const cpu = cpuFromLines(counters.cpuLines, prev?.cpuLines);
 
@@ -890,7 +907,7 @@ function buildSnapshot(hostId, counters, prev, intervalSec, isFirst, dirsCfg) {
       const dc = dirMap.get(dirPath);
       groupName = dc.name; groupPath = dc.path; groupSource = dc.source;
     } else if (p.cg) {
-      const info = dockerMap.get(p.cg.slice(0, 12));
+      const info = dmap.get(p.cg.slice(0, 12));
       const dc = info?.dir ? dirMap.get(info.dir) : null;
       if (dc) { groupName = dc.name; groupPath = dc.path; groupSource = dc.source; p._dir = dc.path; }
       else { groupName = `容器 ${info?.name || p.cg.slice(0, 8)}`; groupPath = `docker:${info?.name || p.cg.slice(0, 12)}`; groupSource = 'container'; }
@@ -987,26 +1004,39 @@ function compactPoint(snap) {
   for (const d of snap.dirs || []) dirs[d.path] = { cpu: d.cpuPct, mem: d.memMb, ioR: d.ioReadMbs, ioW: d.ioWriteMbs, thr: d.threads, fds: d.fds, procs: d.procs };
   return { t: snap.t, cpu: snap.cpu.pct, load: snap.cpu.load1, loadN: snap.cpu.loadPerCore, mem: snap.mem.pct, swap: snap.mem.swapPct, disks: snap.disks, dioR: snap.diskIo.readMbs, dioW: snap.diskIo.writeMbs, netI: snap.net.inMbs, netO: snap.net.outMbs, dirs };
 }
+/* 分钟滚动：把 lastMinuteTs 起到 upToTs 之间的每个分钟补齐——正常路径聚合窗口均值，
+   离线/无数据的窗口产出全 null 分钟点（JSONL 保持连续，图表断线可见而非整段缺失）；
+   超过 24h 的空洞（主机长期离线后回归）直接快进，不批量补 null。 */
+function rollMinute(h, upToTs, hostId) {
+  if (!h.lastMinuteTs || upToTs <= h.lastMinuteTs) return;
+  if (upToTs - h.lastMinuteTs > 86_400_000) { h.lastMinuteTs = upToTs; return; }
+  while (h.lastMinuteTs + 60_000 <= upToTs) {
+    const start = h.lastMinuteTs;
+    const window = h.raw.filter(p => p.t >= start && p.t < start + 60_000);
+    const avg = window.length
+      ? avgPoints(window, start)
+      : { t: start, cpu: null, load: null, loadN: null, mem: null, swap: null, disks: [], dioR: null, dioW: null, netI: null, netO: null, dirs: {}, offline: true };
+    h.minute.push(avg);
+    if (h.minute.length > MINUTE_CAP) h.minute.shift();
+    appendJsonl(path.join(HISTORY_DIR, hostId, `${new Date(start).toISOString().slice(0, 10)}.jsonl`), avg);
+    h.lastMinuteTs = start + 60_000;
+  }
+}
 function pushHistory(hostId, snap) {
   const h = histOf(hostId);
   h.raw.push(compactPoint(snap));
   if (h.raw.length > RAW_CAP) h.raw.shift();
   const minuteTs = Math.floor(snap.t / 60_000) * 60_000;
-  if (h.lastMinuteTs && minuteTs !== h.lastMinuteTs) {
-    const window = h.raw.filter(p => p.t >= h.lastMinuteTs && p.t < minuteTs);
-    if (window.length) {
-      const avg = avgPoints(window, h.lastMinuteTs);
-      h.minute.push(avg);
-      if (h.minute.length > MINUTE_CAP) h.minute.shift();
-      appendJsonl(path.join(HISTORY_DIR, hostId, `${new Date(h.lastMinuteTs).toISOString().slice(0, 10)}.jsonl`), avg);
-    }
-  }
-  h.lastMinuteTs = minuteTs;
+  rollMinute(h, minuteTs, hostId);
+  if (!h.lastMinuteTs) h.lastMinuteTs = minuteTs;
 }
 function pushHistoryOffline(hostId, t) {
   const h = histOf(hostId);
   h.raw.push({ t, cpu: null, load: null, loadN: null, mem: null, swap: null, disks: [], dioR: null, dioW: null, netI: null, netO: null, dirs: {}, offline: true });
   if (h.raw.length > RAW_CAP) h.raw.shift();
+  const minuteTs = Math.floor(t / 60_000) * 60_000;
+  rollMinute(h, minuteTs, hostId);
+  if (!h.lastMinuteTs) h.lastMinuteTs = minuteTs;
 }
 function avgPoints(window, t) {
   const out = { t, dirs: {} };
@@ -1050,15 +1080,21 @@ function loadHistoryFromDisk(hostId) {
 }
 function cleanHistoryRetention() {
   const cutoff = Date.now() - (config.collect.retentionDays || 7) * 86_400_000;
-  for (const hostId of history.keys()) {
+  // 遍历磁盘目录而非内存 history keys：已删除主机的残留历史也能按保留期清掉
+  let hostIds;
+  try { hostIds = fs.readdirSync(HISTORY_DIR); } catch { return; }
+  for (const hostId of hostIds) {
     const dir = path.join(HISTORY_DIR, hostId);
-    fs.readdir(dir, (err, files) => {
-      if (err) return;
-      for (const f of files) {
-        const ts = Date.parse(f.replace('.jsonl', 'T00:00:00Z'));
-        if (Number.isFinite(ts) && ts < cutoff) fs.unlink(path.join(dir, f), () => {});
-      }
-    });
+    let files;
+    try { files = fs.readdirSync(dir); } catch { continue; }
+    let removed = 0;
+    for (const f of files) {
+      const ts = Date.parse(f.replace('.jsonl', 'T00:00:00Z'));
+      if (!Number.isFinite(ts) || ts >= cutoff) continue;
+      try { fs.unlinkSync(path.join(dir, f)); removed++; } catch { /* 已删 */ }
+    }
+    try { if (!fs.readdirSync(dir).length) fs.rmdirSync(dir); } catch { /* 非空 */ }
+    if (removed) log('历史清理:', hostId, `删除 ${removed} 个过期文件`);
   }
 }
 
@@ -1164,6 +1200,11 @@ let collectorTimers = [];
 function applyCollectors() {
   for (const t of collectorTimers) clearInterval(t);
   collectorTimers = [];
+  /* 主机被删除后释放其内存态（历史/状态/进程缓存）；磁盘历史由 cleanHistoryRetention 按保留期清掉 */
+  const live = new Set(config.hosts.map(h => h.id));
+  for (const id of [...history.keys()]) if (!live.has(id)) history.delete(id);
+  for (const id of [...hostState.keys()]) if (!live.has(id)) hostState.delete(id);
+  for (const id of [...procDetailCache.keys()]) if (!live.has(id)) procDetailCache.delete(id);
   for (const host of config.hosts) {
     loadHistoryFromDisk(host.id);
     if (host.type === 'local') {
@@ -1491,6 +1532,11 @@ function readBody(req, limit = 64 * 1024) {
     req.on('error', reject);
   });
 }
+/* 解析 JSON 请求体：坏 JSON / 空请求体统一 400（此前抛给 route 兜底成 500，排障语义差） */
+async function readJsonBody(req, res, limit) {
+  try { return JSON.parse((await readBody(req, limit)) || '{}'); }
+  catch { sendJson(res, 400, { error: '请求体不是合法 JSON' }); return null; }
+}
 function guard(req, res) {
   if (['POST', 'PUT', 'DELETE'].includes(req.method) && req.headers['x-requested-with'] !== 'XMLHttpRequest') {
     sendJson(res, 403, { error: 'missing X-Requested-With' });
@@ -1569,7 +1615,8 @@ async function route(req, res) {
 
   if (p === '/api/monitor/login' && req.method === 'POST') {
     if (rateLimited(ip)) { audit('auth_fail', { ip, reason: 'rate_limited' }); return sendJson(res, 429, { error: '尝试过于频繁，请稍后再试' }); }
-    const body = JSON.parse((await readBody(req)) || '{}');
+    const body = await readJsonBody(req, res);
+    if (!body) return;
     if (!verifyPassword(body.password || '', currentPasswordHash())) { recordAuthFail(ip); audit('auth_fail', { ip }); return sendJson(res, 401, { error: '密码错误' }); }
     const token = createSession(ip);
     audit('auth_ok', { ip });
@@ -1599,7 +1646,8 @@ async function route(req, res) {
 
   if (p === '/api/monitor/hosts/provision' && req.method === 'POST') {
     if (!guard(req, res)) return;
-    const body = JSON.parse((await readBody(req)) || '{}');
+    const body = await readJsonBody(req, res);
+    if (!body) return;
     if (!body.host || !body.password) return sendJson(res, 400, { error: '缺少主机信息或密码' });
     try {
       const r = await provisionHost(body.host, String(body.password), ip);
@@ -1612,7 +1660,8 @@ async function route(req, res) {
 
   if (p === '/api/monitor/password' && req.method === 'POST') {
     if (!guard(req, res)) return;
-    const body = JSON.parse((await readBody(req)) || '{}');
+    const body = await readJsonBody(req, res);
+    if (!body) return;
     if (!verifyPassword(body.oldPassword || '', currentPasswordHash())) return sendJson(res, 401, { error: '旧密码错误' });
     if (!body.newPassword) return sendJson(res, 400, { error: '新密码不能为空' });
     writePasswordHash(scryptHash(body.newPassword));
@@ -1638,7 +1687,8 @@ async function route(req, res) {
   }
   if (p === '/api/monitor/config' && req.method === 'PUT') {
     if (!guard(req, res)) return;
-    const body = JSON.parse((await readBody(req)) || '{}');
+    const body = await readJsonBody(req, res);
+    if (!body) return;
     const patch = {};
     if (body.hosts !== undefined) {
       if (!Array.isArray(body.hosts)) return sendJson(res, 400, { error: 'hosts 必须是数组' });
