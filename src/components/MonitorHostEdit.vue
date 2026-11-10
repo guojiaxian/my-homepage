@@ -175,8 +175,8 @@ function onDelete() {
               该主机跟踪目录（目录级资源统计{{ host.type === 'local' ? '；主页登记的应用目录已自动并入' : '；全局目录已自动并入' }}）
             </div>
             <div v-for="d in inheritedDirs" :key="'in-' + d.path" class="dir-row inherited">
-              <span class="d-path">{{ d.path }}</span>
-              <span class="d-src" :class="d.source">{{ d.source === 'homepage' ? '主页登记' : '全局' }}</span>
+              <span class="d-path" :title="d.path">{{ d.source === 'container' ? d.name : d.path }}</span>
+              <span class="d-src" :class="d.source">{{ d.source === 'homepage' ? '主页登记' : d.source === 'container' ? '自动发现' : '全局' }}</span>
             </div>
             <div v-for="(d, di) in host.trackedDirs" :key="d.path" class="dir-row">
               <span class="d-path">{{ d.path }}</span>
@@ -247,6 +247,7 @@ export default { name: 'MonitorHostEdit' }
 .d-src { font-size: 11px; border-radius: 999px; padding: 0 8px; background: var(--purple-soft); color: var(--purple); flex: none; }
 .d-src.homepage { background: var(--accent-soft); color: var(--accent); }
 .d-src.custom { background: var(--amber-soft); color: var(--amber); }
+.d-src.container { background: var(--teal-soft); color: var(--teal); }
 .cred-tip { margin: 10px 0 8px; line-height: 1.6; }
 code { font-family: var(--mono); font-size: 11.5px; background: var(--bg-hover); border-radius: 4px; padding: 0 4px; }
 .mhe-foot { display: flex; align-items: center; gap: 10px; padding: 12px 16px 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }

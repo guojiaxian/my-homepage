@@ -1424,9 +1424,17 @@ async function route(req, res) {
 
   if (p === '/api/monitor/config' && req.method === 'GET') {
     const { auth, ...rest } = config;
-    /* effectiveDirs：只读的生效目录集（全局 + 本机主页登记 + 该主机自有），供设置页展示；
-       PUT 时 normalizeHost 会丢弃该字段，不会写回配置 */
-    const hosts = (rest.hosts || []).map(h => ({ ...h, effectiveDirs: effectiveTrackedDirsFor(h) }));
+    /* effectiveDirs：只读的生效目录集（全局 + 本机主页登记 + 该主机自有 + 运行时自动发现的容器目录），
+       供设置页展示；PUT 时 normalizeHost 会丢弃该字段，不会写回配置 */
+    const hosts = (rest.hosts || []).map(h => {
+      const seen = new Set();
+      const dirs = [...effectiveTrackedDirsFor(h)];
+      for (const d of dirs) seen.add(d.path);
+      for (const d of (stateOf(h.id).lastSnap?.dirs || [])) {
+        if (d.source === 'container' && !seen.has(d.path)) { seen.add(d.path); dirs.push({ path: d.path, name: d.name, source: 'container' }); }
+      }
+      return { ...h, effectiveDirs: dirs };
+    });
     return sendJson(res, 200, { ...rest, hosts, hasPassword: !!auth?.passwordHash });
   }
   if (p === '/api/monitor/config' && req.method === 'PUT') {
