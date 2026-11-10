@@ -492,3 +492,41 @@ code { font-family: var(--gv-mono); font-size: 11.5px; background: var(--gv-pane
 /* 终端全窗口 */
 .gv-term-drawer.is-full { inset: 0; width: 100vw; height: 100vh; border-left: 0; }
 .gv-term-drawer.is-full #gv-term-container { border-radius: 0; }
+
+/* ===== 批量终端 ===== */
+.gv-bt-mask { position: fixed; inset: 0; z-index: 86; background: rgba(4, 8, 18, 0.55); backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.gv-bt { position: fixed; z-index: 87; inset: 20px 12px; width: calc(100vw - 24px); height: calc(100vh - 40px);
+  background: var(--gv-panel-strong); border: 1px solid var(--gv-hairline-strong); border-radius: 16px;
+  backdrop-filter: blur(var(--gv-blur)) saturate(160%); -webkit-backdrop-filter: blur(var(--gv-blur)) saturate(160%);
+  box-shadow: var(--gv-shadow); display: flex; flex-direction: column; overflow: hidden; }
+.gv-bt.is-full { inset: 0; width: 100vw; height: 100vh; border-radius: 0; }
+.gv-bt-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--gv-hairline); flex-wrap: wrap; }
+.gv-bt-title { font-weight: 600; }
+.gv-bt-mode { font-size: 12px; color: var(--gv-accent); background: var(--gv-accent-soft); border-radius: 999px; padding: 1px 10px; }
+.gv-bt-mode.solo { color: var(--gv-amber); background: color-mix(in srgb, var(--gv-amber) 16%, transparent); }
+.gv-bt-panes { flex: 1; display: grid; gap: 8px; padding: 8px; min-height: 0; }
+.gv-bt-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--gv-hairline); border-radius: 10px; overflow: hidden; background: #0d1117; cursor: text; }
+.gv-bt-pane.solo { border-color: var(--gv-amber); box-shadow: 0 0 0 1px var(--gv-amber); }
+.gv-bt-pane-head { display: flex; align-items: center; gap: 8px; padding: 5px 10px; background: #161b22; border-bottom: 1px solid #30363d; flex: none; }
+.gv-bt-pane-name { font-size: 12px; font-weight: 600; color: #e6edf3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.gv-bt-pane-status { font-size: 11px; color: #8b949e; }
+.gv-bt-pane-status.ok { color: #3fb950; }
+.gv-bt-pane-status.bad { color: #f85149; }
+.gv-bt-pane-term { flex: 1; padding: 4px 6px; min-height: 0; }
+.gv-bt-pane-term .xterm { height: 100%; }
+.gv-bt-bar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--gv-hairline); }
+.gv-bt-prompt { font-family: var(--gv-mono); font-size: 12.5px; font-weight: 600; color: var(--gv-accent); flex: none; }
+.gv-bt-prompt.solo { color: var(--gv-amber); }
+.gv-bt-bar input { flex: 1; font: inherit; font-family: var(--gv-mono); font-size: 13px; color: var(--gv-text); background: var(--gv-panel); border: 1px solid var(--gv-hairline-strong); border-radius: 8px; padding: 7px 12px; outline: none; }
+.gv-bt-bar input:focus { border-color: var(--gv-accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--gv-accent) 18%, transparent); }
+.gv-bt-sent { font-size: 12px; color: var(--gv-green); flex: none; }
+.gv-bt-picker { position: fixed; inset: 0; z-index: 88; background: rgba(4, 8, 18, 0.55); display: flex; align-items: center; justify-content: center; backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px); }
+.gv-bt-picker-box { width: 460px; max-width: calc(100vw - 32px); background: rgba(15, 24, 42, 0.94); border: 1px solid var(--gv-hairline-strong); border-radius: 14px; padding: 16px 18px; }
+html[data-theme='light'] .gv-bt-picker-box { background: rgba(244, 248, 254, 0.96); }
+.gv-bt-picker-list { display: flex; flex-direction: column; gap: 6px; max-height: 320px; overflow: auto; }
+.gv-bt-picker-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border: 1px solid var(--gv-hairline); border-radius: 10px; cursor: pointer; font-size: 13.5px; color: var(--gv-text); }
+.gv-bt-picker-row.on { border-color: var(--gv-accent); background: var(--gv-accent-soft); }
+.gv-bt-picker-row.dis { opacity: 0.55; }
+.gv-bt-picker-row input { accent-color: var(--gv-accent); }
+@media (max-width: 900px) { .gv-bt-panes { grid-template-columns: 1fr !important; } }
+@media (prefers-reduced-motion: reduce) { .gv-bt-pane, .gv-minibtn { transition: none !important; } }

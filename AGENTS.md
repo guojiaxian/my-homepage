@@ -426,6 +426,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **详情布局与按钮体系（2026-11-10 按用户反馈重做）**：详情页 = 4 趋势图一行 → 目录占比**全宽**（分区用量图已按用户要求删除，分区占用保留在主机卡磁盘圆环）→ 目录历史对比 → 进程明细；**无跟踪目录的主机**（netwatch/aliyun/113）目录占比与对比盒整体收起、显示一行占位指引（守卫 elDirs/elCmp 为 null 的 echarts.init 崩溃）。按钮统一**软胶囊两档**（强调蓝 accent-soft / 中性灰 bg-hover），去 ⌨/✕ emoji；时间窗为分段控件（bg-hover 槽 + 白色浮起选中）；markLine 标签 `position:'insideEndTop'` 防右缘裁剪。主机卡圆环根因：`@property --v` 必须 `inherits: true`（见踩坑 #19）。
 
+**批量终端（2026-11-10）**：`MonitorBatchTerm.vue`——监控工具栏「批量终端」→ 主机多选器（仅 credReady 主机，**最多 6 台**）→ 多窗格并排；**命令栏一条输入广播到全部窗格**（`text+\r` 逐 WS 下发），点击某窗格进入**单机交互**（密码/交互式提示，命令栏同步切单机语义），「返回广播」切回；布局规则：≤3 台一行并排、≥4 台两行×3 列（`gridTemplateColumns` 动态）；支持全屏切换、每窗格独立重连/状态点。每窗格即一条普通 WS 会话（走既有网关，审计天然覆盖，注意 `maxSessionsPerHost` 默认 2 的并发上限）。glass-v2 同款（vanilla 实现，xterm 用 vendor 全局 `Terminal`/`FitAddon.FitAddon`）。
+
 **Agent 推送模式（2026-11-10）**：`hosts[].mode: 'agent'` 切换——目标机常驻零依赖 sh agent（采集代码与 SSH 探测**同源**，指标口径一致），每 20s `curl POST /api/monitor/agent/push`（X-Agent-Token 鉴权，token 存 credentials.json agents 段，CLI/凭据库 fs.watch 热同步）；中心复用 parseRemoteOutput→buildSnapshot 管线，**监控零 SSH 连接**（终端仍 SSH）；推送断流 >70s 看门狗判离线。一键安装：`GET /api/monitor/agent/install.sh?token=`（token 门禁）返回自带采集器/systemd 单元的幂等安装脚本（无 systemd 兜底 nohup+cron）；设置页主机弹窗「采集方式=Agent 推送」可生成/复制命令，CLI `--agent-install-cmd <hostId>` 同效。适用内网可达中心的机器；**公网不可内连的主机（如阿里云）保持 SSH 拉取模式**（中心 20s 短连接外连采集，即当前定制方案）。netwatch 已实测切换（推送驱动/掉线告警/恢复/终端不受影响）；目标机单元名 `my-homepage-agent.service`，push URL 走 nginx `/api/monitor/agent/*`（8301 仅回环）。设置页主机弹窗含「采集方式」下拉与安装命令生成/复制；CLI `--agent-install-cmd <hostId>` 同效。
 
 ### 8.8 毛玻璃 v2 对比端点（`/glass-v2/`，2026-11-10，unslop skill 产出）

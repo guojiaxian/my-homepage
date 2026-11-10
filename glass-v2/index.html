@@ -149,6 +149,7 @@
           <span class="gv-sub">内网蓝 / 公网橙 · 点击卡片展开详情</span>
           <span class="gv-grow"></span>
           <span class="gv-sub gv-num" id="gv-m-updated"></span>
+          <button type="button" class="gv-minibtn" id="gv-m-open-batch">批量终端</button>
           <button type="button" class="gv-minibtn" id="gv-m-open-settings">⚙ 监控设置</button>
         </div>
 
@@ -243,6 +244,37 @@
       <button type="button" class="gv-minibtn" id="gv-term-close">✕ 关闭</button>
     </div>
     <div id="gv-term-container"></div>
+  </div>
+
+  <!-- 批量终端 -->
+  <div class="gv-bt-mask" id="gv-bt" hidden>
+    <div class="gv-bt" id="gv-bt-box">
+      <div class="gv-bt-head">
+        <span class="gv-bt-title" id="gv-bt-title">批量终端</span>
+        <span class="gv-bt-mode" id="gv-bt-mode"></span>
+        <span class="gv-grow"></span>
+        <button type="button" class="gv-minibtn" id="gv-bt-full">全屏</button>
+        <button type="button" class="gv-minibtn" id="gv-bt-close">✕ 关闭</button>
+      </div>
+      <div class="gv-bt-panes" id="gv-bt-panes"></div>
+      <div class="gv-bt-bar">
+        <span class="gv-bt-prompt" id="gv-bt-prompt">广播 ▸</span>
+        <input type="text" id="gv-bt-input" placeholder="输入命令，回车同时下发到全部主机…" autocomplete="off" spellcheck="false" />
+        <button type="button" class="gv-minibtn" id="gv-bt-send">下发</button>
+        <span class="gv-bt-sent" id="gv-bt-sent"></span>
+      </div>
+    </div>
+  </div>
+  <div class="gv-bt-picker" id="gv-bt-picker" hidden>
+    <div class="gv-bt-picker-box">
+      <div class="gv-bt-title" style="margin-bottom:10px">批量终端 · 选择主机 <span class="gv-sub">最多 6 台</span></div>
+      <div class="gv-bt-picker-list" id="gv-bt-picker-list"></div>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:12px">
+        <span class="gv-sub" id="gv-bt-pick-n">已选 0/6</span><span class="gv-grow"></span>
+        <button type="button" class="gv-minibtn" id="gv-bt-pick-cancel">取消</button>
+        <button type="button" class="gv-minibtn" id="gv-bt-pick-ok" style="color:var(--gv-accent);border-color:var(--gv-accent)">打开批量终端</button>
+      </div>
+    </div>
   </div>
 
   <!-- 监控设置 -->

@@ -1165,6 +1165,160 @@
       if (state.detailHost) loadDetail(true)
     }
 
+
+  const bt = {
+    open: false, full: false, solo: null,
+    panes: [], // {id,name,el,term,fit,ws,statusEl}
+    picked: new Set(),
+  }
+  const $b = (id) => document.getElementById(id)
+
+  function openPicker() {
+    const list = $b('gv-bt-picker-list')
+    bt.picked.clear()
+    const hosts = (state.summary?.hosts || []).filter((h) => h.credReady)
+    list.innerHTML = hosts.length
+      ? hosts.map((h) => `<label class="gv-bt-picker-row" data-id="${esc(h.id)}">
+          <input type="checkbox" data-id="${esc(h.id)}" />
+          <span>${esc(h.name)}</span>
+          <span class="gv-sub" style="margin-left:auto">${esc(h.address || '')} · ${h.online ? '在线' : '离线'}</span>
+        </label>`).join('')
+      : '<p class="gv-sub" style="padding:10px">没有可用主机（需已配置凭据）</p>'
+    $$('input[data-id]', list).forEach((cb) => cb.addEventListener('change', () => {
+      const id = cb.dataset.id
+      if (cb.checked) {
+        if (bt.picked.size >= 6) { cb.checked = false; return }
+        bt.picked.add(id)
+      } else bt.picked.delete(id)
+      cb.closest('.gv-bt-picker-row').classList.toggle('on', cb.checked)
+      $b('gv-bt-pick-n').textContent = `已选 ${bt.picked.size}/6`
+      $b('gv-bt-pick-ok').style.opacity = bt.picked.size ? '1' : '0.5'
+    }))
+    $b('gv-bt-picker').hidden = false
+  }
+
+  async function openBatch() {
+    const hosts = (state.summary?.hosts || []).filter((h) => bt.picked.has(h.id))
+    $b('gv-bt-picker').hidden = true
+    const panesEl = $b('gv-bt-panes')
+    const n = hosts.length
+    const cols = n >= 4 ? 3 : Math.max(1, n)
+    panesEl.style.gridTemplateColumns = `repeat(${cols}, minmax(0, 1fr))`
+    panesEl.innerHTML = hosts.map((h) => `
+      <div class="gv-bt-pane" data-id="${esc(h.id)}">
+        <div class="gv-bt-pane-head">
+          <span class="pane-dot" style="width:8px;height:8px;border-radius:50%;background:#8b949e"></span>
+          <span class="gv-bt-pane-name">${esc(h.name)}</span>
+          <span class="gv-bt-pane-status">连接中…</span>
+          <span class="gv-grow"></span>
+          <button type="button" class="gv-minibtn" data-reconnect="${esc(h.id)}" style="font-size:11px;padding:1px 8px">重连</button>
+        </div>
+        <div class="gv-bt-pane-term"></div>
+      </div>`).join('')
+    bt.open = true
+    bt.solo = null
+    bt.panes = []
+    $b('gv-bt').hidden = false
+    updateMode()
+    await new Promise((r) => setTimeout(r, 60))
+    for (const h of hosts) connectPane(h)
+  }
+
+  function setStatusPane(pane, txt, cls) {
+    pane.el.querySelector('.gv-bt-pane-status').textContent = txt
+    pane.el.querySelector('.gv-bt-pane-status').className = 'gv-bt-pane-status ' + (cls || '')
+    pane.el.querySelector('.pane-dot').style.background = cls === 'ok' ? 'var(--gv-green)' : cls === 'bad' ? 'var(--gv-red)' : '#8b949e'
+  }
+
+  function connectPane(h) {
+    const el = $b('gv-bt-panes').querySelector(`.gv-bt-pane[data-id="${CSS.escape(h.id)}"]`)
+    const pane = { id: h.id, name: h.name, el, term: null, fit: null, ws: null }
+    bt.panes.push(pane)
+    const term = new Terminal({
+      fontFamily: "'Cascadia Code', Menlo, Consolas, monospace",
+      fontSize: Math.max(11, Math.floor(13.5 - (bt.panes.length >= 4 ? 2 : 0))),
+      theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#4d9fff', selectionBackground: '#264f78' },
+      cursorBlink: !reducedMotionGlobal(), scrollback: 3000,
+    })
+    const fit = new FitAddon.FitAddon()
+    term.loadAddon(fit)
+    term.open(el.querySelector('.gv-bt-pane-term'))
+    fit.fit()
+    pane.term = term; pane.fit = fit
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+    const ws = new WebSocket(`${proto}://${location.host}/api/terminal?host=${encodeURIComponent(h.id)}&cols=${term.cols}&rows=${term.rows}`)
+    pane.ws = ws
+    ws.binaryType = 'arraybuffer'
+    ws.onopen = () => setStatusPane(pane, '已连接', 'ok')
+    ws.onmessage = (ev) => {
+      if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return }
+      try { const m = JSON.parse(ev.data); if (m.type === 'error') setStatusPane(pane, '错误：' + m.message, 'bad') } catch { /* 忽略 */ }
+    }
+    ws.onclose = (ev) => { if (pane.ws === ws) setStatusPane(pane, ev.reason ? `断开（${ev.reason}）` : '断开', 'bad') }
+    ws.onerror = () => setStatusPane(pane, '连接失败', 'bad')
+    term.onData((d) => { if (ws.readyState === 1) ws.send(d) })
+    term.onResize(({ cols: cc, rows: rr }) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols: cc, rows: rr })) })
+    el.querySelector('[data-reconnect]').addEventListener('click', (e) => { e.stopPropagation(); connectPane(h) })
+  }
+
+  function reducedMotionGlobal() { return matchMedia('(prefers-reduced-motion: reduce)').matches }
+
+  function updateMode() {
+    $b('gv-bt-mode').textContent = bt.solo ? `单机输入：${bt.solo.name}` : `广播：输入将下发到全部 ${bt.panes.length} 台`
+    $b('gv-bt-mode').classList.toggle('solo', !!bt.solo)
+    $b('gv-bt-prompt').textContent = bt.solo ? '单机 ▸' : '广播 ▸'
+    $b('gv-bt-prompt').classList.toggle('solo', !!bt.solo)
+  }
+
+  function sendBar() {
+    const text = $b('gv-bt-input').value
+    if (!text.trim()) return
+    const targets = bt.solo ? [bt.solo] : bt.panes
+    let n = 0
+    for (const pane of targets) if (pane.ws && pane.ws.readyState === 1) { pane.ws.send(text + '\r'); n++ }
+    $b('gv-bt-input').value = ''
+    $b('gv-bt-sent').textContent = bt.solo ? `已下发到 ${n} 台（单机：${bt.solo.name}）` : `已下发到 ${n} 台`
+  }
+
+  function closeBatch() {
+    for (const pane of bt.panes) { try { pane.ws && pane.ws.close() } catch {} try { pane.term && pane.term.dispose() } catch {} }
+    bt.panes = []; bt.open = false; bt.solo = null
+    $b('gv-bt-panes').innerHTML = ''
+    $b('gv-bt').hidden = true
+    $b('gv-bt-sent').textContent = ''
+  }
+
+  function refitAll() { for (const pane of bt.panes) { try { pane.fit && pane.fit.fit() } catch {} } }
+
+  $b('gv-m-open-batch').addEventListener('click', openPicker)
+  $b('gv-bt-pick-cancel').addEventListener('click', () => { $b('gv-bt-picker').hidden = true })
+  $b('gv-bt-pick-ok').addEventListener('click', openBatch)
+  $b('gv-bt-close').addEventListener('click', closeBatch)
+  $b('gv-bt-send').addEventListener('click', sendBar)
+  $b('gv-bt-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendBar() })
+  $b('gv-bt-full').addEventListener('click', () => {
+    bt.full = $b('gv-bt-box').classList.toggle('is-full')
+    $b('gv-bt-full').textContent = bt.full ? '还原窗口' : '全屏'
+    setTimeout(refitAll, 60); setTimeout(refitAll, 180)
+  })
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !bt.open) return
+    if (bt.full) { e.preventDefault(); e.stopPropagation(); $b('gv-bt-full').click() }
+  }, true)
+  window.addEventListener('resize', () => { if (bt.open) refitAll() })
+  // 窗格点击 → 单机交互
+  $b('gv-bt-panes').addEventListener('click', (e) => {
+    if (e.target.closest('button')) return
+    const el = e.target.closest('.gv-bt-pane')
+    if (!el) return
+    const pane = bt.panes.find((x) => x.id === el.dataset.id)
+    if (!pane) return
+    bt.solo = pane
+    pane.term && pane.term.focus()
+    updateMode()
+  })
+  $b('gv-bt-input').addEventListener('focus', () => { if (bt.solo) { bt.solo = null; updateMode() } })
+
     return {
       activate() { if (!booted) boot(); else { startPoll(); refreshSummary() } },
       boot, onThemeChange, showLogin,
