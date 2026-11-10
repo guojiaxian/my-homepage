@@ -114,7 +114,7 @@ function onDelete() {
           <h2>{{ host.type === 'local' ? '本机' : 'SSH 远程' }} · {{ host.name || host.id }}</h2>
           <code>{{ host.id }}</code>
           <span class="grow" />
-          <button class="mini-btn" @click="emit('close')">✕</button>
+          <button class="icon-btn" title="关闭" @click="emit('close')">✕</button>
         </div>
         <div class="mhe-body">
           <div class="form-grid">
@@ -237,12 +237,12 @@ export default { name: 'MonitorHostEdit' }
 <style scoped>
 .grow { flex: 1; }
 .sub { color: var(--text-2); font-size: 12px; }
-.mhe-mask { position: fixed; inset: 0; background: rgb(16 24 40 / 0.45); z-index: 80; display: flex; align-items: flex-start; justify-content: center; padding: 60px 16px; overflow: auto; }
-.mhe { width: 560px; max-width: 100%; background: var(--bg-soft); border-radius: 14px; box-shadow: var(--shadow-hover); border: 1px solid var(--border); }
-.mhe-head { display: flex; align-items: center; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--border); }
+.mhe-mask { position: fixed; inset: 0; background: rgb(0 0 0 / 0.45); backdrop-filter: blur(3px); z-index: 80; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.mhe { width: 560px; max-width: 100%; max-height: 90vh; display: flex; flex-direction: column; background: var(--bg); border-radius: 14px; box-shadow: var(--shadow-hover); border: 1px solid var(--border); }
+.mhe-head { display: flex; align-items: center; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--border); flex: none; }
 .mhe-head h2 { margin: 0; font-size: 15px; }
 .mhe-head code { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); background: var(--bg-hover); border-radius: 4px; padding: 1px 6px; }
-.mhe-body { padding: 14px 16px 6px; max-height: calc(100vh - 260px); overflow: auto; }
+.mhe-body { padding: 14px 16px 6px; flex: 1 1 auto; min-height: 0; overflow: auto; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
 .fitem { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
 .fitem span { font-size: 12px; color: var(--text-2); }
