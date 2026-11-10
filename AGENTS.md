@@ -1,7 +1,7 @@
 # AGENTS.md · my-homepage 项目交接记忆
 
 > 面向接手本项目的 AI Agent / 开发者：读完这一份即可上手，无需再翻聊天记录。
-> 最后更新：2026-11-10 · 文档随代码演进，改功能时请同步更新本文。
+> 最后更新：2026-11-10 · 文档随代码演进，改功能时请同步更新本文；本轮新增的 UI/图表/目录设置记忆见 §16。
 
 ---
 
@@ -819,3 +819,36 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - ⚠️ 改动前端后必须 `./deploy.sh`；只改配置/数据则 `npm run probe` 即可；改 `monitor-server.mjs` 后 `systemctl restart my-homepage-monitor`（改 `monitor.config.json` 不用，热加载）。
 - ⚠️ 本项目已纳入 git（origin `github.com:guojiaxian/my-homepage`），改完请 commit/push，保持主页「同步」列干净。
 - ⚠️ 本机 nginx 80 端口还承载其他历史代理路径，改 nginx 前务必 `nginx -t` 并保留 `.bak` 备份；`/monitor/`、`/api/monitor/`、`/api/terminal` 与其他独立页面一样**两处 server 块都要配**。
+
+---
+
+## 16. 2026-11-10 会话增量（UI / 图表 / 目录设置）
+
+> 本节记录本轮用户反馈驱动的改动与决策，作为后续接手者的「最近上下文」。更细的实现说明见 §8。
+
+### 16.1 用户明确偏好（按原话）
+
+- **不要 85% 参考线**：趋势图不再画 `markLine` 阈值虚线（阈值仍用于告警/设置）。
+- **纵轴要自适应且有单位**：`scale:true`，不再固定 0–100；网络/磁盘轴名标 `Mbps` / `MB/s`，百分比轴刻度带 `%`。
+- **不要负载、Swap**：CPU 图只保留 CPU%，内存图只保留内存%，删除左右双轴与两条辅助曲线。
+- **要解释颜色/轴**：每图显示图例；图例名带单位；CPU 图头显示「当前 X% · 峰值 Y%」；tooltip 数值带单位；资源趋势标题旁注明「曲线颜色见各图图例 · 纵轴按所选时段的峰值自适应」。
+- **主机副标题格式**：`N核 CPU型号 · 内存GB · 磁盘TB/GB · 操作系统`（本机 `32核 7390 · 30GB · 0.9TB · Kylin V10`）。
+- **表头排序时列位置不能动**：排序箭头固定占位 11px（`.sort-arrow`），实测切换列 0 位移。
+- **黑色方格要删**：目录占比图容器项的 `⬛` 后缀已移除（容器仍显示为「容器 xxx」）。
+- **选择控件要好看**：目录指标下拉改胶囊 + 自绘箭头；目录 chip 复选框改 13px 自绘方框。
+- **本机跟踪目录不能空**：设置页要显示自动并入的主页登记目录；全局「跟踪目录」区与每主机目录不是一回事，空时不再显示以免误认为重复。
+- **顶栏/页头一致**：两视图共用 `PageHero`；齿轮常驻并按视图打开对应设置；tab 字重固定；`scrollbar-gutter: stable` 防横向抖动。
+
+### 16.2 实现要点 / 踩坑补充
+
+- **ECharts 单系列图例**：图例直接显示 `CPU %` / `内存 %`；多系列网络/磁盘显示读写方向与单位；`legend` 不可再 `show:false`。
+- **自适应轴的代价**：CPU 轴会随窗口内峰值变化（NetWatch 因 20:50 真实峰值 27.4% 显示 0–30%，当前 3.5% 与目标机 `top` 3.2% 一致）。图头「当前/峰值」是消除「数据不对」误解的关键。
+- **进程表排序**：`PROC_COLS` 统一生成 11 个 th；数字列默认降序、文本列升序，再点切方向；空值始终排最后；默认 CPU% 降序。箭头必须始终占位，否则切换列时表头宽度变化。
+- **effectiveDirs（跟踪目录）**：`GET /api/monitor/config` 为每台主机附加只读 `effectiveDirs`（全局 + 本机主页登记 + 主机自有）；`PUT` 时 `normalizeHost` 白名单会丢弃它，不会写回配置。主机弹窗「自动并入」目录只读展示（主页登记 / 全局 chip），自有目录可增删；添加已并入路径会拦截。全局 `cfg.trackedDirs` 区仅非空时显示，标题「全局自定义目录（对所有主机生效）」。
+- **本机目录少 1 个的原因**：图表/主机卡「10 个目录」= 9 个主页登记 + 1 个自动发现的容器目录 `open-webui`；设置页只列配置目录，所以是 9。
+- **monitor-server.mjs 改动必须重启**：`systemctl restart my-homepage-monitor`（改 `monitor.config.json` 才是热加载）。
+- **验证方式**：Playwright 从 `data/monitor/sessions.json` 注入 `mh_mon` Cookie（只读），轮询页用 `domcontentloaded` + `waitForSelector`；本轮截图脚本在 `/tmp`，项目内保留 `.verify/` 截图（u1–u5、nw-cpu、dirs-ui 等）。
+
+### 16.3 本轮涉及文件
+
+`src/components/MonitorView.vue`（副标题、主机卡）、`MonitorDetail.vue`（图表/排序/选择控件）、`MonitorHostEdit.vue`（生效目录展示）、`MonitorSettings.vue`（全局目录区）、`src/lib/monitor-charts.js`（自适应轴/移除 MarkLine 组件）、`src/components/PageHero.vue`（新增共享页头）、`src/style.css`（tab 字重/滚动条预留）、`glass-v2/assets/glass-v2.css|js|index.html`（同步图表与 tab 防跳）、`scripts/monitor-server.mjs`（effectiveDirs）。
