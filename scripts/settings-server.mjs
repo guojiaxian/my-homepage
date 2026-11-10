@@ -185,7 +185,14 @@ function syncHostsToAppsOnce() {
     const address = String(h.address || '')
     if (!id || !address) continue
     const env = /公网|public/i.test(String(h.group || '')) ? 'public' : 'lan'
-    const idx = list.findIndex((a) => a && a.id === id)
+    /* 配对：优先同 id；id 未见则按地址配对已有远程应用（真实场景应用 id 常与监控主机 id 不同）。
+       monitorSync 应用由方向一回写（跳过防回环）；syncSource==='monitor' 的应用只认 id（不被其他主机地址抢占）。 */
+    let idx = list.findIndex((a) => a && a.id === id)
+    let viaAddress = false
+    if (idx < 0) {
+      const j = list.findIndex((a) => a && a.syncSource !== 'monitor' && a.monitorSync !== true && String(a.host || '') === address && address)
+      if (j >= 0) { idx = j; viaAddress = true }
+    }
     if (idx < 0) {
       list.push({
         id,
@@ -217,7 +224,9 @@ function syncHostsToAppsOnce() {
           a.url = `http://${address}/`
         }
         changed = true
-        console.log('[settings] 已按监控主机信息更新远程应用:', id)
+        console.log(viaAddress
+          ? `[settings] 已按监控主机信息更新远程应用（按地址配对，主机 ${id} → 应用 ${a.id}）`
+          : '[settings] 已按监控主机信息更新远程应用:', a.id)
       }
     }
   }

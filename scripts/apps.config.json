@@ -210,7 +210,8 @@
       "name": "NetWatch 网络监控",
       "description": "单位多出口宽带网络监控系统（部署于内网另一台服务器 10.8.14.200）：面向 12 条联通宽带 × 12 个楼层子网的分流场景，监测出口线路连通性 / 网速并告警，同时覆盖外网视角的官网可达性监控。",
       "gitDir": "/root/network-monitor",
-      "gitKey": "/root/applications/my-homepage/data/monitor/keys/netwatch"
+      "gitKey": "/root/applications/my-homepage/data/monitor/keys/netwatch",
+      "monitorSync": true
     },
     {
       "id": "log-gpt-agent",

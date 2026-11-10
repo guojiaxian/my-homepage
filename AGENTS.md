@@ -887,7 +887,8 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 | ② 监控中心 → 应用中心 | `settings-server.mjs` fs.watch `monitor.config.json`（新增 watcher）+ 启动时 + 自家 POST /api/config 后（自愈陈旧整表保存） | `hosts[].appSync: true`（normalizeHost 白名单放行） | 应用中心同 id 远程应用：`healthUrl/url` 默认 `http://<地址>/`、`env` 按组公网/内网映射、`location=group`、`syncSource:'monitor'`，写盘后自动 `probe --no-fetch` |
 
 同步规则（两侧一致）：
-- **事实源**：勾 `monitorSync` 的应用是共享字段（name/group/address ↔ name/group/env/host）的唯一事实源，只回写 `syncSource==='apps'` 的主机；勾 `appSync` 的主机同理，但应用若同时勾了 `monitorSync` 则跳过回写（防两方向互抢形成回环）。
+- **配对规则（2026-11-11 扩展）**：同 id 优先，id 未见时**按地址配对已有条目**（ssh 主机 `address` ↔ 应用 `host`；`syncSource==='apps'` 的主机不被其他应用地址抢占、`monitorSync`/`syncSource==='monitor'` 的应用不被其他主机地址抢占；一台主机每轮只被第一个 monitorSync 应用占用）。真实场景监控主机 id 与应用 id 常不同（如 network-monitor@10.8.14.200 ↔ netwatch），按地址配对使勾选即可建立关联而不产生重复条目。
+- **事实源**：勾 `monitorSync` 的应用是共享字段（name/group/address ↔ name/group/env/host）的唯一事实源，匹配到（id 或地址）即回写；勾 `appSync` 的主机同理，但应用若同时勾了 `monitorSync` 则跳过回写（防两方向互抢形成回环）。
 - **永不自动删除、也不复活**：取消勾选/删除源条目后，对侧已创建条目保留且不会自动重建（方向一只处理带 monitorSync 的条目，方向二只处理带 appSync 的主机）；要彻底移除先撤勾选，再手工删对侧条目。
 - **自愈**：已同步条目被陈旧面板的整表 PUT/POST 覆盖丢失时，下次本方向触发（配置变更/自家保存/服务重启）自动补齐。
 - **不触碰监控侧配置**：凭据/端口/采集方式/跟踪目录（除创建时按 gitDir 预置）永不被同步覆盖；应用自定义健康接口在地址未变时保留，地址变化才重生成默认值。
@@ -906,6 +907,8 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - 应用中心设置面板：远程应用编辑弹窗底部「同步到监控中心」勾选（title 说明机制与删除语义）；外机/公网列表行加「已同步监控 / 来自监控」徽标；本机应用弹窗显示禁用勾选「监控自动跟踪」。
 - 监控设置：`MonitorHostEdit` SSH 主机「采集方式」下方「同步到应用中心」勾选（草稿/直连两模式均可）；主机行摘要加「来自应用中心 / 同步到应用中心」徽标。
 - glass-v2 未同步此功能（其设置弹窗本就未对齐主站，见 §8.8）。
+- **同步检查面板（2026-11-11）**：设置面板标题栏「同步检查」→ `src/components/SyncCheckPanel.vue`（z-index 66）——实时 GET `/api/monitor/sync-check`（monitor-server 只读计算三段：**已同步配对** pairs（含待对齐 diffs，如「主机名 A→B」，重同步/下次配置变更后对齐）、**同步异常** unpaired（勾选了但找不到同 id/同地址对端）、**可同步候选** candidates（同地址且两侧都没勾））；「强制重同步」POST `/api/monitor/sync-run`（方向一立即重跑 + `utimes` 唤醒方向二，两端点均需会话/CSRF）；候选行「应用为主 / 主机为主」一键配对（前端分别 POST `/api/config` 勾 monitorSync、GET+PUT `/api/monitor/config` 勾 appSync，等价于 UI 手工勾选）。
+- **已建立的真实配对（2026-11-11）**：network-monitor（应用）⇄ netwatch（主机，10.8.14.200），应用为主——主机名已由「NetWatch 服务器」回写为「NetWatch 网络监控」，凭据/agent 模式/跟踪目录未动；study-log-cloud⇄aliyun、log-gpt-agent⇄lan-1103 仍为检查面板候选，可一键配对（自行选择事实源方向）。
 
 ### 17.4 涉及文件与验证
 

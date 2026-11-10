@@ -44,7 +44,7 @@
     },
     {
       "id": "netwatch",
-      "name": "NetWatch 服务器",
+      "name": "NetWatch 网络监控",
       "type": "ssh",
       "group": "内网",
       "mode": "agent",

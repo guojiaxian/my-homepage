@@ -1,5 +1,6 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
+import SyncCheckPanel from './SyncCheckPanel.vue'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -13,6 +14,8 @@ const error = ref('')
 const form = ref({ apps: [], remoteApps: [], page: {} })
 const existingIds = ref(new Set())
 const detectedApps = ref(new Map())
+/* 同步检查弹窗（应用中心 ⇄ 监控中心 配对/异常/候选） */
+const syncOpen = ref(false)
 
 /** 当前正在编辑的条目：null 或 { list: 'apps' | 'remoteApps', index } */
 const editing = ref(null)
@@ -279,7 +282,10 @@ async function save() {
       <div class="settings-panel" role="dialog" aria-label="设置">
         <header class="settings-head">
           <h2>设置</h2>
-          <button class="icon-btn" title="关闭" @click="emit('close')">✕</button>
+          <div class="head-actions">
+            <button class="mini-btn" title="检查应用中心与监控中心的同步状态：已配对 / 异常 / 可配对候选，支持强制重同步与一键配对" @click="syncOpen = true">同步检查</button>
+            <button class="icon-btn" title="关闭" @click="emit('close')">✕</button>
+          </div>
         </header>
 
         <div v-if="loading" class="settings-tip">加载中…</div>
@@ -560,6 +566,9 @@ async function save() {
         </footer>
       </div>
     </div>
+
+    <!-- 应用中心 ⇄ 监控中心 同步检查（嵌套弹窗） -->
+    <SyncCheckPanel :open="syncOpen" @close="syncOpen = false" />
   </Teleport>
 </template>
 
@@ -617,6 +626,12 @@ async function save() {
   gap: 10px;
   padding: 14px 20px;
   border-bottom: 1px solid var(--border);
+}
+
+.head-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .settings-head h2 {

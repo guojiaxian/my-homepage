@@ -204,6 +204,7 @@ function syncAppsToHostsOnce() {
   const appsRaw = JSON.parse(fs.readFileSync(APPS_CONFIG_PATH, 'utf8'));
   const monRaw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
   const hosts = Array.isArray(monRaw.hosts) ? monRaw.hosts : [];
+  const claimed = new Set(); // 一台主机每轮只被第一个 monitorSync 应用占用，避免多应用同址时互相改名
   let changed = false;
   for (const a of (Array.isArray(appsRaw.remoteApps) ? appsRaw.remoteApps : [])) {
     if (!a || a.monitorSync !== true) continue;
@@ -212,7 +213,14 @@ function syncAppsToHostsOnce() {
     if (!address) { try { address = new URL(String(a.healthUrl || '')).hostname; } catch { /* 留空 */ } }
     if (!id || !address || !HOST_ID_RE.test(id)) { log('同步跳过（id 或 host 无效）:', id || '(空)'); continue; }
     const group = a.env === 'public' ? '公网' : '内网';
-    const existing = hosts.find((h) => h && h.id === id);
+    /* 配对：优先同 id；id 未见则按地址配对已有 SSH 主机（真实场景监控主机 id 常与应用 id 不同）。
+       syncSource==='apps' 的主机只认 id（不被其他应用地址抢占）；已被本轮其他应用占用的主机跳过。 */
+    let existing = hosts.find((h) => h && h.id === id);
+    let viaAddress = false;
+    if (!existing) {
+      existing = hosts.find((h) => h && h.type === 'ssh' && h.syncSource !== 'apps' && h.address === address && !claimed.has(h.id));
+      viaAddress = !!existing;
+    }
     if (!existing) {
       const host = {
         id, name: String(a.name || id), type: 'ssh', group,
@@ -224,19 +232,22 @@ function syncAppsToHostsOnce() {
       const gd = String(a.gitDir || '');
       if (path.isAbsolute(gd)) host.trackedDirs.push({ path: path.resolve(gd), name: defaultDirName(gd), source: 'host' });
       hosts.push(host);
+      claimed.add(id);
       changed = true;
       log('已从应用中心同步创建主机:', id, '@', address);
-    } else if (existing.syncSource === 'apps') {
+    } else {
+      claimed.add(existing.id);
       const nextName = String(a.name || id);
       if (existing.name !== nextName || existing.group !== group || existing.address !== address) {
         existing.name = nextName;
         existing.group = group;
         existing.address = address;
         changed = true;
-        log('已按应用中心信息更新主机:', id);
+        log(viaAddress
+          ? `已按应用中心信息更新主机（按地址配对，应用 ${id} → 主机 ${existing.id}）`
+          : '已按应用中心信息更新主机:', existing.id);
       }
     }
-    /* 其他来源（手工添加）的同名主机：不触碰 */
   }
   if (changed) saveConfig({ hosts });
   return changed;
@@ -271,6 +282,75 @@ function makeSyncRetryer(tag, fn) {
   return () => { attempt = 0; clearTimeout(timer); run(); };
 }
 const syncAppsToHosts = makeSyncRetryer('apps→monitor', syncAppsToHostsOnce);
+
+/* ============================ 同步检查（设置页「同步检查」数据源，只读实时计算） ============================
+   配对规则与两个方向的同步函数保持一致：id 精确 → 地址精确（ssh 主机 ↔ remoteApp.host）；
+   syncSource==='apps' 的主机不被其他应用地址抢占，monitorSync / syncSource==='monitor' 的应用不被其他主机地址抢占。 */
+function syncCheckPayload() {
+  let appsRaw = {};
+  try { appsRaw = JSON.parse(fs.readFileSync(APPS_CONFIG_PATH, 'utf8')); } catch { /* 损坏时按空算，重试器会处理写侧 */ }
+  const remoteApps = Array.isArray(appsRaw.remoteApps) ? appsRaw.remoteApps : [];
+  const sshHosts = config.hosts.filter((h) => h.type === 'ssh');
+  const envGroup = (env) => (env === 'public' ? '公网' : '内网');
+  const groupEnv = (g) => (/公网|public/i.test(String(g || '')) ? 'public' : 'lan');
+
+  const pairs = [];
+  const unpairedApps = [];
+  const unpairedHosts = [];
+  const pairedKeys = new Set();   // 'appId|hostId'
+  const pairedHostIds = new Set();
+
+  /* 视角一：勾 monitorSync 的应用（应用为主） */
+  for (const a of remoteApps) {
+    if (!a || a.monitorSync !== true) continue;
+    const addr = String(a.host || '');
+    let h = config.hosts.find((x) => x && x.id === a.id);
+    let via = h ? 'id' : '';
+    if (!h && addr) h = sshHosts.find((x) => x.syncSource !== 'apps' && x.address === addr);
+    if (h) via = via || 'address';
+    if (!h) { unpairedApps.push({ appId: a.id, appName: a.name || a.id, host: addr, reason: '监控中心没有同 id 或同地址的主机（可能对端已删除）' }); continue; }
+    pairedKeys.add(a.id + '|' + h.id);
+    pairedHostIds.add(h.id);
+    const wantName = String(a.name || a.id);
+    const diffs = [];
+    if (h.name !== wantName) diffs.push({ field: '主机名', from: h.name, to: wantName });
+    if (h.group !== envGroup(a.env)) diffs.push({ field: '分组', from: h.group, to: envGroup(a.env) });
+    if (h.address !== addr) diffs.push({ field: '地址', from: h.address, to: addr });
+    pairs.push({ appId: a.id, appName: a.name || a.id, hostId: h.id, hostName: h.name, via, truth: 'app', diffs });
+  }
+
+  /* 视角二：勾 appSync 的主机（主机为主） */
+  for (const h of config.hosts) {
+    if (!h || h.appSync !== true || h.type !== 'ssh') continue;
+    if (pairedHostIds.has(h.id)) continue; // 已按 monitorSync（应用为主）记录，避免同一配对报两遍
+    const addr = String(h.address || '');
+    let a = remoteApps.find((x) => x && x.id === h.id);
+    let via = a ? 'id' : '';
+    if (!a && addr) a = remoteApps.find((x) => x && x.syncSource !== 'monitor' && x.monitorSync !== true && x.host === addr);
+    if (a) via = via || 'address';
+    if (!a) { unpairedHosts.push({ hostId: h.id, hostName: h.name, address: addr, reason: '应用中心没有同 id 或同地址的远程应用（可能对端已删除）' }); continue; }
+    pairedKeys.add(a.id + '|' + h.id);
+    const wantName = String(h.name || h.id);
+    const diffs = [];
+    if (String(a.name || '') !== wantName) diffs.push({ field: '应用名', from: a.name || '', to: wantName });
+    if (String(a.location || '') !== String(h.group || '')) diffs.push({ field: '位置', from: a.location || '', to: String(h.group || '') });
+    if (String(a.env || '') !== groupEnv(h.group)) diffs.push({ field: '部署位置', from: a.env || '', to: groupEnv(h.group) });
+    if (String(a.host || '') !== addr) diffs.push({ field: '主机地址', from: a.host || '', to: addr });
+    pairs.push({ appId: a.id, appName: a.name || a.id, hostId: h.id, hostName: h.name, via, truth: 'host', diffs });
+  }
+
+  /* 候选：地址相同、两侧都没勾（可在设置里一键配对） */
+  const candidates = [];
+  for (const a of remoteApps) {
+    if (!a || a.monitorSync === true) continue;
+    const addr = String(a.host || '');
+    if (!addr) continue;
+    const h = sshHosts.find((x) => x.appSync !== true && x.address === addr && !pairedKeys.has(a.id + '|' + x.id));
+    if (h) candidates.push({ appId: a.id, appName: a.name || a.id, hostId: h.id, hostName: h.name, address: addr });
+  }
+
+  return { serverTime: nowIso(), pairs, unpairedApps, unpairedHosts, candidates };
+}
 
 /* ============================ 密钥库 / 加密 ============================ */
 function ensureSecret() {
@@ -1503,6 +1583,17 @@ async function route(req, res) {
   if (!getSession(req)) return sendJson(res, 401, { error: '未登录或会话已过期' });
 
   if (p === '/api/monitor/summary' && req.method === 'GET') return sendJson(res, 200, summaryPayload());
+
+  if (p === '/api/monitor/sync-check' && req.method === 'GET') return sendJson(res, 200, syncCheckPayload());
+
+  if (p === '/api/monitor/sync-run' && req.method === 'POST') {
+    if (!guard(req, res)) return;
+    syncAppsToHosts(); // 方向一立即重跑（重试器内含并发合并）
+    // 触发方向二：settings-server 监听 monitor.config.json 变更事件，utimes 不改内容仅唤醒其防抖回调
+    try { const st = fs.statSync(CONFIG_PATH); fs.utimesSync(CONFIG_PATH, st.atime, new Date()); } catch { /* 忽略 */ }
+    audit('sync_run', { ip });
+    return sendJson(res, 200, { ok: true });
+  }
 
   if (p === '/api/monitor/hosts/provision' && req.method === 'POST') {
     if (!guard(req, res)) return;
