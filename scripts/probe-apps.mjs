@@ -502,11 +502,13 @@ function buildRemoteGitScript(dir, doFetch) {
     'echo "@repo@ $(git config --get remote.origin.url 2>/dev/null)"',
     'rn=$(git config --get "branch.$b.remote" 2>/dev/null)',
     '[ -z "$rn" ] && rn=origin',
-    'if [ "$FETCH" = 1 ] && [ "$rn" != "." ] && [ -n "$(git config --get remote.$rn.url 2>/dev/null)" ]; then',
+    'if [ "$FETCH" = 0 ]; then',
+    '  echo "@fetch@ skip"',
+    'elif [ "$rn" = "." ] || [ -z "$(git config --get remote.$rn.url 2>/dev/null)" ]; then',
+    '  echo "@fetch@ none"',
+    'else',
     '  git --no-optional-locks -c gc.auto=0 fetch --quiet --no-tags --no-recurse-submodules "$rn" >/dev/null 2>&1',
     '  echo "@fetch@ $?"',
-    'else',
-    '  echo "@fetch@ skip"',
     'fi',
     "git status --porcelain=v1 2>/dev/null | sed 's/^/@st@ /'",
     "git rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null | sed 's/^/@count@ /'",
@@ -541,7 +543,8 @@ function parseRemoteGitOutput(out, now) {
     else if (line.startsWith('@repo@ ')) info.repo = normalizeRepo(line.slice(7).trim())
     else if (line.startsWith('@fetch@ ')) {
       const v = line.slice(8).trim()
-      info.remoteOk = v === 'skip' ? null : v === '0'
+      // none = 仓库未配置远端（与本机 fetchRepo 语义对齐：无需 fetch，视为成功）；skip = 快速探测未 fetch
+      info.remoteOk = v === 'skip' ? null : v === '0' || v === 'none'
     } else if (line.startsWith('@st@ ')) {
       const s = line.slice(5)
       if (s.startsWith('?? ')) info.untracked++
@@ -1074,8 +1077,13 @@ async function runProbe(NO_FETCH) {
     )
   }
   for (const r of results) {
-    // 远程应用没有本地目录：配置了 gitDir 的走外机检查结果，否则不做 git 检查
-    r.git = remoteGitMap.get(r.id) ?? (r.directory ? gitSyncInfo(r.directory, remoteOkMap.get(r.directory) ?? null, now) : null)
+    // 远程应用没有本地目录：配置了 gitDir 的走外机检查结果，否则不做 git 检查。
+    // map 只在 r.remote 时查（id 全局唯一由 sanitize 保证，自动发现的本地条目防御性排除）
+    r.git = r.remote
+      ? (remoteGitMap.get(r.id) ?? null)
+      : r.directory
+        ? gitSyncInfo(r.directory, remoteOkMap.get(r.directory) ?? null, now)
+        : null
     // 配置未填 github 时，用仓库远程地址兜底生成网页链接
     if (!r.github && r.git?.repo?.startsWith('github.com/')) {
       r.github = `https://${r.git.repo}`

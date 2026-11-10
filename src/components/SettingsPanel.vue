@@ -65,6 +65,8 @@ function normalizeEntry(a, isRemote, detected) {
     kinds: [...new Set([...normalizeKinds(a), ...detectedKinds.filter((k) => k !== 'web')])],
     env: a.env === 'lan' || a.env === 'public' ? a.env : (isRemote ? 'public' : 'lan'),
     https: Boolean(a.https),
+    // 双向同步标记：勾选后由 monitor-server / settings-server 自动跨中心同步（仅远程应用有意义）
+    ...(isRemote && a.monitorSync ? { monitorSync: true } : {}),
     languages: asList(a.languages),
     frontend: asList(a.frontend),
     backend: asList(a.backend),
@@ -347,6 +349,8 @@ async function save() {
                   <span class="app-row-meta">{{ rowMeta(a, true) }}</span>
                 </span>
                 <span v-if="!a.id" class="tag">新</span>
+                <span v-else-if="a.monitorSync" class="tag" title="已勾选「同步到监控中心」">已同步监控</span>
+                <span v-else-if="a.syncSource === 'monitor'" class="tag" title="由监控中心同步创建（appSync）">来自监控</span>
                 <span class="app-row-arrow">›</span>
               </button>
             </div>
@@ -376,6 +380,8 @@ async function save() {
                   <span class="app-row-meta">{{ rowMeta(a, true) }}</span>
                 </span>
                 <span v-if="!a.id" class="tag">新</span>
+                <span v-else-if="a.monitorSync" class="tag" title="已勾选「同步到监控中心」">已同步监控</span>
+                <span v-else-if="a.syncSource === 'monitor'" class="tag" title="由监控中心同步创建（appSync）">来自监控</span>
                 <span class="app-row-arrow">›</span>
               </button>
             </div>
@@ -469,6 +475,9 @@ async function save() {
                   <input v-model="editingApp.https" type="checkbox" /> 使用 HTTPS
                 </label>
                 <label class="chk"><input v-model="editingApp.exclude" type="checkbox" /> 在主页隐藏（exclude）</label>
+                <label class="chk" title="本机应用的目录与端口已自动纳入监控中心跟踪，无需手动同步">
+                  <input type="checkbox" checked disabled /> 监控自动跟踪
+                </label>
               </span>
             </div>
           </template>
@@ -500,7 +509,7 @@ async function save() {
             </div>
             <span class="stack-note">远程应用不在本机目录，技术栈需手动填写。</span>
             <div class="grid2">
-              <label class="fld" title="配置后每轮探测通过 SSH 检查该目录的 git 同步状态（fetch + 工作区 + 未推送/未拉取）">
+              <label class="fld" title="配置后每轮探测通过 SSH 检查该目录的 git 同步状态（fetch + 工作区 + 未推送/未拉取）；公网机按线上语义展示：线上已改 / 线上提交未推送 = 违规（红），可拉取 = 待部署（橙）">
                 <span>外机项目目录（可选，配置后检测其 git 同步）</span>
                 <input v-model="editingApp.gitDir" class="mono" placeholder="/root/myapp" />
               </label>
@@ -530,6 +539,14 @@ async function save() {
                   <option value="public">公网（云服务器）</option>
                 </select>
               </label>
+            </div>
+            <div class="app-edit-foot">
+              <span class="chk-group">
+                <label class="chk" title="在监控中心自动创建/更新同名主机（地址=主机 IP，分组按公网/内网映射，gitDir 会预置为跟踪目录）。SSH 凭据需在监控设置中配置或用「自动部署」；取消勾选不会删除已创建的主机。">
+                  <input v-model="editingApp.monitorSync" type="checkbox" /> 同步到监控中心
+                </label>
+              </span>
+              <span v-if="editingApp.syncSource === 'monitor'" class="foot-note">该条目由监控中心同步创建（appSync），主机信息以监控设置为准</span>
             </div>
           </template>
         </div>

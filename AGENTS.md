@@ -1,7 +1,7 @@
 # AGENTS.md · my-homepage 项目交接记忆
 
 > 面向接手本项目的 AI Agent / 开发者：读完这一份即可上手，无需再翻聊天记录。
-> 最后更新：2026-11-10 · 文档随代码演进，改功能时请同步更新本文；本轮新增的 UI/图表/目录设置记忆见 §16。
+> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；应用中心 ⇄ 监控中心双向同步见 §17，2026-11-10 的 UI/图表/目录设置记忆见 §16。
 
 ---
 
@@ -251,6 +251,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
   "languages": ["JavaScript/Node.js"],                      // 主要语言（远程应用手填）
   "frontend": ["Vue 3"],                                    // 前端框架
   "backend": ["Fastify"],                                   // 后端框架
+  "monitorSync": true,                                      // 可选：勾选后自动同步到监控中心（§17）
   "github": "…", "tags": ["公网"], "icon": "☁️"
 }
 ```
@@ -261,7 +262,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 {"status":"ok","dbReady":true,"rssMb":78,"uptimeSec":1088946,"version":"1.1.0","time":"…"}
 ```
 
-解析规则：`version`（兼容 `data.version`）→ 应用名旁 `v1.1.0` 标签；`dbReady`/`uptimeSec`/`rssMb` → 状态徽标悬停明细；**在线判定 = HTTP 2xx 且（若有 `status` 字段）值为 `ok`**。外机 git 同步检查见 §7.3.1（可选，配置 `gitDir` 才做）。
+解析规则：`version`（兼容 `data.version`）→ 应用名旁 `v1.1.0` 标签；`dbReady`/`uptimeSec`/`rssMb` → 状态徽标悬停明细；**在线判定 = HTTP 2xx 且（若有 `status` 字段）值为 `ok`**。外机 git 同步检查见 §7.3.1（可选，配置 `gitDir` 才做）。**同步到监控中心**：条目带 `"monitorSync": true`（设置面板远程应用弹窗勾选）时，monitor-server 自动维护同 id 的被监控主机，机制见 §17。
 
 ### 6.3 `page` — 页面文案（设置面板可改）
 
@@ -329,12 +330,12 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 对配置了 `gitDir` 的 `remoteApps[]` 条目（当前 network-monitor@netwatch、log-gpt-agent@lan-1103），每轮探测通过 **SSH 在外机上执行只读脚本**检查 git 同步状态，结果写入 `apps.json` 的 `git` 字段（结构同本机），前端同步列/卡片自动渲染，无需区分来源：
 
-- **一次 SSH 跑完**：`cd <gitDir>` + `rev-parse` 仓库校验 → branch/repo(url) → `fetch --no-tags`（远端 git 用**远端自己的凭据与网络**）→ `status --porcelain` → `rev-list --left-right --count @{upstream}...HEAD`，用 `@branch@/@repo@/@fetch@/@st@/@count@/@end@` 行标记分段，Node 侧解析（输出缺 `@end@` = 被中断 → 视为瞬态失败）。
+- **一次 SSH 跑完**：`cd <gitDir>` + `rev-parse` 仓库校验 → branch/repo(url) → `fetch --no-tags`（远端 git 用**远端自己的凭据与网络**；除远端机 `.git` 内的 FETCH_HEAD/refs 外不触碰任何文件）→ `status --porcelain` → `rev-list --left-right --count @{upstream}...HEAD`，用 `@branch@/@repo@/@fetch@/@st@/@count@/@end@` 行标记分段，Node 侧解析（输出缺 `@end@` = 被中断 → 视为瞬态失败）。`@fetch@` 值：`0` 成功 / `none` 未配置远端（视为成功，与本机 fetchRepo 对齐）/ `skip` 快速探测免 fetch（remoteOk=null）。
 - **并发与重试**：并发默认 2（`PROBE_REMOTE_GIT_CONCURRENCY`）；连接失败/超时/输出中断按 **4s → 10s 退避自动重试**（共 3 次尝试），仍失败标 `status:'error'`（前端灰色「检查失败」，悬停看原因），**下一轮完整探测自动再试**。单次超时：含 fetch 60s / 仅 status 25s。
 - **快速探测（--no-fetch）**：跳过远端 fetch 只查工作区与 ahead/behind（沿用上次远端快照，与本机语义一致），实测 2 台约 90ms；错误信息经 `remoteGitErr()` 提取 stderr 首行（不回显整条 ssh 命令行）。
 - **SSH 细节**：`BatchMode + ConnectTimeout=8 + accept-new + ControlMaster/Persist=120`；配置 `gitKey` 时加 `-i <key> -o IdentitiesOnly=yes`（踩坑 #16：指定钥匙确定性）。与监控采集不冲突（agent 模式主机只是被动收 git 检查的 1 条短连接，非监控采集双路）。
 - **线上机语义（2026-11-11）**：`env: 'public'`（公网服务器）视为线上机，检查结果带 `git.production: true`，前端同步列按线上口径显示——`synced`→绿「线上已同步」、`dirty`→红「线上已改 ×n」（违规：不允许线上改代码）、`ahead`→红「线上提交 ×n 未推送」（违规：不允许线上提交/push）、`behind`→橙「可拉取 ×n」（正常待部署）、title 注明「线上机（仅允许 pull，禁止线上修改与 push）」。当前 study-log-cloud（阿里云 `/root/applications/studylog`，main 分支）实测已同步。
-- 实测：netwatch `/root/network-monitor` main 分支未提交 47、lan-1103 `/root/log_gpt_agent` VueRebuild 分支未提交 3、阿里云 studylog main 已同步；`github` 字段留空时由远端 repo url 兜底生成链接。
+- 实测：netwatch `/root/network-monitor` main 分支未提交 47、lan-1103 `/root/log_gpt_agent` VueRebuild 分支未提交 3、阿里云 studylog main 已同步；`github` 字段留空时由远端 repo url 兜底生成链接。 线上语义已在三份前端拷贝同步（`src/lib/app-utils.js`、`glass/assets/glass.js`、`glass-v2/assets/glass-v2.js`、`unslop/assets/app.js`）——**改 git 展示逻辑时四处都要改**。
 
 ### 7.4 输出 `apps.json` 结构
 
@@ -412,7 +413,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 ### 8.4 设置面板（`src/components/SettingsPanel.vue`）
 
-`Teleport` 到 body 的模态框，三区块：页面信息 / 本机应用 / 云服务器应用。**应用区块是紧凑列表**（每行：图标 + 名称 + mono id + 摘要行「应用形式 · 部署位置 · 端口/主机」，右侧 ›，加「新 / 已隐藏」标记；标题栏带计数与「＋添加」），**点击条目弹出嵌套编辑弹窗**（z-index 60 盖在面板上，含全部字段；底部「删除此条目」需 confirm，「完成 / ✕ / 点遮罩」关闭）。**新增**按钮直接创建空条目并立即打开弹窗。弹窗内修改均为**草稿**（直接改 form 里的响应式对象），仍由面板底部「保存」一次性 POST `/api/config`，保存语义不变（见 §8.1 `onSaved`，保存后立即关闭，探测在后台跑）。字段能力不变：**应用形式**（`kinds` 多选）决定是否探测（勾 Web 才探测）、**主要语言 / 前端框架 / 后端框架**（逗号分隔）、**部署位置**（`env`）、本机应用另有 **使用 HTTPS** / `exclude`；本机技术栈留空用自动识别（保存后变手动值），远程需手填；「期望端口」旁显示实际探测端口，不一致时点「采用」写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；旧 `type: "app"` 回退 `["app"]`）。注意：`mini-btn` 曾只在 AppCard 的 scoped 样式里定义（面板按钮无样式），2026-11-07 起面板自带文字按钮样式。
+`Teleport` 到 body 的模态框，三区块：页面信息 / 本机应用 / 云服务器应用。**应用区块是紧凑列表**（每行：图标 + 名称 + mono id + 摘要行「应用形式 · 部署位置 · 端口/主机」，右侧 ›，加「新 / 已隐藏」标记；标题栏带计数与「＋添加」），**点击条目弹出嵌套编辑弹窗**（z-index 60 盖在面板上，含全部字段；底部「删除此条目」需 confirm，「完成 / ✕ / 点遮罩」关闭）。**新增**按钮直接创建空条目并立即打开弹窗。弹窗内修改均为**草稿**（直接改 form 里的响应式对象），仍由面板底部「保存」一次性 POST `/api/config`，保存语义不变（见 §8.1 `onSaved`，保存后立即关闭，探测在后台跑）。字段能力不变：**应用形式**（`kinds` 多选）决定是否探测（勾 Web 才探测）、**主要语言 / 前端框架 / 后端框架**（逗号分隔）、**部署位置**（`env`）、本机应用另有 **使用 HTTPS** / `exclude`；本机技术栈留空用自动识别（保存后变手动值），远程需手填；「期望端口」旁显示实际探测端口，不一致时点「采用」写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；旧 `type: "app"` 回退 `["app"]`）。注意：`mini-btn` 曾只在 AppCard 的 scoped 样式里定义（面板按钮无样式），2026-11-07 起面板自带文字按钮样式。**双向同步（2026-11-11）**：远程应用编辑弹窗底部有「同步到监控中心」勾选（`monitorSync`，外机/公网列表行加「已同步监控 / 来自监控」徽标）；本机应用弹窗显示禁用勾选「监控自动跟踪」（本机目录本来就自动并入监控，无需勾选）。机制见 §17。
 
 ### 8.5 独立毛玻璃页面（`glass/`，访问 `/glass/`）
 
@@ -473,6 +474,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 **组件结构**：`MonitorView.vue`（hero 统计胶囊 + 告警横幅 + 主机卡 grid；登录层已上移至 App.vue 全站门禁）→ `MonitorDetail.vue`（点卡片**内联展开**：4 趋势图一行 / 目录占比 + 目录对比 / 进程明细全宽，独立加载 history+procs，15s 自刷；详情头部 ⚙ 打开该主机的设置弹窗；**目录历史对比默认全选**——`seededDirs` 记录已补勾路径，只补新目录、自刷不重置用户手动取消项，标题旁有全选/清空按钮）→ `MonitorSettings.vue`（设置弹窗，**纳管主机为紧凑列表**：点击行弹出嵌套 `MonitorHostEdit.vue` 编辑弹窗）与 `MonitorTerm.vue`（终端抽屉 + 弹窗放大 + **全屏/还原切换**：原地铺满视口并同步 pty 列数，ESC 先还原窗口再关闭——捕获阶段监听，因 xterm textarea 会吞冒泡阶段的 Escape）。图表走 `src/lib/monitor-charts.js`（**echarts/core 按需注册**，动态 import → 独立 chunk 180KB gz，不占首屏；主包 56KB gz 基本不变）；xterm 同样动态分包（73KB gz）。
 
 **主机设置双通道**（2026-11-10）：`MonitorHostEdit.vue` 是单主机编辑弹窗的共享组件（表单 + 该主机跟踪目录 + 凭据提示），两种模式：① **草稿模式**（设置面板进入）——面板「纳管主机」区为紧凑列表（图标 + 名称 + mono id + 摘要行「类型 · 分组 · 地址:端口 · N 个跟踪目录」+ 本机标「内置」），点击行弹嵌套弹窗（z-index 80 > 面板 70），修改直接改 cfg 里的响应式对象，仍由面板底部「保存配置」统一 PUT；「＋添加主机」创建空条目并立即打开弹窗。② **直连模式**（详情页 ⚙ 进入）——`MonitorView` 拉全量配置深拷贝出目标主机，弹窗底部「保存」直接 PUT 整份配置（其余段原样带回），成功后刷新 summary；服务端校验错误（如 SSH 缺 address）就地显示在弹窗内，不改配置。删除主机只在草稿模式弹窗提供（confirm 后删草稿行，保存生效）；本机主机不可删。**跟踪目录展示（2026-11-10 用户反馈「本机显示空、全局区重复」）**：`GET /api/monitor/config` 给每台主机附带只读 `effectiveDirs`（`effectiveTrackedDirsFor`：全局 + 本机主页登记 + 该主机自有，**再追加运行时自动发现的容器目录 `source:'container'`**；PUT 时 `normalizeHost` 丢弃不落盘）；主机弹窗把「自动并入」目录以虚线行 + 「主页登记 / 全局 / 自动发现」chip 只读展示（容器行显示 `name` 如「容器 open-webui」，title 放原始 path），自有目录可增删；添加时若路径已在 `effectiveDirs` 中会拦截重复。本机因此显示 9 个主页登记 + 1 个容器 = 10，与主机卡/图表一致。设置面板的全局「跟踪目录」区改为 **仅当 `cfg.trackedDirs` 非空时显示**，标题「全局自定义目录（对所有主机生效）」并注明通常无需在此添加，避免与每主机目录重复。
+
+**双向同步勾选（2026-11-11）**：`MonitorHostEdit.vue` SSH 主机表单在「采集方式」下新增「同步到应用中心」勾选（`hosts[].appSync`，`normalizeHost` 白名单放行），勾选后由 settings-server 自动在应用中心维护同 id 远程应用；主机行摘要随之显示「来自应用中心 / 同步到应用中心」徽标（`syncSource`）。机制、回环防护与删除语义统一见 §17。
 
 **架构**：`monitor-server.mjs`（systemd 常驻，`127.0.0.1:8301`，依赖 ssh2+ws）同时承载 HTTP API 与终端 WebSocket；nginx **两处 server 块**各加三个 location：`/monitor/`（静态 stub+终端页）、`/api/monitor/`（反代）、`/api/terminal`（WS 升级，read_timeout 3600s）。备份 `*.bak-monitor-20261110`。echarts/@xterm 已移入 dependencies（SPA 打包需要），主站「前端零第三方运行时依赖」的说法仅对**首屏主包**成立。
 
@@ -701,6 +704,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 监控主机设置弹窗化 + 详情页 ⚙（2026-11-10） | 用户要求「点击服务器弹窗设置、详情页加齿轮直达」：复用主页设置面板 2026-11-07「紧凑列表 + 嵌套弹窗」成熟模式，抽出 MonitorHostEdit 共享组件；详情页齿轮走直连保存（就地调单机不必开整个设置面板） |
 | 目录历史对比默认全选（2026-11-10） | 用户要求「默认全选」：seededDirs 只补新目录，15s 自刷不勾回手动取消项；另配全选/清空按钮兜底 |
 | 监控布局对照 1Panel 重排（2026-11-10） | 用户反馈「1Panel 布局好看、我们的有点奇怪」：根源是 hero 三层堆叠 / 圆环数字小 / 装饰编码重复 / 详情无分组。按「密度均匀、单一卡片体系、颜色只表达语义」收紧，白底语言与导航不变（详情见 §8.7 布局重排段） |
+| 应用中心 ⇄ 监控中心双向同步（2026-11-11） | 用户要求「添加应用可选同步到监控中心并监测，反之亦然，中断自动重试」：选 fs.watch 文件级同步（monitor-server 只写 monitor.config、settings-server 只写 apps.config，单一写者）而非前端编排——UI 之外（CLI/手工改配置）同样生效；「无 diff 不写盘」防回环，重试器退避抗读写竞态（详见 §17） |
 
 ---
 
@@ -862,9 +866,50 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - **CPU 型号采集**：`snap.cpu.model` 由本机 `os.cpus()[0].model`、远程/agent 的 `===CPUINFO===` 段（`/proc/cpuinfo` 的 model name / Hardware / Model）提供；前端只去掉 `Processor (series)`、`(R)`、`CPU`、`@xGHz` 噪声，保留真实厂商型号。**旧 agent 的采集脚本不含 CPUINFO**，需重跑一键安装器更新（2026-11-10 已对 netwatch / lan-1103 重装，型号分别为 Hygon C86 7151 / Hygon C86 7390）。
 - **内存标称容量**：`MemTotal` 是内核可用内存，会少 1–2GB（本机 30837MB）。`nominalMemGb()` 向上取常见内存档位 `[1,2,4,6,8,12,16,24,32,48,64,...]`，本机显示 32GB、NetWatch 8GB、阿里云 2GB；不要再直接 `Math.round(totalMb/1024)`。
 - **monitor-server.mjs 改动必须重启**：`systemctl restart my-homepage-monitor`（改 `monitor.config.json` 才是热加载）。
-- **应用中心 ↔ 监控中心的对应关系（单向、仅本机目录）**：应用中心 `apps[].directory`（且 `exclude` 不为 true）会作为**本机主机**的自动跟踪目录并入监控（`homepageDirs`）；`remoteApps` 不会自动变成监控主机，远程主机需在监控设置里单独添加并配置该机目录。监控侧的主机/跟踪目录**不会反向写入** `apps.config.json`。`monitor-server.mjs` 已监听 `scripts/apps.config.json`（600ms 防抖），设置页新增/删除/隐藏应用后自动 `reloadHomepageDirs()`，下一个 5s 采集周期生效，无需重启网关；日志出现「主页应用目录热加载完成」。反向的唯一“自动出现”来自主页端口探测：目录在 `/root/applications` 下且有监听端口的应用会被应用中心自动发现为「待补充」，与监控配置无关。
+- **应用中心 ↔ 监控中心的对应关系（本机目录单向 + 可选双向同步）**：应用中心 `apps[].directory`（且 `exclude` 不为 true）会作为**本机主机**的自动跟踪目录并入监控（`homepageDirs`）；`remoteApps` 默认不会自动变成监控主机，远程主机需在监控设置里单独添加并配置该机目录——**2026-11-11 起勾选 `monitorSync` / `appSync` 可双向同步（见 §17）**。`monitor-server.mjs` 已监听 `scripts/apps.config.json`（600ms 防抖），设置页新增/删除/隐藏应用后自动 `reloadHomepageDirs()`，下一个 5s 采集周期生效，无需重启网关；日志出现「主页应用目录热加载完成」。反向的唯一“自动出现”来自主页端口探测：目录在 `/root/applications` 下且有监听端口的应用会被应用中心自动发现为「待补充」，与监控配置无关。
 - **验证方式**：Playwright 从 `data/monitor/sessions.json` 注入 `mh_mon` Cookie（只读），轮询页用 `domcontentloaded` + `waitForSelector`；本轮截图脚本在 `/tmp`，项目内保留 `.verify/` 截图（u1–u5、nw-cpu、dirs-ui 等）。
 
 ### 16.3 本轮涉及文件
 
 `src/components/MonitorView.vue`（副标题、主机卡）、`MonitorDetail.vue`（图表/排序/选择控件）、`MonitorHostEdit.vue`（生效目录展示）、`MonitorSettings.vue`（全局目录区）、`src/lib/monitor-charts.js`（自适应轴/移除 MarkLine 组件）、`src/components/PageHero.vue`（新增共享页头）、`src/style.css`（tab 字重/滚动条预留）、`glass-v2/assets/glass-v2.css|js|index.html`（同步图表与 tab 防跳）、`scripts/monitor-server.mjs`（effectiveDirs）。
+
+---
+
+## 17. 2026-11-11 增量：应用中心 ⇄ 监控中心 双向同步
+
+用户需求：「应用中心手动添加应用时可选择同步到监控中心，自动同步应用信息并监测，反之亦然；运行期间因并发限制中断则过一段时间自动重试。」
+
+### 17.1 机制（文件级双向同步，各写各的文件）
+
+| 方向 | 触发（谁监听谁） | 标记字段 | 产物 |
+|---|---|---|---|
+| ① 应用中心 → 监控中心 | `monitor-server.mjs` fs.watch `apps.config.json`（已有 watcher 扩展）+ 启动时 + monitor.config 热加载后（自愈陈旧 PUT） | `remoteApps[].monitorSync: true`（sanitize 白名单放行） | 监控中心同 id SSH 主机：`address=应用 host`、`group` 按 env 映射（public→公网）、`gitDir` 有值则预置跟踪目录、`note` 提示待配凭据、`syncSource:'apps'` |
+| ② 监控中心 → 应用中心 | `settings-server.mjs` fs.watch `monitor.config.json`（新增 watcher）+ 启动时 + 自家 POST /api/config 后（自愈陈旧整表保存） | `hosts[].appSync: true`（normalizeHost 白名单放行） | 应用中心同 id 远程应用：`healthUrl/url` 默认 `http://<地址>/`、`env` 按组公网/内网映射、`location=group`、`syncSource:'monitor'`，写盘后自动 `probe --no-fetch` |
+
+同步规则（两侧一致）：
+- **事实源**：勾 `monitorSync` 的应用是共享字段（name/group/address ↔ name/group/env/host）的唯一事实源，只回写 `syncSource==='apps'` 的主机；勾 `appSync` 的主机同理，但应用若同时勾了 `monitorSync` 则跳过回写（防两方向互抢形成回环）。
+- **永不自动删除、也不复活**：取消勾选/删除源条目后，对侧已创建条目保留且不会自动重建（方向一只处理带 monitorSync 的条目，方向二只处理带 appSync 的主机）；要彻底移除先撤勾选，再手工删对侧条目。
+- **自愈**：已同步条目被陈旧面板的整表 PUT/POST 覆盖丢失时，下次本方向触发（配置变更/自家保存/服务重启）自动补齐。
+- **不触碰监控侧配置**：凭据/端口/采集方式/跟踪目录（除创建时按 gitDir 预置）永不被同步覆盖；应用自定义健康接口在地址未变时保留，地址变化才重生成默认值。
+- **防回环**：两侧均「无 diff 不写盘」；只有真写盘才会触发对方 watcher，收敛后静止（实测 70s 日志计数 0/0）。
+- **凭据不自动分发**：方向一创建的主机 `credReady=false` 显示「待配置凭据」，用既有「自动部署」（输密码一键免密+Agent）或监控设置补密钥后即开始采集。
+
+### 17.2 中断自动重试（并发限制防护）
+
+两侧各有一个同构 `makeSyncRetryer(tag, fn)`：
+- **并发合并**：in-flight 期间的重复触发只记 `pendingAgain`，本轮跑完补一次（不并发重入）；
+- **退避重试**：单次同步抛错（读写竞态/JSON 解析半截/写冲突等）按 **10s→30s→60s→120s→120s** 自动重试，最多 5 次，日志形如 `[monitor→apps] 同步中断，10s 后自动重试（1/5）：…`；新事件触发会重置退避立即执行；连续 5 次失败本轮放弃，等下次变更或重启。
+- 实测：写坏 monitor.config.json 后 settings 侧依次打出 10s/30s/60s 重试日志、monitor 侧「热加载失败（保留旧配置）」，恢复文件后自动同步成功。
+
+### 17.3 UI
+
+- 应用中心设置面板：远程应用编辑弹窗底部「同步到监控中心」勾选（title 说明机制与删除语义）；外机/公网列表行加「已同步监控 / 来自监控」徽标；本机应用弹窗显示禁用勾选「监控自动跟踪」。
+- 监控设置：`MonitorHostEdit` SSH 主机「采集方式」下方「同步到应用中心」勾选（草稿/直连两模式均可）；主机行摘要加「来自应用中心 / 同步到应用中心」徽标。
+- glass-v2 未同步此功能（其设置弹窗本就未对齐主站，见 §8.8）。
+
+### 17.4 涉及文件与验证
+
+- `scripts/monitor-server.mjs`（normalizeHost 白名单 + syncAppsToHostsOnce + makeSyncRetryer + watcher/main 挂载）、`scripts/settings-server.mjs`（MONITOR_CONFIG_FILE + sanitize 白名单 + syncHostsToAppsOnce + makeSyncRetryer + watcher + 启动/POST 挂载，顺带修正文件头过时注释）、`src/components/SettingsPanel.vue`（勾选 + 徽标 + normalizeEntry）、`src/components/MonitorHostEdit.vue`（勾选区 + `.sync-chk` 样式）、`src/components/MonitorSettings.vue`（hostSummary 徽标）。
+- 生效方式：`./deploy.sh` + `systemctl restart my-homepage-settings my-homepage-monitor`。
+- 实测通过：方向一创建（gitDir 预置目录、note、syncSource）、改名回写、方向二跳过路径（monitorSync 优先）、方向二创建（env=公网映射、probe 自动触发、apps.json 出现条目）、无回环、退避重试链条、清理无复活；Playwright 会话注入验证三处勾选渲染（`.verify/sync-1-appeditor.png`、`sync-2-hosteditor.png`）。
+- 踩坑补充：#18 的 `cp -i` 别名再次咬人——恢复配置用 `cat 文件 > 目标` 重定向最稳；验证 apps.json 更新要等探测跑完（远程 git 检查失败重试会使单轮 probe 长达 ~14s），立刻 curl 会读到上一轮产物。
