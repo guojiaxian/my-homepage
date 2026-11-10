@@ -126,7 +126,13 @@ function sanitizeConfig(body) {
     heroTitle: str(body?.page?.heroTitle) || '我的应用',
     heroSubtitle: str(body?.page?.heroSubtitle),
   }
-  return { apps, remoteApps, page }
+  const out = { apps, remoteApps, page }
+  // 全局默认顺序（可选）：显式提交了合法数组才采纳，非法则丢弃（保存时另从原文件兜底保留）
+  if (Array.isArray(body.order)) {
+    const order = body.order.map(str).filter(Boolean)
+    if (order.length) out.order = order
+  }
+  return out
 }
 
 function readConfig() {
@@ -135,6 +141,7 @@ function readConfig() {
     $comment: raw.$comment ?? undefined,
     apps: raw.apps ?? [],
     remoteApps: raw.remoteApps ?? [],
+    order: raw.order ?? undefined,
     page: raw.page ?? { siteName: '我的应用导航', heroTitle: '我的应用', heroSubtitle: '' },
   }
 }
@@ -322,10 +329,12 @@ const server = createServer(async (req, res) => {
     if (req.method === 'POST' && url === '/api/config') {
       const body = JSON.parse(await readBody(req))
       const next = sanitizeConfig(body)
-      // 保留顶层 $comment 说明文字
+      // 保留顶层 $comment 说明文字与未在本次请求中提交的 order（面板不感知该字段；
+      // 请求体显式携带 order 键时以提交值为准——空数组即删除）
       try {
         const prev = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
         if (prev.$comment) next.$comment = prev.$comment
+        if (body.order === undefined && next.order === undefined && Array.isArray(prev.order)) next.order = prev.order
       } catch {
         /* 原文件缺失/损坏时不阻塞保存 */
       }

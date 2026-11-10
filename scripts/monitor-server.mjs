@@ -613,6 +613,7 @@ function connectSSH(creds, timeoutMs = 12_000, externalConn = null) {
     };
     if (creds.authType === 'password') {
       // _password = 一次性明文（provision 流程传入），否则读加密存档
+      const rec = credentials[creds._hostId];
       const pw = creds._password || (rec && rec.password ? decSecret(rec.password) : null);
       if (!pw) { done(new Error('未配置密码凭据（CLI --set-cred 或看板设置）')); return; }
       opt.password = pw;
@@ -695,9 +696,10 @@ function parseRemoteOutput(text) {
       if (p) { p.fds = +rest.slice(sp1 + 1, sp2) || 0; p.cwd = rest.slice(sp2 + 1); }
     } else if (section === 'DF') {
       const f = t.split(/\s+/);
-      if (f[0] === 'Filesystem' || f.length < 6) continue;
+      // df -kPT 数据行 7 列：Filesystem Type 1024-blocks Used Available Capacity Mounted-on
+      if (f[0] === 'Filesystem' || f[0] === '文件系统' || f.length < 7) continue;
       if (!REAL_FS.has(f[1])) continue;
-      c.df.push({ fs: f[0], type: f[1], totalKb: +f[2] || 0, usedKb: +f[3] || 0, mnt: f.slice(5).join(' ') });
+      c.df.push({ fs: f[0], type: f[1], totalKb: +f[2] || 0, usedKb: +f[3] || 0, mnt: f.slice(6).join(' ') });
     } else if (section === 'OS') {
       const kv = t.split('=', 2);
       if (kv[0] === 'NAME' && kv[1]) c.osName = kv[1].replace(/"/g, '');
@@ -1571,7 +1573,7 @@ async function route(req, res) {
     if (!verifyPassword(body.password || '', currentPasswordHash())) { recordAuthFail(ip); audit('auth_fail', { ip }); return sendJson(res, 401, { error: '密码错误' }); }
     const token = createSession(ip);
     audit('auth_ok', { ip });
-    return sendJson(res, 200, { ok: true }, { 'Set-Cookie': `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${(config.auth.sessionTtlHours || 12) * 3600}` });
+    return sendJson(res, 200, { ok: true }, { 'Set-Cookie': `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${sessionTtlMs() / 1000}` });
   }
   if (p === '/api/monitor/logout' && req.method === 'POST') {
     const token = getSession(req);

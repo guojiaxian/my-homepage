@@ -669,6 +669,12 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 28. **原生 DOM 写内容后立刻重渲染 = 内容被冲掉**
    设置面板把 provision 步骤写进 `<ol>` 后马上调 `renderSettings()`（模板字符串全量重建），刚写的日志被清空、只剩占位「正在连接…」。正确做法：状态驱动——步骤存 `host._provSteps`，模板负责渲染，任何时候重渲染都能保真。
 
+29. **变量定义在嵌套闭包里，外层分支直接引用 = 运行时 ReferenceError（`node --check` 不报）**
+   `connectSSH` 的密码分支引用了 `opt.hostVerifier` 闭包内声明的 `rec`，密码认证走「加密存档」路径时直接抛 `rec is not defined`。一直没暴露是因为 provision 传入一次性 `_password` 短路了该表达式（2026-11-11 系统测试修复：`rec` 移入分支内定义）。教训：**每条凭据路径（key / 一次性密码 / 加密存档密码）都要有一条真实 E2E**，只测过主路径的分支等于没测。
+
+30. **解析外部命令输出前，先对照真实表头数一遍列**
+   远程采集 `df -kPT` 数据行是 **7 列**（Filesystem Type 块 已用 可用 **配额** 挂载点），原代码 `mnt: f.slice(5)` 把配额列混进了挂载点——三台远程主机全部呈现 `mnt: "22% /"`，且告警 key `disk:<mnt>` 随使用率变化漂移（持续计时被重置）。修复为 `f.slice(6)`（2026-11-11）。同类风险：`String.raw`/awk 段、`/proc` 行格式改动时，先在目标机跑一遍真实输出再写解析。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
@@ -916,3 +922,33 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - 生效方式：`./deploy.sh` + `systemctl restart my-homepage-settings my-homepage-monitor`。
 - 实测通过：方向一创建（gitDir 预置目录、note、syncSource）、改名回写、方向二跳过路径（monitorSync 优先）、方向二创建（env=公网映射、probe 自动触发、apps.json 出现条目）、无回环、退避重试链条、清理无复活；Playwright 会话注入验证三处勾选渲染（`.verify/sync-1-appeditor.png`、`sync-2-hosteditor.png`）。
 - 踩坑补充：#18 的 `cp -i` 别名再次咬人——恢复配置用 `cat 文件 > 目标` 重定向最稳；验证 apps.json 更新要等探测跑完（远程 git 检查失败重试会使单轮 probe 长达 ~14s），立刻 curl 会读到上一轮产物。
+
+---
+
+## 18. 2026-11-11 增量：全量系统测试与 4 处修复
+
+### 18.1 测试覆盖（全部通过）
+
+- **服务与基础设施**：五个 systemd 单元 active + enabled；nginx 两处 server 块 location 齐全；8300/8301 仅回环。
+- **探测链路**：完整探测 12 应用（fetch 9 仓并发 6 ≈5.3s，3 台外机 git 检查 ≈8s），`public/` 与 `www/` 产物 md5 一致；线上机语义（aliyun production）正常。
+- **设置 API**：三个入口（直连/两个 Host）返回一致；非法 healthUrl / 重复 id 均 400；往返保存无损；`.bak` 自动备份。
+- **监控 API**：summary（4 主机在线）、sync-check（1 配对 + 2 候选）、config（effectiveDirs）、history 1h/24h/7d + 非法 range 400、procs、dirs/history、alerts、audit、401 门禁、CSRF 403、agent push/install.sh token 门禁。
+- **终端 WS**：local + netwatch（agent 模式主机）echo 回显 PASS。
+- **前端**：`npm run build` 通过；主站表格 12 行、监控 4 主机卡、详情 6 canvas、设置面板、同步检查面板；/glass/（12 行）、/unslop/、/glass-v2/、/monitor/ stub 重定向——五端点 0 控制台/页面错误（Playwright 会话注入法，脚本 `.verify/sweep-systemtest.cjs`）。
+
+### 18.2 修复的 bug（均已重启生效 + 回归验证）
+
+1. `connectSSH` 密码认证「加密存档」路径 `rec` 未定义 → ReferenceError（踩坑 #29）。
+2. 远程采集 `df -kPT` 挂载点混入配额列，`mnt: "22% /"` → 告警 key 漂移 + UI title「22% / 20.4%」（踩坑 #30）；重启后三台远程主机 mnt 已干净。
+3. 设置面板 POST /api/config 会丢弃顶层 `order` 字段（§6.4 文档化功能）——改与 `$comment` 同款保留机制：请求未携带时兜底保留、显式 `order: []` 可删除、GET /api/config 现在返回 order。
+4. 登录 Set-Cookie 回退值 `|| 12` 与会话 TTL 8760h 不一致 → 统一用 `sessionTtlMs()`。
+
+### 18.3 已知空缺 / 优化候选（未动手，待需求驱动）
+
+- **远程主机容器归属未实现**：采集 awk 收集了 `cg[]` 但 END 块的 PRC 行未携带，远程进程 `p.cg` 恒空——远程 docker 容器目录/容器计数不生效（当前三台远程机无此需求；支持时需改 awk 输出 + parseRemoteOutput 回填）。
+- **删除主机后历史文件残留**：`cleanHistoryRetention` 只遍历内存 history keys，已删主机的 `data/monitor/history/<id>/` 永不清理；可改为遍历 HISTORY_DIR。
+- **离线期间分钟点缺失**：`pushHistoryOffline` 不做分钟滚动，JSONL 离线段有空洞（图表 connectNulls=false 表现为断线，可接受）。
+- **JSON 解析异常统一 500**：login/provision/password 与 POST /api/config 的 `JSON.parse` 抛错走 route 兜底 500（语义应为 400），影响仅排障体验。
+- **onSaved 时钟基准**：保存后轮询用客户端 `savedAt` 与服务端 `probedAt` 比较，浏览器时钟偏差时靠 40 次上限兜底；POST /api/config 返回服务端时间戳可彻底对齐（「立刻同步」已如此）。
+- **glass-v2 设置弹窗未同步**：主站监控设置已改紧凑列表 + 双向同步勾选，glass-v2 仍是平铺表单版（§8.8 已注明）。
+- 主包 gzip 68.9KB（较 §2 基线 56KB 增长来自 SyncCheckPanel/批量终端等新增组件），仍在轻量范围内。
