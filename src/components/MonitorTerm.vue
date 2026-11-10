@@ -1,5 +1,5 @@
 <script setup>
-import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps({
   hostId: { type: String, default: '' },
@@ -10,6 +10,7 @@ const emit = defineEmits(['close'])
 const container = ref(null)
 const status = ref('')
 const statusCls = ref('')
+const full = ref(false)
 let term = null, ws = null, fit = null, loaded = false
 
 function setStatus(txt, cls = '') { status.value = txt; statusCls.value = cls }
@@ -66,7 +67,20 @@ function setStatsCleanup() {
   if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
   if (term) { try { term.dispose() } catch { /* 已释放 */ } term = null }
 }
-function onKeydown(e) { if (e.key === 'Escape') emit('close') }
+function onKeydown(e) {
+  if (e.key !== 'Escape') return
+  if (!full.value) { emit('close'); return }
+  e.preventDefault()
+  e.stopPropagation()
+  toggleFull() // 全屏时 ESC 还原窗口（拦截不让进 shell）
+}
+async function toggleFull() {
+  full.value = !full.value
+  await nextTick()
+  // 容器尺寸变化后重排 xterm 并把新行列同步给服务端（term.onResize 已接 WS resize 帧）
+  requestAnimationFrame(() => { try { fit && fit.fit() } catch { /* 忽略 */ } })
+  setTimeout(() => { try { fit && fit.fit(); term && term.focus() } catch { /* 忽略 */ } }, 80)
+}
 function popout() {
   emit('close')
   window.open(`/monitor/terminal.html?host=${encodeURIComponent(props.hostId)}`, '_blank', 'width=980,height=640')
@@ -78,23 +92,25 @@ onBeforeUnmount(setStatsCleanup)
 
 function onResizeWin() { if (fit) { try { fit.fit() } catch { /* 忽略 */ } } }
 window.addEventListener('resize', onResizeWin)
-window.addEventListener('keydown', onKeydown)
+// 捕获阶段监听：xterm 的 textarea 会吞 Escape（冒泡阶段收不到）；全屏时 ESC 还原窗口
+window.addEventListener('keydown', onKeydown, true)
 onBeforeUnmount(() => {
   window.removeEventListener('resize', onResizeWin)
-  window.removeEventListener('keydown', onKeydown)
+  window.removeEventListener('keydown', onKeydown, true)
 })
 </script>
 
 <template>
   <Teleport to="body">
-    <div class="mon-term-mask" @click="emit('close')" />
-    <div class="mon-term-drawer">
+    <div class="mon-term-mask" :style="full ? { display: 'none' } : undefined" @click="emit('close')" />
+    <div class="mon-term-drawer" :class="{ full }">
       <div class="mon-term-head">
         <span class="t-title">终端 · {{ hostName || hostId }}</span>
         <span class="t-status" :class="statusCls">{{ status }}</span>
         <span class="spacer" />
         <button class="mini-btn" @click="connect">重连</button>
         <button class="mini-btn" @click="popout">弹出窗口</button>
+      <button class="mini-btn" @click="toggleFull">{{ full ? '还原窗口' : '全屏' }}</button>
         <button class="mini-btn" @click="emit('close')">✕ 关闭</button>
       </div>
       <div ref="container" class="mon-term-body" />
@@ -121,6 +137,7 @@ onBeforeUnmount(() => {
 .mini-btn { border: 1px solid var(--border); background: var(--bg-soft); border-radius: 6px; padding: 2px 8px; font-size: 12.5px; cursor: pointer; color: var(--text-2); }
 .mini-btn:hover { border-color: var(--accent); color: var(--accent); }
 .mon-term-body { flex: 1; padding: 8px; background: #0d1117; }
+.mon-term-drawer.full { inset: 0; width: 100vw; height: 100vh; border-left: 0; }
 .mon-term-body :deep(.xterm) { height: 100%; }
 @media (prefers-reduced-motion: reduce) { .mon-term-drawer { animation: none; } }
 @media (max-width: 760px) { .mon-term-drawer { width: 100vw; } }

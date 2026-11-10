@@ -488,3 +488,7 @@ code { font-family: var(--gv-mono); font-size: 11.5px; background: var(--gv-pane
 .gv-he-dirs { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--gv-hairline); }
 
 .gv-he-dirs { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--gv-hairline); }
+
+/* 终端全窗口 */
+.gv-term-drawer.is-full { inset: 0; width: 100vw; height: 100vh; border-left: 0; }
+.gv-term-drawer.is-full #gv-term-container { border-radius: 0; }
