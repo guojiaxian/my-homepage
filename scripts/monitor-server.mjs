@@ -94,6 +94,9 @@ function normalizeHost(h) {
     out.keyPath = h.keyPath ? String(h.keyPath) : '';
   }
   if (h.note) out.note = String(h.note);
+  // 双向同步标记：appSync = 回写应用中心（方向二，settings-server 消费）；syncSource = 条目来源（apps = 方向一创建）
+  if (h.appSync) out.appSync = true;
+  if (h.syncSource === 'apps' || h.syncSource === 'monitor') out.syncSource = h.syncSource;
   // 每主机跟踪目录：远程主机在此指定应用目录，目录级资源统计按主机维度生效
   out.trackedDirs = (Array.isArray(h.trackedDirs) ? h.trackedDirs : [])
     .map(d => (typeof d === 'string' ? { path: d } : d))
@@ -158,7 +161,7 @@ try {
     if (fn === cfgName) {
       clearTimeout(configWatchTimer);
       configWatchTimer = setTimeout(() => {
-        try { config = loadConfigSync(); reloadHomepageDirs(); applyCollectors(); log('配置热加载完成'); }
+        try { config = loadConfigSync(); reloadHomepageDirs(); applyCollectors(); syncAppsToHosts(); log('配置热加载完成'); }
         catch (e) { log('配置热加载失败（保留旧配置）:', e.message); }
       }, 600);
       return;
@@ -168,6 +171,7 @@ try {
       clearTimeout(homepageWatchTimer);
       homepageWatchTimer = setTimeout(() => {
         reloadHomepageDirs();
+        syncAppsToHosts(); // 方向一：勾选 monitorSync 的远程应用自动登记为被监控主机
         log('主页应用目录热加载完成');
       }, 600);
     }
@@ -185,6 +189,88 @@ function saveConfig(patch) {
   reloadHomepageDirs();
   applyCollectors();
 }
+
+/* ============================ 方向一：应用中心 → 监控中心 同步 ============================
+   apps.config.json 的 remoteApps[] 条目带 "monitorSync": true 时，自动在监控中心创建/更新
+   同 id 的 SSH 主机（地址 = 应用 host，分组按 env 映射，gitDir 有值则预置跟踪目录）。
+   规则：
+   · 勾选 monitorSync 的应用是共享字段（name/group/address）的唯一事实源，
+     但只回写 syncSource==='apps'（本方向创建）的主机，手工添加的同名主机不触碰；
+   · 只创建与更新，从不删除：要移除请先在应用中心取消勾选，再在监控设置里删主机；
+   · 凭据 / 端口 / 采集方式 / 跟踪目录等监控侧配置永不回写覆盖；
+   · 无 diff 不写盘（防止与方向二互相触发形成回环）；
+   · 单次同步因读写竞态/并发冲突中断时，由重试器按退避间隔自动重试。 */
+function syncAppsToHostsOnce() {
+  const appsRaw = JSON.parse(fs.readFileSync(APPS_CONFIG_PATH, 'utf8'));
+  const monRaw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8'));
+  const hosts = Array.isArray(monRaw.hosts) ? monRaw.hosts : [];
+  let changed = false;
+  for (const a of (Array.isArray(appsRaw.remoteApps) ? appsRaw.remoteApps : [])) {
+    if (!a || a.monitorSync !== true) continue;
+    const id = String(a.id || '');
+    let address = String(a.host || '');
+    if (!address) { try { address = new URL(String(a.healthUrl || '')).hostname; } catch { /* 留空 */ } }
+    if (!id || !address || !HOST_ID_RE.test(id)) { log('同步跳过（id 或 host 无效）:', id || '(空)'); continue; }
+    const group = a.env === 'public' ? '公网' : '内网';
+    const existing = hosts.find((h) => h && h.id === id);
+    if (!existing) {
+      const host = {
+        id, name: String(a.name || id), type: 'ssh', group,
+        address, port: 22, username: 'root', authType: 'key', keyPath: '',
+        mode: 'ssh', syncSource: 'apps',
+        note: '由应用中心同步创建：请在监控设置中配置 SSH 密钥/密码（或自动部署）后开始采集',
+        trackedDirs: [],
+      };
+      const gd = String(a.gitDir || '');
+      if (path.isAbsolute(gd)) host.trackedDirs.push({ path: path.resolve(gd), name: defaultDirName(gd), source: 'host' });
+      hosts.push(host);
+      changed = true;
+      log('已从应用中心同步创建主机:', id, '@', address);
+    } else if (existing.syncSource === 'apps') {
+      const nextName = String(a.name || id);
+      if (existing.name !== nextName || existing.group !== group || existing.address !== address) {
+        existing.name = nextName;
+        existing.group = group;
+        existing.address = address;
+        changed = true;
+        log('已按应用中心信息更新主机:', id);
+      }
+    }
+    /* 其他来源（手工添加）的同名主机：不触碰 */
+  }
+  if (changed) saveConfig({ hosts });
+  return changed;
+}
+
+/* 同步重试器：in-flight 期间的重复触发合并为一次（并发限制）；单次中断按
+   10s/30s/60s/120s/120s 退避自动重试（最多 5 次）；新事件触发会重置退避立即执行。 */
+function makeSyncRetryer(tag, fn) {
+  const DELAYS = [10_000, 30_000, 60_000, 120_000, 120_000];
+  let timer = null, attempt = 0, running = false, pendingAgain = false;
+  const run = () => {
+    if (running) { pendingAgain = true; return; }
+    running = true;
+    try {
+      fn();
+      attempt = 0;
+    } catch (e) {
+      if (attempt < DELAYS.length) {
+        const delay = DELAYS[attempt++];
+        log(`[${tag}] 同步中断，${Math.round(delay / 1000)}s 后自动重试（${attempt}/${DELAYS.length}）:`, e.message);
+        clearTimeout(timer);
+        timer = setTimeout(() => { run(); }, delay);
+      } else {
+        log(`[${tag}] 同步连续 ${DELAYS.length} 次失败，本轮放弃（下次配置变更或重启后再试）:`, e.message);
+        attempt = 0;
+      }
+    } finally {
+      running = false;
+      if (pendingAgain) { pendingAgain = false; run(); }
+    }
+  };
+  return () => { attempt = 0; clearTimeout(timer); run(); };
+}
+const syncAppsToHosts = makeSyncRetryer('apps→monitor', syncAppsToHostsOnce);
 
 /* ============================ 密钥库 / 加密 ============================ */
 function ensureSecret() {
@@ -1594,6 +1680,7 @@ async function main() {
   }
 
   reloadHomepageDirs();
+  syncAppsToHosts(); // 启动时做一次方向一同步（自愈：补齐曾被整表保存覆盖掉的同步主机）
   ensureDirSync(HISTORY_DIR);
   loadSessions();
   refreshDockerMap();

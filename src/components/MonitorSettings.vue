@@ -52,7 +52,12 @@ function hostSummary(h) {
   const kind = h.type === 'local' ? '本机' : 'SSH 远程'
   const addr = h.type === 'ssh' ? `${h.address || '未配置地址'}:${h.port || 22}` : (h.address || '127.0.0.1')
   const n = (h.effectiveDirs || h.trackedDirs || []).length
-  return `${kind} · ${h.group || '未分组'} · ${addr}${n ? ` · ${n} 个跟踪目录` : ''}`
+  /* 双向同步徽标：syncSource='apps' = 方向一创建；appSync = 已勾选同步到应用中心（方向二） */
+  const sync = [
+    h.syncSource === 'apps' ? '来自应用中心' : '',
+    h.appSync ? '同步到应用中心' : '',
+  ].filter(Boolean).join(' + ')
+  return `${kind} · ${h.group || '未分组'} · ${addr}${n ? ` · ${n} 个跟踪目录` : ''}${sync ? ` · ${sync}` : ''}`
 }
 
 function addDir() {

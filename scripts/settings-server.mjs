@@ -6,20 +6,25 @@
  *
  * 路由：
  *   GET  /api/config  读取 scripts/apps.config.json（apps + remoteApps + page）
- *   POST /api/config  校验并原子写入配置（原文件备份为 .bak），随后自动运行一次
- *                     探测脚本使改动立即反映到前端；响应包含探测输出
+ *   POST /api/config  校验并原子写入配置（原文件备份为 .bak），随后后台运行一次
+ *                     探测脚本（--no-fetch）使改动尽快反映到前端；响应立即返回
  *   GET  /api/healthz 存活检查
  *
  * 写入仅限配置文件本身，不执行任何 shell、不触碰 /root/applications。
+ *
+ * 方向二同步（监控中心 → 应用中心）：监听 scripts/monitor.config.json，
+ * 对勾选 appSync 的主机自动在 remoteApps[] 创建/更新同 id 的远程应用；
+ * 中断（读写竞态/并发冲突）时按退避间隔自动重试。
  */
 import { createServer } from 'node:http'
-import { readFileSync, writeFileSync, renameSync, copyFileSync, existsSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, copyFileSync, existsSync, watch } from 'node:fs'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CONFIG_FILE = path.join(__dirname, 'apps.config.json')
+const MONITOR_CONFIG_FILE = path.join(__dirname, 'monitor.config.json')
 const PROBE_SCRIPT = path.join(__dirname, 'probe-apps.mjs')
 const PORT = Number(process.env.SETTINGS_PORT || 8300)
 const BODY_LIMIT = 1024 * 1024 // 1MB
@@ -109,6 +114,10 @@ function sanitizeConfig(body) {
     if (str(a?.gitDir)) out.gitDir = str(a.gitDir)
     if (str(a?.gitSsh)) out.gitSsh = str(a.gitSsh)
     if (str(a?.gitKey)) out.gitKey = str(a.gitKey)
+    // 双向同步标记：monitorSync = 同步到监控中心（方向一，monitor-server 消费）；
+    // syncSource = 条目来源（monitor = 方向二由监控主机创建），两者都随保存保留
+    if (a?.monitorSync) out.monitorSync = true
+    if (a?.syncSource === 'monitor') out.syncSource = a.syncSource
     return out
   })
 
@@ -153,6 +162,117 @@ function runProbe({ noFetch = false } = {}) {
   })
   child.on('error', (err) => console.error('[settings] 探测进程启动失败：', err.message))
   child.unref()
+}
+
+/* ============================ 方向二：监控中心 → 应用中心 同步 ============================
+   monitor.config.json 的 hosts[] 条目带 "appSync": true 时，自动在 remoteApps[] 创建/更新
+   同 id 的远程应用（健康接口默认 http://<地址>/，env 按主机组公网/内网映射）。
+   规则：
+   · 勾选 appSync 的主机是共享字段（name/location/env/host）的唯一事实源，
+     但应用若同时勾选了 monitorSync（应用侧为主），则跳过回写，只补建缺失条目；
+   · 只创建与更新，从不删除：要移除请先在监控设置取消勾选，再在应用设置里删条目；
+   · 应用地址变化时才重生成默认健康/访问地址，未变化时保留用户自定义的健康接口；
+   · 无 diff 不写盘（防止与方向一互相触发形成回环）；
+   · 单次同步因读写竞态/并发冲突中断时，由重试器按退避间隔自动重试。 */
+function syncHostsToAppsOnce() {
+  const monRaw = JSON.parse(readFileSync(MONITOR_CONFIG_FILE, 'utf8'))
+  const appsRaw = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
+  const list = Array.isArray(appsRaw.remoteApps) ? appsRaw.remoteApps : []
+  let changed = false
+  for (const h of (Array.isArray(monRaw.hosts) ? monRaw.hosts : [])) {
+    if (!h || h.appSync !== true || h.type !== 'ssh') continue
+    const id = String(h.id || '')
+    const address = String(h.address || '')
+    if (!id || !address) continue
+    const env = /公网|public/i.test(String(h.group || '')) ? 'public' : 'lan'
+    const idx = list.findIndex((a) => a && a.id === id)
+    if (idx < 0) {
+      list.push({
+        id,
+        name: String(h.name || id),
+        description: '由监控中心同步创建的主机条目：健康探测默认走站点根路径，可在应用设置中修改健康接口。',
+        healthUrl: `http://${address}/`,
+        url: `http://${address}/`,
+        location: String(h.group || (env === 'public' ? '公网' : '内网')),
+        host: address,
+        kinds: ['web'],
+        env,
+        icon: env === 'public' ? '☁️' : '🖥️',
+        syncSource: 'monitor',
+      })
+      changed = true
+      console.log('[settings] 已从监控中心同步创建远程应用:', id, '@', address)
+    } else if (list[idx].monitorSync !== true) {
+      const a = list[idx]
+      const prevHost = String(a.host || '')
+      const nextName = String(h.name || id)
+      const nextLocation = String(h.group || '')
+      if (a.name !== nextName || a.location !== nextLocation || a.env !== env || prevHost !== address) {
+        a.name = nextName
+        a.location = nextLocation
+        a.env = env
+        a.host = address
+        if (prevHost !== address) {
+          a.healthUrl = `http://${address}/`
+          a.url = `http://${address}/`
+        }
+        changed = true
+        console.log('[settings] 已按监控主机信息更新远程应用:', id)
+      }
+    }
+  }
+  if (changed) {
+    // 展开原对象仅替换 remoteApps：保持 $comment 等顶层键的原有顺序，避免纯键序变化弄脏 diff
+    writeConfig({ ...appsRaw, remoteApps: list })
+    runProbe({ noFetch: true }) // 应用条目变化尽快反映到 apps.json（前端数据源）
+  }
+  return changed
+}
+
+/* 同步重试器：in-flight 期间的重复触发合并为一次（并发限制）；单次中断按
+   10s/30s/60s/120s/120s 退避自动重试（最多 5 次）；新事件触发会重置退避立即执行。 */
+function makeSyncRetryer(tag, fn) {
+  const DELAYS = [10_000, 30_000, 60_000, 120_000, 120_000]
+  let timer = null
+  let attempt = 0
+  let running = false
+  let pendingAgain = false
+  const run = () => {
+    if (running) { pendingAgain = true; return }
+    running = true
+    try {
+      fn()
+      attempt = 0
+    } catch (err) {
+      if (attempt < DELAYS.length) {
+        const delay = DELAYS[attempt++]
+        console.error(`[settings][${tag}] 同步中断，${Math.round(delay / 1000)}s 后自动重试（${attempt}/${DELAYS.length}）：`, err.message)
+        if (timer) clearTimeout(timer)
+        timer = setTimeout(() => { run() }, delay)
+      } else {
+        console.error(`[settings][${tag}] 同步连续 ${DELAYS.length} 次失败，本轮放弃（下次配置变更或重启后再试）：`, err.message)
+        attempt = 0
+      }
+    } finally {
+      running = false
+      if (pendingAgain) { pendingAgain = false; run() }
+    }
+  }
+  return () => { attempt = 0; if (timer) clearTimeout(timer); run() }
+}
+const syncHostsToApps = makeSyncRetryer('monitor→apps', syncHostsToAppsOnce)
+
+/* 监听监控配置：勾选 appSync 的主机变化时同步到应用中心（600ms 防抖，与热加载节奏一致） */
+try {
+  const monName = path.basename(MONITOR_CONFIG_FILE)
+  let monWatchTimer = null
+  watch(__dirname, (ev, fn) => {
+    if (fn !== monName) return
+    if (monWatchTimer) clearTimeout(monWatchTimer)
+    monWatchTimer = setTimeout(() => { syncHostsToApps() }, 600)
+  })
+} catch (err) {
+  console.error('[settings] fs.watch 不可用（方向二同步退化为仅启动时执行一次）：', err.message)
 }
 
 function send(res, code, body) {
@@ -203,6 +323,7 @@ const server = createServer(async (req, res) => {
       writeConfig(next)
       // 探测转后台执行：保存立即返回，前端轮询 apps.json 感知更新
       runProbe({ noFetch: true })
+      syncHostsToApps() // 自愈：整表保存若覆盖掉 appSync 同步条目，立即补齐（无 diff 不写盘）
       send(res, 200, { ok: true, probeStarted: true })
       return
     }
@@ -218,6 +339,8 @@ const server = createServer(async (req, res) => {
     send(res, 400, { ok: false, error: err.message })
   }
 })
+
+syncHostsToApps() // 启动时做一次方向二同步（自愈：补齐曾被整表保存覆盖掉的同步条目）
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[settings] listening on http://127.0.0.1:${PORT}  config=${CONFIG_FILE}`)

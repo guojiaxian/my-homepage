@@ -149,6 +149,16 @@ function onDelete() {
           </div>
 
           <div v-if="host.type === 'ssh'" class="he-dirs">
+            <label class="sync-chk">
+              <input v-model="host.appSync" type="checkbox" />
+              <span>同步到应用中心</span>
+            </label>
+            <p class="sub" style="margin:4px 0 0">
+              勾选后在应用中心自动创建/更新同名远程应用（健康接口默认 http://地址/，分组按公网/内网映射，主机信息变更自动跟随）；取消勾选不会删除已创建的条目，需在应用设置中手动删除。
+            </p>
+          </div>
+
+          <div v-if="host.type === 'ssh'" class="he-dirs">
             <div class="sub" style="margin-bottom:4px">
               自动部署：输入目标机密码，中心自动 SSH 完成——① 免密密钥分发 ② Agent 安装并启动 ③ 切换推送模式（密码仅本次使用，另加密存档备用）
             </div>
@@ -239,6 +249,8 @@ export default { name: 'MonitorHostEdit' }
 .fitem input, .fitem select { width: 100%; }
 .fitem.span2 { grid-column: span 2; }
 .he-dirs { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.sync-chk { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; cursor: pointer; }
+.sync-chk input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
 .prov-steps { margin: 8px 0 4px; padding-left: 20px; color: var(--text-2); font-size: 12px; }
 .prov-steps li { margin: 2px 0; }
 .dir-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--bg); }
