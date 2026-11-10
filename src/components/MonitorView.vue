@@ -70,7 +70,6 @@ const containerCount = computed(() =>
   hosts.value.reduce((a, h) => a + (h.online && h.snap ? h.snap.containersCount || 0 : 0), 0),
 )
 const selectedHost = computed(() => hosts.value.find((h) => h.id === selectedId.value) || null)
-const thresholds = ref({})
 
 /* 主机卡列数随台数自适应：在 2..5 列里选「行数最少 → 末行空位最少 → 列数少（卡更宽）」的组合，
    保证整行排满不塌空。实测：1→1 2→2 3→3 4→4 5→5 6→3(2行) 7→4 8→4 9→5 10→5 11→4 12→4 15→5 16→4 24→5 */
@@ -100,7 +99,6 @@ async function boot() {
   try {
     summary.value = await monApi('/api/monitor/summary')
     loadErr.value = ''
-    monApi('/api/monitor/config').then((c) => { thresholds.value = c.thresholds || {} }).catch(() => {})
     startPoll()
   } catch (e) {
     if (e.authRequired) emit('unauth')
@@ -212,8 +210,6 @@ async function saveDirectEdit() {
     })
     hostEdit.open = false
     onSaved()
-    /* 阈值可能在本次保存中被修改，同步刷新图表阈值参考线 */
-    monApi('/api/monitor/config').then((x) => { thresholds.value = x.thresholds || {} }).catch(() => {})
   } catch (e) {
     hostEdit.err = '保存失败：' + e.message
   } finally { hostEdit.saving = false }
@@ -333,7 +329,6 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
         v-if="selectedHost"
         :key="selectedHost.id"
         :host="selectedHost"
-        :thresholds="thresholds"
         @term="openTerm(selectedHost)"
         @close="selectedId = ''"
         @edit="openDirectEdit(selectedHost)"

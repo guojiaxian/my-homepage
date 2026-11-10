@@ -4,7 +4,6 @@ import { monApi, fmtMb, fmtMbs, fmtPct, fmtUptime } from '../lib/monitor-api.js'
 
 const props = defineProps({
   host: { type: Object, required: true }, // summary 里的主机条目（随父级轮询更新）
-  thresholds: { type: Object, default: () => ({}) },
 })
 const emit = defineEmits(['term', 'close', 'edit'])
 
@@ -91,20 +90,12 @@ function renderTrends() {
   const { baseOption, lineSeries, legendStyle, cssVar } = mod()
   const t = (p) => p.t
   const c = inst('cpu', elCpu.value)
-  const th = props.thresholds?.cpuPct ?? 85
   c.setOption({
     ...baseOption('{value}%', range.value),
     legend: { ...legendStyle(), show: false },
     yAxis: { ...baseOption('{value}%', range.value).yAxis, max: 100 },
     series: [
-      lineSeries('CPU %', pts().map((p) => [t(p), p.cpu]), cssVar('--accent'), {
-        markLine: pts().length ? {
-          silent: true, symbol: 'none',
-          lineStyle: { color: cssVar('--red'), type: 'dashed' },
-          label: { color: cssVar('--red'), fontSize: 10, formatter: `${th}`, position: 'insideEndTop' },
-          data: [{ yAxis: th }],
-        } : undefined,
-      }),
+      lineSeries('CPU %', pts().map((p) => [t(p), p.cpu]), cssVar('--accent')),
       lineSeries('负载', pts().map((p) => [t(p), p.load]), cssVar('--amber'), { noArea: true }),
     ],
   }, { notMerge: true })

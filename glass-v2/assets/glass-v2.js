@@ -808,14 +808,11 @@
       const pts = state.hist || []
       const t = (p) => p.t
       const accent = cssVar('--gv-accent'), amber = cssVar('--gv-amber'), purple = cssVar('--gv-purple')
-      const teal = cssVar('--gv-teal'), green = cssVar('--gv-green'), red = cssVar('--gv-red')
-      const th = state.cfg?.thresholds?.cpuPct ?? 85
+      const teal = cssVar('--gv-teal'), green = cssVar('--gv-green')
       inst('cpu', $('#gv-ch-cpu')).setOption({
         ...baseOption('{value}%'), yAxis: { ...baseOption('{value}%').yAxis, max: 100 },
         series: [
-          lineSeries('CPU %', pts.map((p) => [t(p), p.cpu]), accent, {
-            markLine: pts.length ? { silent: true, symbol: 'none', lineStyle: { color: red, type: 'dashed' }, label: { color: red, fontSize: 10, formatter: `${th}`, position: 'insideEndTop' }, data: [{ yAxis: th }] } : undefined,
-          }),
+          lineSeries('CPU %', pts.map((p) => [t(p), p.cpu]), accent),
           lineSeries('负载', pts.map((p) => [t(p), p.load]), amber, { noArea: true }),
         ],
       }, { notMerge: true })
