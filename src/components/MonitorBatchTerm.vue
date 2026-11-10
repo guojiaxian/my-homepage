@@ -58,6 +58,15 @@ function connect(pane) {
   term.open(pane.el)
   fit.fit()
   pane.term = term; pane.fit = fit
+  /* 普通缓冲区下 PageUp/PageDown 翻终端历史，不再发给 shell；
+     备用屏（vim / less 等）仍交给应用处理 */
+  term.attachCustomKeyEventHandler((ev) => {
+    if (ev.type !== 'keydown' || ev.altKey || ev.ctrlKey || ev.metaKey) return true
+    if (ev.key !== 'PageUp' && ev.key !== 'PageDown') return true
+    if (term.buffer.active.type !== 'normal') return true
+    term.scrollPages(ev.key === 'PageUp' ? -1 : 1)
+    return false
+  })
   const proto = location.protocol === 'https:' ? 'wss' : 'ws'
   const ws = new WebSocket(`${proto}://${location.host}/api/terminal?host=${encodeURIComponent(pane.id)}&cols=${term.cols}&rows=${term.rows}`)
   pane.ws = ws
@@ -95,6 +104,16 @@ function sendBar() {
 function focusPane(pane) {
   solo.value = pane
   pane.term && pane.term.focus()
+}
+/* 命令栏 PageUp/PageDown：广播模式翻全部窗格，单机模式只翻当前窗格 */
+function scrollPanes(dir) {
+  const targets = solo.value ? [solo.value] : panes
+  for (const pane of targets) { try { pane.term && pane.term.scrollPages(dir) } catch { /* 未就绪 */ } }
+}
+function onBarKeydown(e) {
+  if (e.key !== 'PageUp' && e.key !== 'PageDown') return
+  e.preventDefault()
+  scrollPanes(e.key === 'PageUp' ? -1 : 1)
 }
 function backToBroadcast() {
   solo.value = null
@@ -140,6 +159,7 @@ onMounted(openAll)
         <span class="mbt-mode" :class="{ solo: !!solo }">
           {{ solo ? `单机输入：${solo.name}` : `广播：输入将下发到全部 ${panes.length} 台` }}
         </span>
+        <span class="mbt-hint" title="滚轮或 PageUp / PageDown 翻页；点击窗格可单机输入">滚轮 / PageUp 翻页</span>
         <span class="grow" />
         <button class="mbt-btn" :class="{ accent: !solo }" @click="backToBroadcast" :disabled="!solo">广播模式</button>
         <button class="mbt-btn" @click="toggleFull">{{ full ? '还原窗口' : '全屏' }}</button>
@@ -175,6 +195,7 @@ onMounted(openAll)
           :placeholder="solo ? `输入仅在 ${solo.name} 执行（密码/交互式提示请在此操作或点击窗格）` : '输入命令，回车同时下发到全部主机…'"
           autocomplete="off"
           spellcheck="false"
+          @keydown="onBarKeydown"
           @keydown.enter="sendBar"
         />
         <button class="mbt-btn accent" @click="sendBar">下发</button>
@@ -204,6 +225,7 @@ export default { name: 'MonitorBatchTerm' }
 .mbt-title { font-weight: 600; }
 .mbt-mode { font-size: 12.5px; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 1px 10px; }
 .mbt-mode.solo { color: var(--amber); background: var(--amber-soft); }
+.mbt-hint { font-size: 11.5px; color: var(--text-2); }
 .mbt-btn {
   border: 0; background: var(--bg-hover); color: var(--text-2);
   border-radius: 999px; padding: 4px 14px; font-size: 12.5px; cursor: pointer;
@@ -232,6 +254,19 @@ export default { name: 'MonitorBatchTerm' }
 .pane-solo-tag { font-size: 10.5px; border-radius: 999px; padding: 0 8px; background: color-mix(in srgb, var(--amber) 20%, transparent); color: var(--amber); flex: none; }
 .pane-term { flex: 1; padding: 4px 6px; min-height: 0; }
 .pane-term :deep(.xterm) { height: 100%; }
+/* xterm 默认滚动条是 overlay（宽度 0）不可拖拽，这里给批量窗格一个可见的细滚动条 */
+.pane-term :deep(.xterm-viewport) {
+  background-color: #0d1117 !important;
+  scrollbar-width: thin;
+  scrollbar-color: #3b4654 transparent;
+  scrollbar-gutter: stable;
+}
+.pane-term :deep(.xterm-viewport::-webkit-scrollbar) { width: 9px; }
+.pane-term :deep(.xterm-viewport::-webkit-scrollbar-track) { background: transparent; }
+.pane-term :deep(.xterm-viewport::-webkit-scrollbar-thumb) {
+  background: #39424e; border-radius: 6px; border: 2px solid #0d1117;
+}
+.pane-term :deep(.xterm-viewport::-webkit-scrollbar-thumb:hover) { background: #55606e; }
 .mbt-btn.sm { padding: 1px 8px; font-size: 11.5px; }
 
 .mbt-bar { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--border); background: var(--bg-soft); }
