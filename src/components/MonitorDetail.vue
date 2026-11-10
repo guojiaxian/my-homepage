@@ -1,5 +1,5 @@
 <script setup>
-import { nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { monApi, fmtMb, fmtMbs, fmtPct, fmtUptime } from '../lib/monitor-api.js'
 
 const props = defineProps({
@@ -148,7 +148,7 @@ function renderDirs() {
   const field = DIR_FIELD[dirMetric.value] || dirMetric.value
   const top = [...dirsList.value].sort((a, b) => (b[field] || 0) - (a[field] || 0)).slice(0, 10)
   inst('dirs', elDirs.value).setOption(hBarOption(
-    top.map((d) => d.name + (d.source === 'container' ? ' ⬛' : '')),
+    top.map((d) => d.name),
     top.map((d) => ({
       value: +(d[field] || 0).toFixed(2),
       dirPath: d.path,
@@ -207,10 +207,45 @@ async function setAllCompare(on) {
   renderCompare()
 }
 
+/* 进程表排序：默认 CPU% 降序；点击表头切换字段，再点切换方向 */
+const PROC_COLS = [
+  { key: 'name', label: '程序' },
+  { key: 'dirName', label: '归属' },
+  { key: 'pid', label: 'PID', num: true },
+  { key: 'cpuPct', label: 'CPU%', num: true },
+  { key: 'memMb', label: '内存', num: true },
+  { key: 'ioReadMbs', label: 'IO读 MB/s', num: true },
+  { key: 'ioWriteMbs', label: 'IO写 MB/s', num: true },
+  { key: 'threads', label: '线程', num: true },
+  { key: 'fds', label: '句柄', num: true },
+  { key: 'container', label: '容器' },
+  { key: 'cmd', label: '命令行' },
+]
+const sortKey = ref('cpuPct')
+const sortDir = ref(-1)
+const NUMERIC_COLS = new Set(PROC_COLS.filter((c) => c.num).map((c) => c.key))
+function sortBy(key) {
+  if (sortKey.value === key) { sortDir.value = -sortDir.value; return }
+  sortKey.value = key
+  sortDir.value = NUMERIC_COLS.has(key) ? -1 : 1
+}
 const filteredProcs = () =>
-  procsList.value
-    .filter((p) => !dirFilter.value || p.dir === dirFilter.value)
-    .sort((a, b) => (b.cpuPct || 0) - (a.cpuPct || 0))
+  procsList.value.filter((p) => !dirFilter.value || p.dir === dirFilter.value)
+const sortedProcs = computed(() => {
+  const key = sortKey.value
+  const dir = sortDir.value
+  return [...filteredProcs()].sort((a, b) => {
+    const va = a[key]
+    const vb = b[key]
+    if (va == null && vb == null) return (a.pid || 0) - (b.pid || 0)
+    if (va == null) return 1 // 空值始终排最后
+    if (vb == null) return -1
+    if (typeof va === 'string' || typeof vb === 'string') {
+      return String(va).localeCompare(String(vb), 'zh-Hans-CN') * dir
+    }
+    return (Number(va) - Number(vb)) * dir
+  })
+})
 
 watch(range, load)
 watch(() => props.host?.id, () => {
@@ -301,13 +336,17 @@ onBeforeUnmount(() => {
         <table class="proc-table">
           <thead>
             <tr>
-              <th>程序</th><th>归属</th><th class="num">PID</th><th class="num">CPU%</th><th class="num">内存</th>
-              <th class="num">IO读 MB/s</th><th class="num">IO写 MB/s</th><th class="num">线程</th><th class="num">句柄</th>
-              <th>容器</th><th>命令行</th>
+              <th
+                v-for="c in PROC_COLS"
+                :key="c.key"
+                :class="[{ num: c.num }, 'sortable', { on: sortKey === c.key }]"
+                :aria-sort="sortKey === c.key ? (sortDir === 1 ? 'ascending' : 'descending') : 'none'"
+                @click="sortBy(c.key)"
+              >{{ c.label }}<span class="sort-arrow">{{ sortKey === c.key ? (sortDir === 1 ? '↑' : '↓') : '' }}</span></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="p in filteredProcs()" :key="p.pid">
+            <tr v-for="p in sortedProcs" :key="p.pid">
               <td class="num" :title="p.cmd">{{ p.name }}</td>
               <td><span class="dir-tag" :class="{ container: p.dir && p.dir.startsWith('docker:') }">{{ p.dirName || '-' }}</span></td>
               <td class="num">{{ p.pid }}</td>
@@ -320,7 +359,7 @@ onBeforeUnmount(() => {
               <td>{{ p.container || '-' }}</td>
               <td class="proc-cmd" :title="p.cmd">{{ p.cmd }}</td>
             </tr>
-            <tr v-if="!filteredProcs().length">
+            <tr v-if="!sortedProcs.length">
               <td colspan="11" class="empty">无归属进程</td>
             </tr>
           </tbody>
@@ -391,7 +430,27 @@ onBeforeUnmount(() => {
 .range-tabs { display: inline-flex; padding: 3px; gap: 2px; border-radius: 9px; background: var(--bg-hover); }
 .range-tabs button { border: 0; background: transparent; padding: 4px 14px; border-radius: 7px; font-size: 12.5px; cursor: pointer; color: var(--text-2); transition: color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease; }
 .range-tabs button.on { background: var(--bg-soft); color: var(--accent); font-weight: 500; box-shadow: 0 1px 4px rgb(16 24 40 / 0.12); }
-.mini-select { font-size: 12px; padding: 2px 8px; border-radius: 6px; }
+/* 目录指标下拉：去原生灰底，统一为胶囊控件 + 自绘箭头 */
+.mini-select {
+  appearance: none;
+  -webkit-appearance: none;
+  height: 26px;
+  padding: 0 28px 0 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background-color: var(--bg-soft);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%238c959f' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 9px center;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.mini-select:hover { border-color: var(--border-strong); }
+.mini-select:focus-visible { border-color: var(--accent); box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent); }
 
 .compare-list { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 8px; }
 .mini-link { border: 0; background: none; color: var(--accent); font-size: 12px; cursor: pointer; padding: 0 2px; font-weight: 400; }
@@ -403,7 +462,19 @@ onBeforeUnmount(() => {
   display: inline-flex; align-items: center; gap: 5px;
   transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
 }
-.dir-chip input { accent-color: var(--accent); margin: 0; }
+.dir-chip input {
+  appearance: none; -webkit-appearance: none;
+  width: 13px; height: 13px; margin: 0; flex: none;
+  border: 1px solid var(--border-strong); border-radius: 4px;
+  background: var(--bg-soft); cursor: pointer; position: relative;
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+.dir-chip input:checked { background: var(--accent); border-color: var(--accent); }
+.dir-chip input:checked::after {
+  content: ''; position: absolute; left: 3.5px; top: 1px;
+  width: 4px; height: 7px; border: solid #fff; border-width: 0 1.5px 1.5px 0;
+  transform: rotate(45deg);
+}
 .dir-chip:hover { border-color: var(--accent); color: var(--accent); }
 .dir-chip.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent); }
 
@@ -411,6 +482,10 @@ onBeforeUnmount(() => {
 .proc-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
 .proc-table th, .proc-table td { padding: 6px 10px; border-bottom: 1px solid var(--border); text-align: left; white-space: nowrap; }
 .proc-table th { color: var(--text-2); font-weight: 500; font-size: 12px; position: sticky; top: 0; background: var(--bg-soft); z-index: 1; }
+.proc-table th.sortable { cursor: pointer; user-select: none; transition: color 0.15s ease; }
+.proc-table th.sortable:hover { color: var(--text); }
+.proc-table th.sortable.on { color: var(--accent); }
+.sort-arrow { margin-left: 2px; font-size: 10px; opacity: 0.8; }
 .proc-table td.num, .proc-table th.num { text-align: right; font-family: var(--mono); }
 .proc-table tbody tr { transition: background 0.12s ease; }
 .proc-table tbody tr:hover { background: var(--bg-hover); }

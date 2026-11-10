@@ -864,7 +864,7 @@
         grid: { left: 150, right: 66, top: 8, bottom: 22 },
         tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' }, backgroundColor: 'rgba(15,24,42,0.94)', borderColor: 'rgba(150,175,220,0.3)', textStyle: { color: '#e9effa', fontSize: 12 } },
         xAxis: { type: 'value', axisLabel: { ...axisCommon().axisLabel }, splitLine: axisCommon().splitLine },
-        yAxis: { type: 'category', inverse: true, data: top.map((d) => d.name + (d.source === 'container' ? ' ⬛' : '')), axisLabel: { ...axisCommon().axisLabel, fontSize: 11.5 } },
+        yAxis: { type: 'category', inverse: true, data: top.map((d) => d.name), axisLabel: { ...axisCommon().axisLabel, fontSize: 11.5 } },
         series: [{ type: 'bar', barWidth: 14, data: top.map((d) => ({
           value: +(d[field] || 0).toFixed(2), dirPath: d.path,
           itemStyle: { color: new echarts.graphic.LinearGradient(0, 0, 1, 0, [{ offset: 0, color: cssVar('--gv-accent') + '99' }, { offset: 1, color: cssVar('--gv-accent') }]), borderRadius: 4 },
