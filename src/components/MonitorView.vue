@@ -283,8 +283,11 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
 
     <!-- 批量终端主机多选器 -->
     <div v-if="batchPickerOpen" class="batch-picker-mask" @click.self="batchPickerOpen = false">
-      <div class="batch-picker">
-        <div class="bp-head"><b>批量终端 · 选择主机</b><span class="sub">最多 6 台，命令将同时下发</span></div>
+      <div class="batch-picker" role="dialog" aria-label="批量终端选择主机">
+        <div class="bp-head">
+          <b>批量终端 · 选择主机</b>
+          <span class="sub">最多 6 台，命令将同时下发到每个窗格</span>
+        </div>
         <div class="bp-list">
           <label
             v-for="h in hosts.filter((x) => x.credReady)"
@@ -298,15 +301,15 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
               :disabled="!batchSel.has(h.id) && batchSel.size >= 6"
               @change="toggleBatchSel(h.id)"
             />
-            <span>{{ h.name }}</span>
-            <span class="sub">{{ h.address }} · {{ h.online ? '在线' : '离线' }}</span>
+            <span class="bp-name">{{ h.name }}</span>
+            <span class="bp-meta"><i class="bp-dot" :class="{ on: h.online }" />{{ h.address }} · {{ h.online ? '在线' : '离线' }}</span>
           </label>
         </div>
         <div class="bp-foot">
-          <span class="sub">已选 {{ batchSel.size }}/6</span>
+          <span class="sub">已选 <b>{{ batchSel.size }}</b>/6</span>
           <span class="grow" />
           <button class="ghost-btn" @click="batchPickerOpen = false">取消</button>
-          <button class="login-btn" :disabled="!batchSel.size" @click="openBatch">打开批量终端（{{ batchSel.size }}）</button>
+          <button class="bp-primary" :disabled="!batchSel.size" @click="openBatch">打开批量终端（{{ batchSel.size }}）</button>
         </div>
       </div>
     </div>
@@ -425,6 +428,58 @@ export default { name: 'MonitorView' }
 
 .hc-offline { padding: 10px 0 6px; }
 .hc-offline p { margin: 0 0 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* ===== 批量终端主机选择弹窗 ===== */
+.batch-picker-mask {
+  position: fixed; inset: 0; z-index: 70;
+  display: flex; align-items: center; justify-content: center;
+  padding: 24px 16px;
+  background: rgb(16 24 40 / 0.45);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+}
+.batch-picker {
+  width: 460px; max-width: 100%; max-height: calc(100vh - 80px);
+  display: flex; flex-direction: column;
+  background: var(--bg-soft);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow-hover);
+  overflow: hidden;
+}
+.bp-head { display: flex; flex-direction: column; gap: 3px; padding: 16px 18px 12px; flex: none; }
+.bp-head b { font-size: 15.5px; }
+.bp-head .sub { font-size: 12.5px; }
+.bp-list { display: flex; flex-direction: column; gap: 6px; padding: 0 10px 12px; overflow: auto; flex: 1 1 auto; min-height: 0; }
+.bp-row {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-soft);
+  cursor: pointer;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.bp-row:hover { border-color: var(--border-strong); background: var(--bg-hover); }
+.bp-row.on { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft); }
+.bp-row.dis { opacity: 0.5; cursor: not-allowed; }
+.bp-row.dis:hover { border-color: var(--border); background: var(--bg-soft); }
+.bp-row input { width: 15px; height: 15px; margin: 0; flex: none; accent-color: var(--accent); cursor: inherit; }
+.bp-name { font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bp-meta { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; flex: none; color: var(--text-2); font-size: 11.5px; font-family: var(--mono); }
+.bp-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gray); flex: none; }
+.bp-dot.on { background: var(--green); }
+.bp-foot { display: flex; align-items: center; gap: 10px; padding: 12px 18px; border-top: 1px solid var(--border); flex: none; }
+.bp-foot .sub { font-size: 12.5px; }
+.bp-foot .sub b { color: var(--text); }
+.bp-primary {
+  border: 0; background: var(--accent); color: #fff;
+  border-radius: 999px; padding: 7px 18px;
+  font-size: 13px; font-weight: 500; cursor: pointer;
+  transition: filter 0.15s ease, opacity 0.15s ease;
+}
+.bp-primary:hover:not(:disabled) { filter: brightness(1.06); }
+.bp-primary:disabled { opacity: 0.5; cursor: default; }
 
 @keyframes monPulse {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--red, #cf222e) 45%, transparent); }
