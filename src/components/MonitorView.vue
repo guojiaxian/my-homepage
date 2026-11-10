@@ -1,5 +1,5 @@
 <script setup>
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { monApi, fmtMbs, fmtPct, fmtUptime } from '../lib/monitor-api.js'
 import MonitorDetail from './MonitorDetail.vue'
 import MonitorSettings from './MonitorSettings.vue'
@@ -23,22 +23,40 @@ const emit = defineEmits(['unauth', 'update:settingsOpen'])
 const summary = ref(null)
 const loadErr = ref('')
 const selectedId = ref('')
-/* 终端页签：关闭抽屉仅隐藏，多会话并行保留（最多 8 个，同一主机可开多个，LRU 淘汰最久未用） */
-const TERM_TABS_MAX = 8
-const termTabs = ref([]) // [{ key, hostId, name, ordinal }]，最后一项为最近使用
-const termActive = ref('') // 当前页签 key
+/* 终端多窗格：抽屉顶部主机名列表点击即新增窗格（同一主机可多开），窗格按点击
+   顺序 3 列排布，满 3 列后纵向新增（第 4 个在第 3 列下方）；关闭抽屉仅隐藏，
+   全部窗格与 shell 现场保留，重开不重连。上限 6 个窗格。 */
+const PANES_MAX = 6
+const termPanes = ref([]) // [{ key, hostId, name, ordinal }]，顺序 = 点击顺序
 const termOpen = ref(false)
-const termStatus = reactive({}) // key -> '' | 'ok' | 'bad'（页签状态点）
+const termFull = ref(false)
+const multiInput = ref(false) // 多端输入：任一窗格键入同步到其他窗格
+const termStatus = reactive({}) // key -> '' | 'ok' | 'bad'（窗格状态点）
+const paneTip = ref('')
 let termSeq = 0
-/* 同一主机出现多个会话时，页签名追加稳定序号（落库在 ordinal，不随切换重排） */
-const termTabsView = computed(() => {
-  const counts = {}
-  for (const t of termTabs.value) counts[t.hostId] = (counts[t.hostId] || 0) + 1
-  return termTabs.value.map((t) => ({
-    ...t,
-    label: counts[t.hostId] > 1 ? `${t.name} #${t.ordinal}` : t.name,
-  }))
-})
+const paneRefs = new Map() // key -> MonitorTerm 暴露的 { send, focus, refit }
+function setPaneRef(key, el) { if (el) paneRefs.set(key, el); else paneRefs.delete(key) }
+const paneRows = computed(() => Math.max(1, Math.ceil(termPanes.value.length / 3)))
+const paneCols = computed(() => (termPanes.value.length === 2 ? 2 : Math.min(3, Math.max(1, termPanes.value.length))))
+const paneGridStyle = computed(() => ({
+  gridTemplateColumns: `repeat(${paneCols.value}, minmax(0, 1fr))`,
+  gridTemplateRows: `repeat(${paneRows.value}, minmax(0, 1fr))`,
+}))
+/* 窗格落位：1-3 号横向一行；4-6 号纵向新增——4 号在第 3 列下方，5/6 依次往左 */
+function panePos(i) {
+  if (i < 3) return { gridRow: '1', gridColumn: String(i + 1) }
+  return { gridRow: '2', gridColumn: String(3 - (i - 3)) }
+}
+/* 新窗格滑入方向：第一行从右侧滑入，第二行从下方滑入 */
+const justAdded = ref('') // key
+const justAddedDir = ref('right')
+let justAddedTimer = null
+function markJustAdded(key, i) {
+  justAdded.value = key
+  justAddedDir.value = i < 3 ? 'right' : 'bottom'
+  clearTimeout(justAddedTimer)
+  justAddedTimer = setTimeout(() => { justAdded.value = '' }, 450)
+}
 const batchPickerOpen = ref(false)
 const batchOpen = ref(false)
 const batchSel = reactive(new Set())
@@ -131,50 +149,94 @@ function toggleDetail(h) {
   selectedId.value = selectedId.value === h.id ? '' : h.id
 }
 function openTerm(h, forceNew = false) {
-  // 默认切到该主机最近使用的会话；要再开一个用页签栏「＋ 新会话」
+  // 主机卡「终端」入口：该主机已有窗格则聚焦它（现场保留），否则新建窗格
   if (!forceNew) {
-    for (let i = termTabs.value.length - 1; i >= 0; i--) {
-      if (termTabs.value[i].hostId === h.id) { switchTerm(termTabs.value[i].key); return }
-    }
+    const ex = [...termPanes.value].reverse().find((t) => t.hostId === h.id)
+    if (ex) { termOpen.value = true; focusPane(ex.key); return }
   }
-  // 超出上限先淘汰最久未使用且非当前页签的会话
-  while (termTabs.value.length >= TERM_TABS_MAX) {
-    const victim = termTabs.value.find((t) => t.key !== termActive.value)
-    if (!victim) break
-    endTerm(victim.key)
-  }
-  const ordinal = Math.max(0, ...termTabs.value.filter((t) => t.hostId === h.id).map((t) => t.ordinal)) + 1
+  addPane(h)
+}
+/* 抽屉顶部主机名列表：点击即新增窗格（同一主机可多开） */
+function addPane(h) {
+  if (termPanes.value.length >= PANES_MAX) { paneTip.value = '最多支持 6 个终端窗格'; return }
+  if (!termPanes.value.length) paneTip.value = ''
+  const ordinal = Math.max(0, ...termPanes.value.filter((t) => t.hostId === h.id).map((t) => t.ordinal)) + 1
   const key = `${h.id}:${++termSeq}`
-  termTabs.value.push({ key, hostId: h.id, name: h.name || h.id, ordinal })
-  termActive.value = key
+  flipLayout(() => {
+    termPanes.value.push({ key, hostId: h.id, name: h.name || h.id, ordinal })
+  })
+  markJustAdded(key, termPanes.value.length - 1)
   termOpen.value = true
+  paneTip.value = ''
 }
-/* 为当前页签的主机再开一个独立会话 */
-function newTermForActive() {
-  const cur = termTabs.value.find((t) => t.key === termActive.value)
-  if (!cur) return
-  const h = hosts.value.find((x) => x.id === cur.hostId) || { id: cur.hostId, name: cur.name }
-  openTerm(h, true)
+function endPane(key) {
+  let idx = -1
+  flipLayout(() => {
+    const i = termPanes.value.findIndex((t) => t.key === key)
+    if (i >= 0) { idx = i; termPanes.value.splice(i, 1) }
+    delete termStatus[key]
+  })
+  if (idx < 0) return
+  focusPane(key)
+  if (!termPanes.value.length) termOpen.value = false // 全部关闭时收起抽屉
 }
-function switchTerm(key) {
-  const i = termTabs.value.findIndex((t) => t.key === key)
-  if (i < 0) return
-  const [t] = termTabs.value.splice(i, 1)
-  termTabs.value.push(t) // 最近使用排到最后，淘汰时优先释放最久未用
-  termActive.value = key
-  termOpen.value = true
-}
-function endTerm(key) {
-  const i = termTabs.value.findIndex((t) => t.key === key)
-  if (i < 0) return
-  termTabs.value.splice(i, 1)
-  delete termStatus[key]
-  if (termActive.value !== key) return
-  const last = termTabs.value[termTabs.value.length - 1]
-  if (last) termActive.value = last.key
-  else { termActive.value = ''; termOpen.value = false }
-}
+function focusPane(key) { const r = paneRefs.get(key); r && r.focus() }
+function hideDrawer() { termOpen.value = false } // 仅隐藏：全部窗格与 shell 现场保留 // 仅隐藏：全部窗格与 shell 现场保留
 function onTermStatus(key, cls) { termStatus[key] = cls || '' }
+/* 多端输入：任一窗格键入同步到其他窗格 */
+function onPaneInput(from, d) {
+  if (!multiInput.value || !d) return
+  for (const [key, r] of paneRefs) { if (key !== from) r.send(d) }
+}
+/* 全屏：铺满视口，全部窗格重排 */
+function toggleTermFull() {
+  termFull.value = !termFull.value
+  setTimeout(refitAll, 80)
+}
+function refitAll() { for (const r of paneRefs.values()) r.refit() }
+/* ESC：全屏时还原窗口，否则收起抽屉（窗格保留） */
+function onEsc(e) {
+  if (e.key !== 'Escape') return // 只拦截 Esc；其余按键（含命令字符）必须放行
+  if (!termOpen.value) return
+  e.preventDefault(); e.stopPropagation()
+  if (termFull.value) toggleTermFull(); else hideDrawer('esc')
+}
+window.addEventListener('keydown', onEsc, true)
+onBeforeUnmount(() => window.removeEventListener('keydown', onEsc, true))
+function popoutPane(key, hostId) {
+  flipLayout(() => {
+    const i = termPanes.value.findIndex((t) => t.key === key)
+    if (i >= 0) termPanes.value.splice(i, 1)
+    delete termStatus[key]
+  })
+  window.open(`/monitor/terminal.html?host=${encodeURIComponent(hostId)}`, '_blank', 'width=980,height=640')
+}
+/* FLIP：布局变更前记录旧位置，更新后反向位移再过渡回原位，保证移动/缩放平滑 */
+function flipLayout(mut) {
+  const before = new Map()
+  for (const [key, r] of paneRefs) {
+    const el = r && r.el
+    if (el) before.set(key, el.getBoundingClientRect())
+  }
+  mut()
+  nextTick(() => {
+    for (const [key, r] of paneRefs) {
+      const el = r && r.el
+      const b = before.get(key)
+      if (!el || !b) continue
+      const a = el.getBoundingClientRect()
+      const dx = b.left - a.left
+      const dy = b.top - a.top
+      if (!dx && !dy) continue
+      el.style.transition = 'none'
+      el.style.transform = `translate(${dx}px, ${dy}px)`
+      el.getBoundingClientRect() // 强制回流
+      el.style.transition = 'transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1)'
+      el.style.transform = ''
+      el.addEventListener('transitionend', () => { el.style.transition = ''; el.style.transform = '' }, { once: true })
+    }
+  })
+}
 function onSaved() { refresh() }
 
 /* ---------- 详情页 ⚙：直连编辑单主机 ----------
@@ -416,23 +478,54 @@ function hostSubtitle(h) {
       @save="saveDirectEdit"
       @saved="onSaved"
     />
-    <!-- 终端抽屉：每个会话一个常驻实例（同一主机可多个），最多 8 个（LRU） -->
-    <MonitorTerm
-      v-for="t in termTabsView"
-      :key="t.key"
-      :session-key="t.key"
-      :host-id="t.hostId"
-      :host-name="t.name"
-      :open="termOpen && termActive === t.key"
-      :tabs="termTabsView"
-      :active-id="termActive"
-      :statuses="termStatus"
-      @close="termOpen = false"
-      @switch="switchTerm"
-      @end="endTerm"
-      @new="newTermForActive"
-      @status="onTermStatus"
-    />
+    <!-- 终端抽屉：多窗格布局，关闭仅隐藏（现场保留），重开不重连 -->
+    <div class="mon-term-mask" v-show="termOpen && !termFull" @click="hideDrawer()" />
+    <div class="mon-term-drawer" v-show="termOpen" :class="{ multi: termPanes.length > 1, full: termFull }">
+      <div class="mon-term-head">
+        <span class="t-title">终端</span>
+        <span class="t-multi" :class="{ on: multiInput }" title="任一窗格键入的指令将同步到其他窗格">
+          {{ multiInput ? '多端输入：开' : '多端输入：关' }}
+        </span>
+        <button class="mini-btn" :class="{ on: multiInput }" @click="multiInput = !multiInput">{{ multiInput ? '关闭同步' : '开启同步' }}</button>
+        <span class="grow" />
+        <button class="mini-btn" @click="toggleTermFull">{{ termFull ? '还原窗口' : '全屏' }}</button>
+        <button class="mini-btn" @click="hideDrawer()">✕ 关闭</button>
+        <div class="host-chips">
+          <span class="chips-hint">点击主机名新增终端窗格（同一主机可多开 · 最多 6 个）：</span>
+          <button
+            v-for="h in hosts.filter((x) => x.credReady)"
+            :key="h.id"
+            class="host-chip"
+            :title="`${h.name}（${h.address}）— 新增一个终端窗格`"
+            @click="addPane(h)"
+          >{{ h.name }}</button>
+          <span v-if="paneTip" class="chips-tip">{{ paneTip }}</span>
+        </div>
+      </div>
+      <div class="panes-grid" :style="paneGridStyle">
+        <div
+          v-for="(t, i) in termPanes"
+          :key="t.key"
+          class="mtp-wrap"
+          :class="[justAdded === t.key ? (justAddedDir === 'bottom' ? 'in-bottom' : 'in-right') : '']"
+          :style="panePos(i)"
+        >
+          <MonitorTerm
+            :ref="(el) => setPaneRef(t.key, el)"
+            :session-key="t.key"
+            :host-id="t.hostId"
+            :host-name="t.name"
+            :ordinal="t.ordinal"
+            :visible="termOpen"
+            :broadcast="multiInput"
+            @end="endPane"
+            @status="onTermStatus"
+            @input="onPaneInput($event.from, $event.text)"
+            @popout="popoutPane"
+          />
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -530,6 +623,55 @@ export default { name: 'MonitorView' }
 .mini-btn:hover { color: var(--accent); background: var(--accent-soft); }
 
 .hc-offline { padding: 10px 0 6px; }
+
+/* ===== 终端多窗格抽屉 ===== */
+.mon-term-mask {
+  position: fixed; inset: 0; z-index: 55;
+  background: rgb(16 24 40 / 0.45);
+}
+.mon-term-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 60;
+  width: min(1440px, 97vw);
+  background: var(--bg-soft); border-left: 1px solid var(--border);
+  box-shadow: -12px 0 40px rgb(16 24 40 / 0.18);
+  display: flex; flex-direction: column; overflow: hidden;
+  animation: monTermIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.mon-term-drawer.full { inset: 0; width: 100vw; height: 100vh; border-left: 0; border-radius: 0; }
+.mon-term-drawer :deep(.t-multi) { font-size: 12px; padding: 1px 10px; border-radius: 999px; color: var(--text-2); border: 1px dashed var(--border-strong); }
+.mon-term-drawer :deep(.t-multi.on) { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft); }
+.mon-term-drawer :deep(.mini-btn.on) { color: var(--accent); background: var(--accent-soft); }
+.mon-term-drawer :deep(.host-chips) {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  flex: none; padding: 7px 14px; border-bottom: 1px solid var(--border);
+}
+.mon-term-drawer :deep(.chips-hint) { font-size: 11.5px; color: var(--text-2); }
+.mon-term-drawer :deep(.host-chip) {
+  border: 1px solid var(--border-strong); background: var(--bg); color: var(--text);
+  border-radius: 999px; padding: 2px 12px; font-size: 12px; cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
+}
+.mon-term-drawer :deep(.host-chip:hover) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }
+.mon-term-drawer :deep(.chips-tip) { font-size: 11.5px; color: var(--red); }
+.mon-term-drawer :deep(.panes-grid) {
+  flex: 1; min-height: 0; display: grid; gap: 8px; padding: 8px 8px 8px; background: #0d1117;
+  transition: grid-template-rows 300ms cubic-bezier(0.2, 0.8, 0.2, 1), grid-template-columns 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.mon-term-drawer :deep(.mtp-wrap) {
+  display: flex; flex-direction: column; min-width: 0; min-height: 0;
+  border: 1px solid #30363d; border-radius: 10px; overflow: hidden; background: #0d1117;
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .mon-term-drawer :deep(.mtp-wrap.in-right) { animation: paneInRight 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  .mon-term-drawer :deep(.mtp-wrap.in-bottom) { animation: paneInBottom 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+  @keyframes paneInRight { from { transform: translateX(90px); opacity: 0; } to { transform: none; opacity: 1; } }
+  @keyframes paneInBottom { from { transform: translateY(70px); opacity: 0; } to { transform: none; opacity: 1; } }
+}
+@media (prefers-reduced-motion: reduce) {
+  .mon-term-drawer { animation: none !important; }
+  .mon-term-drawer :deep(.mtp-wrap.in-right), .mon-term-drawer :deep(.mtp-wrap.in-bottom) { animation: none !important; }
+}
 .hc-offline p { margin: 0 0 8px; color: var(--text-2); font-size: 12.5px; line-height: 1.5; word-break: break-all; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
 
 /* ===== 批量终端主机选择弹窗 ===== */

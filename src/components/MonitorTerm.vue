@@ -1,218 +1,198 @@
 <script setup>
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
+/* 终端窗格：多窗格布局里的一个会话。职责 = 连接（含并发受限自动重试）+
+   广播上行（多端输入开启时把键入上抛给父级分发）+ 尺寸自适应。
+   抽屉外壳 / 窗格排布 / 全屏 / ESC 均由 MonitorView 统一管理。 */
 const props = defineProps({
-  /* sessionKey 唯一标识一个终端实例（同一主机可开多个），hostId 仅用于连接目标机 */
   sessionKey: { type: String, default: '' },
   hostId: { type: String, default: '' },
   hostName: { type: String, default: '' },
-  /* 抽屉显隐由父级控制：关闭仅隐藏，不销毁终端会话，重新打开保留上次内容 */
-  open: { type: Boolean, default: true },
-  /* 多会话缓存：父级维护的页签列表 / 当前页签 / 各页签连接状态 */
-  tabs: { type: Array, default: () => [] },
-  activeId: { type: String, default: '' },
-  statuses: { type: Object, default: () => ({}) },
+  ordinal: { type: Number, default: 1 },
+  /* 抽屉是否处于打开状态（关闭仅隐藏，窗格与 shell 现场保留） */
+  visible: { type: Boolean, default: false },
+  /* 多端输入：键入内容上抛父级广播到其他窗格 */
+  broadcast: { type: Boolean, default: false },
 })
-const emit = defineEmits(['close', 'switch', 'end', 'new', 'status'])
+const emit = defineEmits(['end', 'status', 'input', 'popout'])
 
-const container = ref(null)
 const status = ref('')
 const statusCls = ref('')
-const full = ref(false)
-let term = null, ws = null, fit = null, loaded = false, curHost = ''
+const containerRef = ref(null)
+const rootEl = ref(null)
+let term = null, ws = null, fit = null, loaded = false
+let retryTimer = null, retryCount = 0, curHost = ''
 
 function setStatus(txt, cls = '') {
   status.value = txt
   statusCls.value = cls
   emit('status', props.sessionKey, cls)
 }
-function endSession(id = props.sessionKey) { emit('end', id) }
+
+function clearRetry() { if (retryTimer) { clearTimeout(retryTimer); retryTimer = null } }
 
 async function connect() {
   if (!props.hostId) return
   curHost = props.hostId
-  setStatsCleanup()
-  container.value.innerHTML = ''
-  setStatus('连接中…')
-  const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches
-  try {
-    if (!loaded) {
-      const [{ Terminal }, { FitAddon }] = await Promise.all([
-        import('@xterm/xterm'),
-        import('@xterm/addon-fit'),
-      ])
-      await import('@xterm/xterm/css/xterm.css')
-      loaded = true
-      globalThis.__xtermCtor = { Terminal, FitAddon }
-    }
-    const { Terminal, FitAddon } = globalThis.__xtermCtor
-    term = new Terminal({
-      fontFamily: "'Cascadia Code', Menlo, Consolas, monospace",
-      fontSize: 13.5,
-      theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#4493f8', selectionBackground: '#264f78' },
-      cursorBlink: !reducedMotion,
-      scrollback: 5000,
-    })
-    fit = new FitAddon()
-    term.loadAddon(fit)
-    term.open(container.value)
-    fit.fit()
-    const proto = location.protocol === 'https:' ? 'wss' : 'ws'
-    ws = new WebSocket(`${proto}://${location.host}/api/terminal?host=${encodeURIComponent(props.hostId)}&cols=${term.cols}&rows=${term.rows}`)
-    ws.binaryType = 'arraybuffer'
-    ws.onopen = () => setStatus(`已连接 ${props.hostId}`, 'ok')
-    ws.onmessage = (ev) => {
-      if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return }
-      try {
-        const msg = JSON.parse(ev.data)
-        if (msg.type === 'error') { setStatus('错误：' + msg.message, 'bad'); term.writeln(`\r\n\x1b[31m${msg.message}\x1b[0m`) }
-      } catch { /* 普通输入 */ }
-    }
-    ws.onclose = (ev) => { if (ws) setStatus(ev.reason ? `已断开（${ev.reason}）` : '已断开', 'bad') }
-    ws.onerror = () => setStatus('连接失败（未登录或网关不可达）', 'bad')
-    term.onData((d) => { if (ws && ws.readyState === 1) ws.send(d) })
-    term.onResize(({ cols, rows }) => { if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })) })
-    term.focus()
-  } catch (e) {
-    setStatus('终端加载失败：' + e.message, 'bad')
-  }
-}
-function setStatsCleanup() {
-  if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
+  clearRetry()
   if (term) { try { term.dispose() } catch { /* 已释放 */ } term = null }
-}
-function onKeydown(e) {
-  if (!props.open || e.key !== 'Escape') return // 非当前页签不响应
-  if (!full.value) { emit('close'); return }
-  e.preventDefault()
-  e.stopPropagation()
-  toggleFull() // 全屏时 ESC 还原窗口（拦截不让进 shell）
-}
-async function toggleFull() {
-  full.value = !full.value
-  await nextTick()
-  // 容器尺寸变化后重排 xterm 并把新行列同步给服务端（term.onResize 已接 WS resize 帧）
-  requestAnimationFrame(() => { try { fit && fit.fit() } catch { /* 忽略 */ } })
-  setTimeout(() => { try { fit && fit.fit(); term && term.focus() } catch { /* 忽略 */ } }, 80)
-}
-function popout() {
-  /* 弹出窗口需要独立会话：先释放本页签会话并移除页签 */
-  const id = props.hostId
-  const key = props.sessionKey
-  setStatsCleanup()
-  curHost = ''
-  emit('end', key)
-  window.open(`/monitor/terminal.html?host=${encodeURIComponent(id)}`, '_blank', 'width=980,height=640')
+  if (!loaded) {
+    const [{ Terminal }, { FitAddon }] = await Promise.all([import('@xterm/xterm'), import('@xterm/addon-fit')])
+    await import('@xterm/xterm/css/xterm.css')
+    window.__monTermLib = { Terminal, FitAddon }
+    loaded = true
+  }
+  const { Terminal, FitAddon } = window.__monTermLib
+  const container = containerRef.value
+  if (!container) return
+  container.innerHTML = ''
+  setStatus('连接中…')
+  const t = new Terminal({
+    fontFamily: "'Cascadia Code', Menlo, Consolas, monospace",
+    fontSize: 13,
+    theme: { background: '#0d1117', foreground: '#e6edf3', cursor: '#4d9fff', selectionBackground: '#264f78' },
+    cursorBlink: !matchMedia('(prefers-reduced-motion: reduce)').matches,
+    scrollback: 3000,
+  })
+  const f = new FitAddon()
+  t.loadAddon(f)
+  t.open(container)
+  f.fit()
+  term = t; fit = f
+  const proto = location.protocol === 'https:' ? 'wss' : 'ws'
+  const socket = new WebSocket(`${proto}://${location.host}/api/terminal?host=${encodeURIComponent(props.hostId)}&cols=${t.cols}&rows=${t.rows}`)
+  ws = socket
+  socket.binaryType = 'arraybuffer'
+  socket.onopen = () => { setStatus('已连接', 'ok'); retryCount = 0 }
+  socket.onmessage = (ev) => {
+    if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return }
+    try {
+      const msg = JSON.parse(ev.data)
+      if (msg.type === 'error') setStatus('错误：' + msg.message, 'bad')
+    } catch { /* 非控制帧 */ }
+  }
+  socket.onclose = (ev) => {
+    if (ws !== socket) return
+    /* 并发受限：自动延时重试（不放弃窗格，历史输出保留） */
+    if (ev.code === 4029 || /并发/.test(ev.reason || '')) {
+      retryCount += 1
+      if (retryCount <= 30) {
+        setStatus(`并发受限，20 秒后自动重连（第 ${retryCount} 次）`, 'bad')
+        retryTimer = setTimeout(connect, 20_000)
+      } else {
+        setStatus('自动重连已达上限，请手动点击「重连」', 'bad')
+      }
+      return
+    }
+    setStatus(ev.reason ? `断开（${ev.reason}）` : '断开', 'bad')
+  }
+  socket.onerror = () => setStatus('连接失败', 'bad')
+  /* 键入：本地必发；多端输入开启时上抛父级广播到其他窗格 */
+  t.onData((d) => {
+    if (socket.readyState === 1) socket.send(d)
+    if (props.broadcast) emit('input', { from: props.sessionKey, text: d })
+  })
+  t.onResize(({ cols, rows }) => {
+    if (socket.readyState === 1) socket.send(JSON.stringify({ type: 'resize', cols, rows }))
+  })
 }
 
-/* 重新显示时只重排/聚焦，不重连；会话已被服务端关闭（如空闲超时）时仍保留历史输出 */
+function reconnect() { connect() }
+function popout() {
+  /* 弹出窗口需要独立会话：先释放本窗格会话 */
+  emit('popout', props.sessionKey, props.hostId)
+  window.open(`/monitor/terminal.html?host=${encodeURIComponent(props.hostId)}`, '_blank', 'width=980,height=640')
+}
+function endSession() { emit('end', props.sessionKey) }
+
+/* 供父级调用的能力：广播下发 / 聚焦 / 重排 */
+function send(d) { if (ws && ws.readyState === 1) ws.send(d) }
+function paneFocus() { term && term.focus() }
+function paneRefit() { try { fit && fit.fit() } catch { /* 忽略 */ } }
+defineExpose({ send, focus: paneFocus, refit: paneRefit, el: rootEl })
+
+/* 抽屉重新打开：只重排 + 聚焦，不重连（shell 现场保留） */
 async function refitFocus() {
   await nextTick()
-  requestAnimationFrame(() => { try { fit && fit.fit() } catch { /* 忽略 */ } })
-  setTimeout(() => { try { fit && fit.fit(); term && term.focus() } catch { /* 忽略 */ } }, 80)
+  requestAnimationFrame(paneRefit)
+  setTimeout(() => { paneRefit(); paneFocus() }, 80)
 }
+watch(() => props.visible, (v) => { if (v) refitFocus() })
+watch(() => props.hostId, (v) => { if (v && props.visible && curHost !== v) connect() })
+onMounted(() => { connect() })
 
-watch(() => props.hostId, (v) => { if (v && props.open) connect() })
-watch(() => props.open, (v) => {
-  if (!v) { try { term && term.blur() } catch { /* 忽略 */ } return }
-  // 切换过主机或会话已被释放时才新建；同一主机再次打开保留原会话与输出
-  if (!term || curHost !== props.hostId) connect()
-  else refitFocus()
-}, { flush: 'post' })
-onMounted(() => { if (props.open) connect() })
-onBeforeUnmount(setStatsCleanup)
-
-function onResizeWin() { if (props.open && fit) { try { fit.fit() } catch { /* 忽略 */ } } }
+function onResizeWin() { if (props.visible) paneRefit() }
 window.addEventListener('resize', onResizeWin)
-// 捕获阶段监听：xterm 的 textarea 会吞 Escape（冒泡阶段收不到）；全屏时 ESC 还原窗口
-window.addEventListener('keydown', onKeydown, true)
 onBeforeUnmount(() => {
+  clearRetry()
   window.removeEventListener('resize', onResizeWin)
-  window.removeEventListener('keydown', onKeydown, true)
+  if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
+  if (term) { try { term.dispose() } catch { /* 已释放 */ } term = null }
 })
 </script>
 
 <template>
-  <Teleport to="body">
-    <div class="mon-term-mask" v-show="open && !full" @click="emit('close')" />
-    <div class="mon-term-drawer" v-show="open" :class="{ full }">
-      <div class="mon-term-head">
-        <span class="t-title">终端 · {{ hostName || hostId }}</span>
-        <span class="t-status" :class="statusCls">{{ status }}</span>
-        <span class="spacer" />
-        <button class="mini-btn" @click="connect">重连</button>
-        <button class="mini-btn" @click="popout">弹出窗口</button>
-        <button class="mini-btn" @click="toggleFull">{{ full ? '还原窗口' : '全屏' }}</button>
-        <button class="mini-btn" title="关闭该主机的 shell 会话（界面历史一并移除）" @click="endSession(activeId)">结束会话</button>
-        <button class="mini-btn" @click="emit('close')">✕ 关闭</button>
-      </div>
-      <div v-if="tabs.length" class="mon-term-tabs">
-        <button
-          v-for="t in tabs"
-          :key="t.key"
-          class="term-tab"
-          :class="{ on: t.key === activeId }"
-          :title="`${t.label}（点击切换，会话保持后台运行）`"
-          @click="emit('switch', t.key)"
-        >
-          <span class="tab-dot" :class="statuses[t.key]" />
-          <span class="tab-name">{{ t.label }}</span>
-          <span class="tab-x" title="结束该会话" @click.stop="endSession(t.key)">×</span>
-        </button>
-        <button class="term-new" title="为当前主机再开一个终端会话" @click="emit('new')">＋ 新会话</button>
-      </div>
-      <div ref="container" class="mon-term-body" />
+  <div ref="rootEl" class="mtp" @click="paneFocus">
+    <div class="mtp-head">
+      <span class="pane-dot" :class="statusCls" />
+      <span class="mtp-name" :title="hostName">
+        {{ hostName }}<template v-if="ordinal > 1"> #{{ ordinal }}</template>
+      </span>
+      <span class="mtp-status" :class="statusCls" :title="status">{{ status }}</span>
+      <span class="grow" />
+      <button class="mini-btn sm" title="重新连接该会话" @click.stop="reconnect">重连</button>
+      <button class="mini-btn sm" title="释放本窗格会话并在独立窗口打开" @click.stop="popout">弹出</button>
+      <button class="mini-btn sm danger" title="结束该会话（shell 将关闭）" @click.stop="endSession">✕</button>
     </div>
-  </Teleport>
+    <div ref="containerRef" class="mtp-body" />
+  </div>
 </template>
 
+<script>
+export default { name: 'MonitorTermPane' }
+</script>
+
 <style scoped>
-.mon-term-mask { position: fixed; inset: 0; background: rgb(16 24 40 / 0.35); z-index: 55; }
-.mon-term-drawer {
-  position: fixed; top: 0; right: 0; bottom: 0; width: min(920px, 96vw);
-  background: var(--bg-soft); z-index: 60; border-left: 1px solid var(--border);
-  box-shadow: -12px 0 40px rgb(16 24 40 / 0.18);
+.grow { flex: 1; }
+.mini-btn {
+  border: 0; background: transparent; color: #8b949e;
+  border-radius: 6px; padding: 1px 7px; font-size: 11.5px; cursor: pointer; flex: none;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.mini-btn:hover { color: #e6edf3; background: #21262d; }
+.mini-btn.danger:hover { color: #f85149; }
+.mini-btn.sm { padding: 1px 6px; font-size: 11px; }
+.mtp {
   display: flex; flex-direction: column;
-  animation: monTermIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  height: 100%; min-height: 0; min-width: 0;
+  background: #0d1117; overflow: hidden;
 }
-@keyframes monTermIn { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
-.mon-term-head { display: flex; align-items: center; gap: 10px; padding: 10px 14px; border-bottom: 1px solid var(--border); }
-.t-title { font-weight: 600; }
-.t-status { font-size: 12.5px; color: var(--text-2); }
-.t-status.ok { color: var(--green); }
-.t-status.bad { color: var(--red); }
-.spacer { flex: 1; }
-.mini-btn { border: 1px solid var(--border); background: var(--bg-soft); border-radius: 6px; padding: 2px 8px; font-size: 12.5px; cursor: pointer; color: var(--text-2); }
-.mini-btn:hover { border-color: var(--accent); color: var(--accent); }
-.mon-term-tabs {
-  display: flex; align-items: center; gap: 6px; flex: none;
-  padding: 7px 14px; border-bottom: 1px solid var(--border);
-  overflow-x: auto; scrollbar-width: thin;
+.mtp-head {
+  display: flex; align-items: center; gap: 8px; flex: none;
+  padding: 5px 10px; background: #161b22; border-bottom: 1px solid #30363d;
 }
-.term-tab {
-  display: inline-flex; align-items: center; gap: 6px; flex: none;
-  border: 1px solid var(--border); background: var(--bg); color: var(--text-2);
-  border-radius: 999px; padding: 3px 10px; font-size: 12px; cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+.pane-dot { width: 8px; height: 8px; border-radius: 50%; background: #8b949e; flex: none; }
+.pane-dot.ok { background: #3fb950; }
+.pane-dot.bad { background: #f85149; }
+.mtp-name {
+  font-size: 12px; font-weight: 600; color: #e6edf3;
+  max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.term-tab:hover { border-color: var(--border-strong); color: var(--text); }
-.term-tab.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-.term-new {
-  flex: none; border: 1px dashed var(--border-strong); background: transparent;
-  color: var(--text-2); border-radius: 999px; padding: 3px 10px;
-  font-size: 12px; cursor: pointer;
-  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+.mtp-status { font-size: 11px; color: #8b949e; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mtp-status.ok { color: #3fb950; }
+.mtp-status.bad { color: #f85149; }
+/* 底部留出安全边距：修复最后一行命令被浏览器底部遮挡的问题 */
+.mtp-body { flex: 1; padding: 6px 6px 16px; min-height: 0; }
+.mtp-body :deep(.xterm) { height: 100%; }
+/* xterm overlay 滚动条宽度为 0 且不可拖拽，给可见细滚动条 */
+.mtp-body :deep(.xterm-viewport) {
+  background-color: #0d1117 !important;
+  scrollbar-width: thin;
+  scrollbar-color: #3b4654 transparent;
+  scrollbar-gutter: stable;
 }
-.term-new:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
-.tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gray); flex: none; }
-.tab-dot.ok { background: var(--green); }
-.tab-dot.bad { background: var(--red); }
-.tab-name { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.tab-x { margin-left: 2px; font-size: 14px; line-height: 1; color: var(--text-2); }
-.tab-x:hover { color: var(--red); }
-.mon-term-body { flex: 1; padding: 8px; background: #0d1117; min-height: 0; }
-.mon-term-drawer.full { inset: 0; width: 100vw; height: 100vh; border-left: 0; }
-.mon-term-body :deep(.xterm) { height: 100%; }
-@media (prefers-reduced-motion: reduce) { .mon-term-drawer { animation: none; } }
-@media (max-width: 760px) { .mon-term-drawer { width: 100vw; } }
+.mtp-body :deep(.xterm-viewport::-webkit-scrollbar) { width: 9px; }
+.mtp-body :deep(.xterm-viewport::-webkit-scrollbar-track) { background: transparent; }
+.mtp-body :deep(.xterm-viewport::-webkit-scrollbar-thumb) { background: #39424e; border-radius: 6px; border: 2px solid #0d1117; }
+.mtp-body :deep(.xterm-viewport::-webkit-scrollbar-thumb:hover) { background: #55606e; }
 </style>
