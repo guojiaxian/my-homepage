@@ -19,8 +19,8 @@
     "sustainMin": 3
   },
   "terminal": {
-    "idleTimeoutMin": 15,
-    "maxSessionMin": 240,
+    "idleTimeoutMin": 480,
+    "maxSessionMin": 720,
     "maxSessionsPerHost": 2,
     "recordCommands": true
   },
