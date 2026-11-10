@@ -769,10 +769,26 @@ async function runProbe(NO_FETCH) {
 
     if (found) {
       status = 'running'
-      const { primary, extraPorts: rest } = pickPrimary(found.ports, meta.expectedPort)
-      port = primary.port
-      external = primary.external
-      extraPorts = rest
+      // 配置了 expectedPort 且该端口确实在监听、又不归属其他应用时，优先用它：
+      // 项目目录里可能挂着附属进程（如本站的监控网关 8301），cwd 会被误命中，
+      // 而真正对外服务的 nginx 80 / docker 端口往往没有可归属的进程。
+      const expected = Number(meta.expectedPort)
+      const expectedOwner = Number.isInteger(expected) ? portOwner.get(expected) : undefined
+      const preferExpected =
+        Number.isInteger(expected) &&
+        listenerExternal.has(expected) &&
+        (!expectedOwner || expectedOwner.appDir === dirName) &&
+        !found.ports.some((p) => p.port === expected)
+      if (preferExpected) {
+        port = expected
+        external = listenerExternal.get(expected) ?? false
+        extraPorts = found.ports.map((p) => p.port)
+      } else {
+        const { primary, extraPorts: rest } = pickPrimary(found.ports, meta.expectedPort)
+        port = primary.port
+        external = primary.external
+        extraPorts = rest
+      }
     } else {
       // 兜底：进程匹配不到（如 nginx 托管的本站、docker 部署、无权限读 /proc），
       // 直接探 expectedPort；是否对外监听从 ss 端口表取，避免误标「仅本机」

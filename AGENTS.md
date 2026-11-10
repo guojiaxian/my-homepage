@@ -20,7 +20,7 @@
 
 > ⚠️ 部署目录位于 `/root` 之下仍能正常访问，是因为本机 nginx 配置为 `user root;`（worker 也以 root 运行）。**若日后把 nginx 降权为 `nginx` 用户，站点会立刻 403**——届时需把 webroot 移出 `/root`（可用 `move-project.sh --webroot`）或放开目录遍历权限。
 
-> ℹ️ **本项目自身也作为普通应用登记在 `apps[]` 里**（id `my-homepage`，`expectedPort: 80`）。它由 nginx 托管，进程 cwd 不在项目目录，因此走「`expectedPort` TCP 兜底」探测；「是否对外监听」从 `ss` 端口表判定，不会误标「仅本机」。副作用：若此时跑 `npm run dev`，cwd 匹配会优先命中 5173 的开发实例；**监控网关常驻 8301 且 cwd 在项目根，也会被 cwd 匹配命中，主页可能显示 :8301 并标「仅本机」（已知探测副作用，不影响导航）**。
+> ℹ️ **本项目自身也作为普通应用登记在 `apps[]` 里**（id `my-homepage`，`expectedPort: 80`）。它由 nginx 托管，进程 cwd 不在项目目录，因此走「`expectedPort` TCP 兜底」探测；「是否对外监听」从 `ss` 端口表判定，不会误标「仅本机」。⚠️ 项目根目录下常驻的监控网关 8301 会被 cwd 匹配命中，**2026-11-10 已修正**：`expectedPort` 正在监听且不归属其他应用时优先作为主端口，8301 只进 `extraPorts`。若此时跑 `npm run dev`，5173 开发实例同样只作为附加端口。
 
 ---
 
@@ -291,7 +291,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 1. 解析 `ss -tlnp` → 每个 `LISTEN` 的端口、地址族（是否对外）、PID；
 2. 读 `/proc/<pid>/cwd` 判断进程是否位于 `/root/applications/<目录>` 下 → 该端口归属此应用；`/proc/<pid>/cmdline` 兜底匹配绝对路径；
 3. 进程匹配不到的，退回用 `net.connect` 探 `expectedPort`（1.5s 超时，连上即断，不发 HTTP）；「是否对外监听」取 `ss` 端口表（`listenerExternal`），因此 nginx 托管的本站 :80 不会被误标「仅本机」；
-4. **主端口选择**（`pickPrimary`）：`expectedPort` 命中则锚定它 → 否则取最小的**对外**监听端口 → 全为仅本机时取最小值。其余端口进 `extraPorts` 显示为 `+2222, 18099`。
+4. **主端口选择**（`pickPrimary` + expectedPort 优先）：配置的 `expectedPort` 正在监听、且不归属其他应用时优先作为主端口（避免项目目录内附属进程如监控网关 8301 被误判）→ `expectedPort` 在已归属端口里则锚定它 → 否则取最小的**对外**监听端口 → 全为仅本机时取最小值。其余端口进 `extraPorts` 显示为 `+2222, 18099`。
    > 这条规则是踩坑换来的：network-monitor 目录下曾有仅本机的 `sshmockd`(:2222) 非 HTTP 进程，原「取最小端口」规则会生成坏链接。
 5. 仅本机监听的端口会在前端标注「仅本机」。
 
@@ -700,7 +700,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | wedding-plan | 备婚计划 | 本机 | 19002 | synced |
 | jianji-ledger | 简记 · 账本 | 本机（离线应用，kinds: app） | — | no-repo |
 | time-logger | 时间记录器 | 本机（Web + APP） | 19001（https） | synced |
-| my-homepage | 我的应用导航（本站） | 本机（nginx 托管） | 80（探测可能误命中监控网关 8301） | 已纳入 git |
+| my-homepage | 我的应用导航（本站） | 本机（nginx 托管） | 80（+8301 监控网关，仅本机） | 已纳入 git |
 | network-monitor | NetWatch 网络监控 | **外机**（10.8.14.200） | http://10.8.14.200 · v1.0.2 | — |
 | log-gpt-agent | 网络安全自动运维平台 | **外机**（10.8.11.3） | http://10.8.11.3/ · 页面 200 | — |
 | study-log-cloud | StudyLog 公网版 | **公网**（阿里云） | http://47.95.140.199:3000 · v1.2.0 | — |

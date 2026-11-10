@@ -88,7 +88,7 @@ npm run deploy       # 一键发布：构建 → 探测 → 同步 /root/applica
 
 ## 端口探测原理
 
-`scripts/probe-apps.mjs` 解析 `ss -tlnp` 的所有 TCP LISTEN 端口，读取各监听进程的 `/proc/<pid>/cwd`（cmdline 兜底），进程工作目录位于 `/root/applications/<目录>` 内即认定该端口归属此应用；进程匹配不到时退回探测 `expectedPort` 的 TCP 连通性。结果合并元数据写入 `public/apps.json` 与线上 `/root/applications/my-homepage/www/apps.json`，含实际端口、附加端口、是否对外监听（仅本机监听会标注）、运行状态与探测时间。
+`scripts/probe-apps.mjs` 解析 `ss -tlnp` 的所有 TCP LISTEN 端口，读取各监听进程的 `/proc/<pid>/cwd`（cmdline 兜底），进程工作目录位于 `/root/applications/<目录>` 内即认定该端口归属此应用；进程匹配不到时退回探测 `expectedPort` 的 TCP 连通性。若配置的 `expectedPort` 正在监听且不归属其他应用，则优先作为主端口（避免项目目录内的附属进程，如监控网关 8301，被误判为应用入口），其余端口作为附加端口展示。结果合并元数据写入 `public/apps.json` 与线上 `/root/applications/my-homepage/www/apps.json`，含实际端口、附加端口、是否对外监听（仅本机监听会标注）、运行状态与探测时间。
 
 定时器安装（root）：
 
