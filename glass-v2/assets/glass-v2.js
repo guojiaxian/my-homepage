@@ -810,35 +810,40 @@
       const accent = cssVar('--gv-accent'), amber = cssVar('--gv-amber'), purple = cssVar('--gv-purple')
       const teal = cssVar('--gv-teal'), green = cssVar('--gv-green')
       const unit = (text) => ({ name: text, nameLocation: 'end', nameGap: 8, nameTextStyle: { color: cssVar('--gv-text-2'), fontSize: 10, align: 'left' } })
+      const legend = () => ({ top: 0, left: 'center', textStyle: { color: cssVar('--gv-text-2'), fontSize: 11 }, itemWidth: 14, itemHeight: 8 })
       const cpuBase = baseOption('{value}%')
       inst('cpu', $('#gv-ch-cpu')).setOption({
         ...cpuBase,
-        grid: { ...cpuBase.grid, right: 42 },
+        legend: legend(),
+        grid: { ...cpuBase.grid, right: 42, top: 30 },
         yAxis: [
           { ...cpuBase.yAxis },
-          { ...cpuBase.yAxis, ...unit('负载'), splitLine: { show: false }, axisLabel: { ...cpuBase.yAxis.axisLabel, formatter: '{value}' } },
+          { ...cpuBase.yAxis, splitLine: { show: false }, axisLabel: { ...cpuBase.yAxis.axisLabel, formatter: '{value}' } },
         ],
         series: [
-          lineSeries('CPU %', pts.map((p) => [t(p), p.cpu]), accent),
-          lineSeries('负载', pts.map((p) => [t(p), p.load]), amber, { noArea: true, yAxisIndex: 1 }),
+          lineSeries('CPU %（左轴）', pts.map((p) => [t(p), p.cpu]), accent),
+          lineSeries('负载（右轴）', pts.map((p) => [t(p), p.load]), amber, { noArea: true, yAxisIndex: 1 }),
         ],
       }, { notMerge: true })
       const memBase = baseOption('{value}%')
       inst('mem', $('#gv-ch-mem')).setOption({
         ...memBase,
-        grid: { ...memBase.grid, right: 46 },
+        legend: legend(),
+        grid: { ...memBase.grid, right: 46, top: 30 },
         yAxis: [
           { ...memBase.yAxis },
-          { ...memBase.yAxis, ...unit('Swap %'), splitLine: { show: false } },
+          { ...memBase.yAxis, splitLine: { show: false } },
         ],
         series: [
-          lineSeries('内存 %', pts.map((p) => [t(p), p.mem]), purple),
-          lineSeries('Swap %', pts.map((p) => [t(p), p.swap]), teal, { noArea: true, yAxisIndex: 1 }),
+          lineSeries('内存 %（左轴）', pts.map((p) => [t(p), p.mem]), purple),
+          lineSeries('Swap %（右轴）', pts.map((p) => [t(p), p.swap]), teal, { noArea: true, yAxisIndex: 1 }),
         ],
       }, { notMerge: true })
       const netBase = baseOption('{value}')
       inst('net', $('#gv-ch-net')).setOption({
         ...netBase,
+        legend: legend(),
+        grid: { ...netBase.grid, top: 30 },
         yAxis: { ...netBase.yAxis, ...unit('Mbps') },
         series: [
           lineSeries('下行 Mbps', pts.map((p) => [t(p), p.netI]), accent),
@@ -848,6 +853,8 @@
       const dioBase = baseOption('{value}')
       inst('dio', $('#gv-ch-dio')).setOption({
         ...dioBase,
+        legend: legend(),
+        grid: { ...dioBase.grid, top: 30 },
         yAxis: { ...dioBase.yAxis, ...unit('MB/s') },
         series: [
           lineSeries('读 MB/s', pts.map((p) => [t(p), p.dioR]), teal),

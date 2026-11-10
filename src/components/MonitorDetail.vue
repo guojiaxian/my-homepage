@@ -100,37 +100,38 @@ function renderTrends() {
   const cpuBase = baseOption('{value}%', range.value)
   c.setOption({
     ...cpuBase,
-    legend: { ...legendStyle(), show: false },
-    grid: { ...cpuBase.grid, right: 42 },
+    legend: legendStyle(),
+    grid: { ...cpuBase.grid, right: 42, top: 30 },
     yAxis: [
       { ...cpuBase.yAxis },
-      { ...cpuBase.yAxis, ...unit('负载'), splitLine: { show: false }, axisLabel: { ...cpuBase.yAxis.axisLabel, formatter: '{value}' } },
+      { ...cpuBase.yAxis, splitLine: { show: false }, axisLabel: { ...cpuBase.yAxis.axisLabel, formatter: '{value}' } },
     ],
     series: [
-      lineSeries('CPU %', pts().map((p) => [t(p), p.cpu]), cssVar('--accent')),
-      lineSeries('负载', pts().map((p) => [t(p), p.load]), cssVar('--amber'), { noArea: true, yAxisIndex: 1 }),
+      lineSeries('CPU %（左轴）', pts().map((p) => [t(p), p.cpu]), cssVar('--accent')),
+      lineSeries('负载（右轴）', pts().map((p) => [t(p), p.load]), cssVar('--amber'), { noArea: true, yAxisIndex: 1 }),
     ],
   }, { notMerge: true })
 
   const memBase = baseOption('{value}%', range.value)
   inst('mem', elMem.value).setOption({
     ...memBase,
-    legend: { ...legendStyle(), show: false },
-    grid: { ...memBase.grid, right: 46 },
+    legend: legendStyle(),
+    grid: { ...memBase.grid, right: 46, top: 30 },
     yAxis: [
       { ...memBase.yAxis },
-      { ...memBase.yAxis, ...unit('Swap %'), splitLine: { show: false } },
+      { ...memBase.yAxis, splitLine: { show: false } },
     ],
     series: [
-      lineSeries('内存 %', pts().map((p) => [t(p), p.mem]), cssVar('--purple')),
-      lineSeries('Swap %', pts().map((p) => [t(p), p.swap]), cssVar('--teal'), { noArea: true, yAxisIndex: 1 }),
+      lineSeries('内存 %（左轴）', pts().map((p) => [t(p), p.mem]), cssVar('--purple')),
+      lineSeries('Swap %（右轴）', pts().map((p) => [t(p), p.swap]), cssVar('--teal'), { noArea: true, yAxisIndex: 1 }),
     ],
   }, { notMerge: true })
 
   const netBase = baseOption('{value}', range.value)
   inst('net', elNet.value).setOption({
     ...netBase,
-    legend: { ...legendStyle(), show: false },
+    legend: legendStyle(),
+    grid: { ...netBase.grid, top: 30 },
     yAxis: { ...netBase.yAxis, ...unit('Mbps') },
     series: [
       lineSeries('下行 Mbps', pts().map((p) => [t(p), p.netI]), cssVar('--accent')),
@@ -141,7 +142,8 @@ function renderTrends() {
   const dioBase = baseOption('{value}', range.value)
   inst('dio', elDio.value).setOption({
     ...dioBase,
-    legend: { ...legendStyle(), show: false },
+    legend: legendStyle(),
+    grid: { ...dioBase.grid, top: 30 },
     yAxis: { ...dioBase.yAxis, ...unit('MB/s') },
     series: [
       lineSeries('读 MB/s', pts().map((p) => [t(p), p.dioR]), cssVar('--teal')),
@@ -262,7 +264,7 @@ onBeforeUnmount(() => {
 
     <p v-if="err" class="detail-err">加载失败：{{ err }}</p>
 
-    <div class="group-cap">资源趋势</div>
+    <div class="group-cap">资源趋势 <span>曲线颜色见各图图例 · 左右轴对应图例标注</span></div>
     <div class="charts4">
       <div class="chart-box"><h4>CPU / 负载</h4><div ref="elCpu" class="chart" /></div>
       <div class="chart-box"><h4>内存 / Swap</h4><div ref="elMem" class="chart" /></div>
