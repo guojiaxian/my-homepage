@@ -23,12 +23,22 @@ const emit = defineEmits(['unauth', 'update:settingsOpen'])
 const summary = ref(null)
 const loadErr = ref('')
 const selectedId = ref('')
-/* 终端页签：关闭抽屉仅隐藏，不同主机会话并行保留（最多 3 台，LRU 淘汰最久未用） */
-const TERM_TABS_MAX = 3
-const termTabs = ref([]) // [{ id, name }]，最后一项为最近使用
-const termActive = ref('')
+/* 终端页签：关闭抽屉仅隐藏，多会话并行保留（最多 8 个，同一主机可开多个，LRU 淘汰最久未用） */
+const TERM_TABS_MAX = 8
+const termTabs = ref([]) // [{ key, hostId, name, ordinal }]，最后一项为最近使用
+const termActive = ref('') // 当前页签 key
 const termOpen = ref(false)
-const termStatus = reactive({}) // hostId -> '' | 'ok' | 'bad'（页签状态点）
+const termStatus = reactive({}) // key -> '' | 'ok' | 'bad'（页签状态点）
+let termSeq = 0
+/* 同一主机出现多个会话时，页签名追加稳定序号（落库在 ordinal，不随切换重排） */
+const termTabsView = computed(() => {
+  const counts = {}
+  for (const t of termTabs.value) counts[t.hostId] = (counts[t.hostId] || 0) + 1
+  return termTabs.value.map((t) => ({
+    ...t,
+    label: counts[t.hostId] > 1 ? `${t.name} #${t.ordinal}` : t.name,
+  }))
+})
 const batchPickerOpen = ref(false)
 const batchOpen = ref(false)
 const batchSel = reactive(new Set())
@@ -122,38 +132,51 @@ watch(
 function toggleDetail(h) {
   selectedId.value = selectedId.value === h.id ? '' : h.id
 }
-function openTerm(h) {
-  // 已有该主机页签：切过去即可，沿用原 WS 会话与滚动内容
-  if (termTabs.value.some((t) => t.id === h.id)) { switchTerm(h.id); return }
+function openTerm(h, forceNew = false) {
+  // 默认切到该主机最近使用的会话；要再开一个用页签栏「＋ 新会话」
+  if (!forceNew) {
+    for (let i = termTabs.value.length - 1; i >= 0; i--) {
+      if (termTabs.value[i].hostId === h.id) { switchTerm(termTabs.value[i].key); return }
+    }
+  }
   // 超出上限先淘汰最久未使用且非当前页签的会话
   while (termTabs.value.length >= TERM_TABS_MAX) {
-    const victim = termTabs.value.find((t) => t.id !== termActive.value)
+    const victim = termTabs.value.find((t) => t.key !== termActive.value)
     if (!victim) break
-    endTerm(victim.id)
+    endTerm(victim.key)
   }
-  termTabs.value.push({ id: h.id, name: h.name || h.id })
-  termActive.value = h.id
+  const ordinal = Math.max(0, ...termTabs.value.filter((t) => t.hostId === h.id).map((t) => t.ordinal)) + 1
+  const key = `${h.id}:${++termSeq}`
+  termTabs.value.push({ key, hostId: h.id, name: h.name || h.id, ordinal })
+  termActive.value = key
   termOpen.value = true
 }
-function switchTerm(id) {
-  const i = termTabs.value.findIndex((t) => t.id === id)
+/* 为当前页签的主机再开一个独立会话 */
+function newTermForActive() {
+  const cur = termTabs.value.find((t) => t.key === termActive.value)
+  if (!cur) return
+  const h = hosts.value.find((x) => x.id === cur.hostId) || { id: cur.hostId, name: cur.name }
+  openTerm(h, true)
+}
+function switchTerm(key) {
+  const i = termTabs.value.findIndex((t) => t.key === key)
   if (i < 0) return
   const [t] = termTabs.value.splice(i, 1)
   termTabs.value.push(t) // 最近使用排到最后，淘汰时优先释放最久未用
-  termActive.value = id
+  termActive.value = key
   termOpen.value = true
 }
-function endTerm(id) {
-  const i = termTabs.value.findIndex((t) => t.id === id)
+function endTerm(key) {
+  const i = termTabs.value.findIndex((t) => t.key === key)
   if (i < 0) return
   termTabs.value.splice(i, 1)
-  delete termStatus[id]
-  if (termActive.value !== id) return
+  delete termStatus[key]
+  if (termActive.value !== key) return
   const last = termTabs.value[termTabs.value.length - 1]
-  if (last) termActive.value = last.id
+  if (last) termActive.value = last.key
   else { termActive.value = ''; termOpen.value = false }
 }
-function onTermStatus(id, cls) { termStatus[id] = cls || '' }
+function onTermStatus(key, cls) { termStatus[key] = cls || '' }
 function onSaved() { refresh() }
 
 /* ---------- 详情页 ⚙：直连编辑单主机 ----------
@@ -366,19 +389,21 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
       @save="saveDirectEdit"
       @saved="onSaved"
     />
-    <!-- 终端抽屉：每个主机一个常驻实例，最多 3 个（LRU） -->
+    <!-- 终端抽屉：每个会话一个常驻实例（同一主机可多个），最多 8 个（LRU） -->
     <MonitorTerm
-      v-for="t in termTabs"
-      :key="t.id"
-      :host-id="t.id"
+      v-for="t in termTabsView"
+      :key="t.key"
+      :session-key="t.key"
+      :host-id="t.hostId"
       :host-name="t.name"
-      :open="termOpen && termActive === t.id"
-      :tabs="termTabs"
+      :open="termOpen && termActive === t.key"
+      :tabs="termTabsView"
       :active-id="termActive"
       :statuses="termStatus"
       @close="termOpen = false"
       @switch="switchTerm"
       @end="endTerm"
+      @new="newTermForActive"
       @status="onTermStatus"
     />
   </div>

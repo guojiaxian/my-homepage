@@ -40,7 +40,7 @@ cat data/monitor/INITIAL_PASSWORD.txt
 | `collect.remoteIntervalSec` | 20 | 远程 SSH 采集周期 |
 | `collect.retentionDays` | 7 | 历史 JSONL 保留天数（7 天约 35MB/3 主机） |
 | `thresholds.*` | CPU 85 / 内存 90 / 磁盘 90 / 每核负载 2 | 告警阈值；`sustainMin` 持续分钟才触发 |
-| `terminal.*` | 空闲 480 分 / 上限 720 分 / 并发 2 | Web 终端限制（空闲 8h、硬顶 12h）；`recordCommands` 命令审计开关；改动仅对新会话生效 |
+| `terminal.*` | 空闲 480 分 / 上限 720 分 / 每主机并发 10 | Web 终端限制（空闲 8h、硬顶 12h）；`recordCommands` 命令审计开关；改动仅对新会话生效 |
 | `webhookUrl` | 空 | 告警触发/恢复时 POST JSON |
 | `hosts[]` | 本机 + 2 远程 | 纳管主机；`type: local` 直读 /proc，`type: ssh` 免 Agent 采集 |
 | `trackedDirs[]` | 空 | 自定义跟踪目录；**主页 `apps[].directory` 自动并入，无需重复登记** |
@@ -113,7 +113,7 @@ curl -fsSL 'http://10.8.11.4/api/monitor/agent/install.sh?token=<token>&interval
 | 主机卡片「未连通: All configured authentication methods failed」 | 密钥是否已 `ssh-copy-id`；`ssh -i <keyPath> root@host true` 手测 | 分发公钥；或确认 `keyPath` 指向**已在目标机 authorized_keys 里的**私钥（本机默认终端走 `~/.ssh/id_rsa`，id_ed25519 不在 authorized_keys） |
 | 主机指纹告警拒绝连接 | 目标机是否重装/换 IP 复用 | 确认合法后删 `data/monitor/credentials.json` 中该主机 `hostFp` |
 | 终端打不开（立刻断开 401） | 会话是否丢失（cookie 被清理 / 换了浏览器） | 重新登录一次即可（会话持久化在网关侧，重启不掉线）；浏览器 WS 被代理拦截时检查 nginx `/api/terminal` 的 Upgrade 头（两处 server 块都要有） |
-| 终端「该主机并发会话已达上限」 | `maxSessionsPerHost`（默认 2） | 关闭闲置会话或在设置中调大 |
+| 终端「该主机并发会话已达上限」 | `maxSessionsPerHost`（当前 10） | 关闭闲置会话或在设置中调大 |
 | 图表空白 | 该主机是否刚启用（首个周期前无速率数据） | 等一个周期；`curl -b cookie .../hosts/<id>/history?range=1h` 看点数 |
 | 告警不触发 | `sustainMin` 持续窗口未到 | 默认持续 3 分钟才触发，属预期 |
 | 忘记密码 | — | `echo '新密码' \| node scripts/monitor-server.mjs --set-password-stdin` |

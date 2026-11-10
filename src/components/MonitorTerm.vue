@@ -2,16 +2,18 @@
 import { nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 
 const props = defineProps({
+  /* sessionKey 唯一标识一个终端实例（同一主机可开多个），hostId 仅用于连接目标机 */
+  sessionKey: { type: String, default: '' },
   hostId: { type: String, default: '' },
   hostName: { type: String, default: '' },
   /* 抽屉显隐由父级控制：关闭仅隐藏，不销毁终端会话，重新打开保留上次内容 */
   open: { type: Boolean, default: true },
-  /* 多主机会话缓存：父级维护的页签列表 / 当前页签 / 各页签连接状态 */
+  /* 多会话缓存：父级维护的页签列表 / 当前页签 / 各页签连接状态 */
   tabs: { type: Array, default: () => [] },
   activeId: { type: String, default: '' },
   statuses: { type: Object, default: () => ({}) },
 })
-const emit = defineEmits(['close', 'switch', 'end', 'status'])
+const emit = defineEmits(['close', 'switch', 'end', 'new', 'status'])
 
 const container = ref(null)
 const status = ref('')
@@ -22,9 +24,9 @@ let term = null, ws = null, fit = null, loaded = false, curHost = ''
 function setStatus(txt, cls = '') {
   status.value = txt
   statusCls.value = cls
-  emit('status', props.hostId, cls)
+  emit('status', props.sessionKey, cls)
 }
-function endSession(id = props.hostId) { emit('end', id) }
+function endSession(id = props.sessionKey) { emit('end', id) }
 
 async function connect() {
   if (!props.hostId) return
@@ -94,11 +96,12 @@ async function toggleFull() {
   setTimeout(() => { try { fit && fit.fit(); term && term.focus() } catch { /* 忽略 */ } }, 80)
 }
 function popout() {
-  /* 弹出窗口需要独立会话：先释放本页签会话并移除页签，避免同一主机并发占用 */
+  /* 弹出窗口需要独立会话：先释放本页签会话并移除页签 */
   const id = props.hostId
+  const key = props.sessionKey
   setStatsCleanup()
   curHost = ''
-  emit('end', id)
+  emit('end', key)
   window.open(`/monitor/terminal.html?host=${encodeURIComponent(id)}`, '_blank', 'width=980,height=640')
 }
 
@@ -143,19 +146,20 @@ onBeforeUnmount(() => {
         <button class="mini-btn" title="关闭该主机的 shell 会话（界面历史一并移除）" @click="endSession(activeId)">结束会话</button>
         <button class="mini-btn" @click="emit('close')">✕ 关闭</button>
       </div>
-      <div v-if="tabs.length > 1" class="mon-term-tabs">
+      <div v-if="tabs.length" class="mon-term-tabs">
         <button
           v-for="t in tabs"
-          :key="t.id"
+          :key="t.key"
           class="term-tab"
-          :class="{ on: t.id === activeId }"
-          :title="`${t.name}（点击切换，会话保持后台运行）`"
-          @click="emit('switch', t.id)"
+          :class="{ on: t.key === activeId }"
+          :title="`${t.label}（点击切换，会话保持后台运行）`"
+          @click="emit('switch', t.key)"
         >
-          <span class="tab-dot" :class="statuses[t.id]" />
-          <span class="tab-name">{{ t.name }}</span>
-          <span class="tab-x" title="结束该会话" @click.stop="endSession(t.id)">×</span>
+          <span class="tab-dot" :class="statuses[t.key]" />
+          <span class="tab-name">{{ t.label }}</span>
+          <span class="tab-x" title="结束该会话" @click.stop="endSession(t.key)">×</span>
         </button>
+        <button class="term-new" title="为当前主机再开一个终端会话" @click="emit('new')">＋ 新会话</button>
       </div>
       <div ref="container" class="mon-term-body" />
     </div>
@@ -193,6 +197,13 @@ onBeforeUnmount(() => {
 }
 .term-tab:hover { border-color: var(--border-strong); color: var(--text); }
 .term-tab.on { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.term-new {
+  flex: none; border: 1px dashed var(--border-strong); background: transparent;
+  color: var(--text-2); border-radius: 999px; padding: 3px 10px;
+  font-size: 12px; cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.term-new:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 .tab-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--gray); flex: none; }
 .tab-dot.ok { background: var(--green); }
 .tab-dot.bad { background: var(--red); }

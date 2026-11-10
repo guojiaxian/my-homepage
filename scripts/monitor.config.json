@@ -21,7 +21,7 @@
   "terminal": {
     "idleTimeoutMin": 480,
     "maxSessionMin": 720,
-    "maxSessionsPerHost": 2,
+    "maxSessionsPerHost": 10,
     "recordCommands": true
   },
   "webhookUrl": "",
