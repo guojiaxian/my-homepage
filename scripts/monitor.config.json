@@ -92,7 +92,7 @@
     },
     {
       "id": "lan-1103",
-      "name": "网络安全自动运维",
+      "name": "内网节点 · 113",
       "type": "ssh",
       "group": "内网",
       "mode": "agent",

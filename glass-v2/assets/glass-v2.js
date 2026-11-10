@@ -1299,6 +1299,7 @@
     updateMode()
     await new Promise((r) => setTimeout(r, 60))
     if (!bt.open) return // closeBatch 已在 60ms 内被调用
+    for (const h of hosts) connectPane(h)
   }
 
   function setStatusPane(pane, txt, cls) {
