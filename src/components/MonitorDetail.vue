@@ -89,39 +89,60 @@ function pts() { return hist.value || [] }
 function renderTrends() {
   const { baseOption, lineSeries, legendStyle, cssVar } = mod()
   const t = (p) => p.t
+  /* 纵轴单位：轴名放顶部，避免数值标签加单位后挤压绘图区 */
+  const unit = (text) => ({
+    name: text,
+    nameLocation: 'end',
+    nameGap: 8,
+    nameTextStyle: { color: cssVar('--text-2'), fontSize: 10, align: 'left' },
+  })
   const c = inst('cpu', elCpu.value)
+  const cpuBase = baseOption('{value}%', range.value)
   c.setOption({
-    ...baseOption('{value}%', range.value),
+    ...cpuBase,
     legend: { ...legendStyle(), show: false },
-    yAxis: { ...baseOption('{value}%', range.value).yAxis, max: 100 },
+    grid: { ...cpuBase.grid, right: 42 },
+    yAxis: [
+      { ...cpuBase.yAxis },
+      { ...cpuBase.yAxis, ...unit('负载'), splitLine: { show: false }, axisLabel: { ...cpuBase.yAxis.axisLabel, formatter: '{value}' } },
+    ],
     series: [
       lineSeries('CPU %', pts().map((p) => [t(p), p.cpu]), cssVar('--accent')),
-      lineSeries('负载', pts().map((p) => [t(p), p.load]), cssVar('--amber'), { noArea: true }),
+      lineSeries('负载', pts().map((p) => [t(p), p.load]), cssVar('--amber'), { noArea: true, yAxisIndex: 1 }),
     ],
   }, { notMerge: true })
 
+  const memBase = baseOption('{value}%', range.value)
   inst('mem', elMem.value).setOption({
-    ...baseOption('{value}%', range.value),
+    ...memBase,
     legend: { ...legendStyle(), show: false },
-    yAxis: { ...baseOption('{value}%', range.value).yAxis, max: 100 },
+    grid: { ...memBase.grid, right: 46 },
+    yAxis: [
+      { ...memBase.yAxis },
+      { ...memBase.yAxis, ...unit('Swap %'), splitLine: { show: false } },
+    ],
     series: [
       lineSeries('内存 %', pts().map((p) => [t(p), p.mem]), cssVar('--purple')),
-      lineSeries('Swap %', pts().map((p) => [t(p), p.swap]), cssVar('--teal'), { noArea: true }),
+      lineSeries('Swap %', pts().map((p) => [t(p), p.swap]), cssVar('--teal'), { noArea: true, yAxisIndex: 1 }),
     ],
   }, { notMerge: true })
 
+  const netBase = baseOption('{value}', range.value)
   inst('net', elNet.value).setOption({
-    ...baseOption('{value}', range.value),
+    ...netBase,
     legend: { ...legendStyle(), show: false },
+    yAxis: { ...netBase.yAxis, ...unit('Mbps') },
     series: [
       lineSeries('下行 Mbps', pts().map((p) => [t(p), p.netI]), cssVar('--accent')),
       lineSeries('上行 Mbps', pts().map((p) => [t(p), p.netO]), cssVar('--green')),
     ],
   }, { notMerge: true })
 
+  const dioBase = baseOption('{value}', range.value)
   inst('dio', elDio.value).setOption({
-    ...baseOption('{value}', range.value),
+    ...dioBase,
     legend: { ...legendStyle(), show: false },
+    yAxis: { ...dioBase.yAxis, ...unit('MB/s') },
     series: [
       lineSeries('读 MB/s', pts().map((p) => [t(p), p.dioR]), cssVar('--teal')),
       lineSeries('写 MB/s', pts().map((p) => [t(p), p.dioW]), cssVar('--amber')),

@@ -794,7 +794,7 @@
         grid: { left: 44, right: 14, top: 24, bottom: 26 },
         tooltip: { trigger: 'axis', axisPointer: { type: 'line' }, backgroundColor: 'rgba(15,24,42,0.94)', borderColor: 'rgba(150,175,220,0.3)', textStyle: { color: '#e9effa', fontSize: 12 } },
         xAxis: { type: 'time', axisLine: a.axisLine, axisLabel: { ...a.axisLabel, formatter: state.range === '7d' ? '{MM}-{dd} {HH}:{mm}' : '{HH}:{mm}' } },
-        yAxis: { type: 'value', axisLabel: { ...a.axisLabel, formatter: yFmt }, splitLine: a.splitLine },
+        yAxis: { type: 'value', scale: true, axisLabel: { ...a.axisLabel, formatter: yFmt }, splitLine: a.splitLine },
       }
     }
     function areaColor(hex) {
@@ -809,29 +809,46 @@
       const t = (p) => p.t
       const accent = cssVar('--gv-accent'), amber = cssVar('--gv-amber'), purple = cssVar('--gv-purple')
       const teal = cssVar('--gv-teal'), green = cssVar('--gv-green')
+      const unit = (text) => ({ name: text, nameLocation: 'end', nameGap: 8, nameTextStyle: { color: cssVar('--gv-text-2'), fontSize: 10, align: 'left' } })
+      const cpuBase = baseOption('{value}%')
       inst('cpu', $('#gv-ch-cpu')).setOption({
-        ...baseOption('{value}%'), yAxis: { ...baseOption('{value}%').yAxis, max: 100 },
+        ...cpuBase,
+        grid: { ...cpuBase.grid, right: 42 },
+        yAxis: [
+          { ...cpuBase.yAxis },
+          { ...cpuBase.yAxis, ...unit('负载'), splitLine: { show: false }, axisLabel: { ...cpuBase.yAxis.axisLabel, formatter: '{value}' } },
+        ],
         series: [
           lineSeries('CPU %', pts.map((p) => [t(p), p.cpu]), accent),
-          lineSeries('负载', pts.map((p) => [t(p), p.load]), amber, { noArea: true }),
+          lineSeries('负载', pts.map((p) => [t(p), p.load]), amber, { noArea: true, yAxisIndex: 1 }),
         ],
       }, { notMerge: true })
+      const memBase = baseOption('{value}%')
       inst('mem', $('#gv-ch-mem')).setOption({
-        ...baseOption('{value}%'), yAxis: { ...baseOption('{value}%').yAxis, max: 100 },
+        ...memBase,
+        grid: { ...memBase.grid, right: 46 },
+        yAxis: [
+          { ...memBase.yAxis },
+          { ...memBase.yAxis, ...unit('Swap %'), splitLine: { show: false } },
+        ],
         series: [
           lineSeries('内存 %', pts.map((p) => [t(p), p.mem]), purple),
-          lineSeries('Swap %', pts.map((p) => [t(p), p.swap]), teal, { noArea: true }),
+          lineSeries('Swap %', pts.map((p) => [t(p), p.swap]), teal, { noArea: true, yAxisIndex: 1 }),
         ],
       }, { notMerge: true })
+      const netBase = baseOption('{value}')
       inst('net', $('#gv-ch-net')).setOption({
-        ...baseOption('{value}'),
+        ...netBase,
+        yAxis: { ...netBase.yAxis, ...unit('Mbps') },
         series: [
           lineSeries('下行 Mbps', pts.map((p) => [t(p), p.netI]), accent),
           lineSeries('上行 Mbps', pts.map((p) => [t(p), p.netO]), green),
         ],
       }, { notMerge: true })
+      const dioBase = baseOption('{value}')
       inst('dio', $('#gv-ch-dio')).setOption({
-        ...baseOption('{value}'),
+        ...dioBase,
+        yAxis: { ...dioBase.yAxis, ...unit('MB/s') },
         series: [
           lineSeries('读 MB/s', pts.map((p) => [t(p), p.dioR]), teal),
           lineSeries('写 MB/s', pts.map((p) => [t(p), p.dioW]), amber),

@@ -5,11 +5,10 @@ import {
   GridComponent,
   TooltipComponent,
   LegendComponent,
-  MarkLineComponent,
 } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 
-echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, MarkLineComponent, CanvasRenderer])
+echarts.use([LineChart, BarChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer])
 
 export { echarts }
 
@@ -53,7 +52,7 @@ export function baseOption(yFmt, range = '1h') {
       axisLine: a.axisLine,
       axisLabel: { ...a.axisLabel, formatter: timeAxisFormatter(range), hideOverlap: true },
     },
-    yAxis: { type: 'value', axisLabel: { ...a.axisLabel, formatter: yFmt }, splitLine: a.splitLine },
+    yAxis: { type: 'value', scale: true, axisLabel: { ...a.axisLabel, formatter: yFmt }, splitLine: a.splitLine },
   }
 }
 
