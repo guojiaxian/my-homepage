@@ -207,6 +207,35 @@
       "url": "http://10.8.14.200",
       "name": "NetWatch 网络监控",
       "description": "单位多出口宽带网络监控系统（部署于内网另一台服务器 10.8.14.200）：面向 12 条联通宽带 × 12 个楼层子网的分流场景，监测出口线路连通性 / 网速并告警，同时覆盖外网视角的官网可达性监控。"
+    },
+    {
+      "id": "log-gpt-agent",
+      "healthUrl": "http://10.8.11.3/",
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/CybersecAgent",
+      "tags": [
+        "安全",
+        "运维"
+      ],
+      "icon": "🛡️",
+      "location": "网络安全自动运维服务器",
+      "host": "10.8.11.3",
+      "languages": [
+        "Python",
+        "JavaScript"
+      ],
+      "frontend": [
+        "Vue 3"
+      ],
+      "backend": [
+        "Flask"
+      ],
+      "url": "http://10.8.11.3/",
+      "name": "网络安全自动运维平台",
+      "description": "多智能体网络安全监控与自动化运维平台（log_gpt_agent），部署在内网另一台服务器 10.8.11.3，提供安全事件监控、研判告警与自动化处置。"
     }
   ],
   "page": {
@@ -214,5 +243,5 @@
     "heroTitle": "应用中心",
     "heroSubtitle": "部署在这台服务器上的个人项目，端口与运行状态每 3 分钟自动探测，源码同步每 5 分钟。"
   },
-  "$comment": "应用元数据（手工维护）。probe-apps.mjs 会探测每个应用的实际监听端口、运行状态与 git 同步状态，并与本文件合并生成前端使用的 apps.json。新增应用：先在 /root/applications 建目录并启动服务，再在此追加一条记录（id 必须与目录名一致）；漏配的应用若在监听也会被自动发现，标记为「待补充」。可选：顶层加 order 字段（id 数组）定义全局默认显示顺序，未列出的排后面。另顶层可加 remoteApps 数组：部署在云服务器等外部主机的应用，通过 healthUrl 健康接口探查在线状态与版本号（不做 git 检查）。条目用 \"kinds\": [\"web\",\"app\",\"miniapp\",\"tv\",\"cli\"] 定义应用形式（可多选）；不含 web 时视为离线应用（纯 APP / 小程序 / 电视 / CLI），主页显示灰色「离线应用」，不做端口探测；含 web 则照常探测。另可加 \"env\": \"lan\"/\"public\" 定义部署位置（内网/公网，本机缺省 lan、远程缺省 public）；本机应用可加 \"https\": true 让访问链接使用 https://。技术栈用 \"languages\"/\"frontend\"/\"backend\" 数组描述；本机应用留空会自动识别，远程应用需手动填写。"
+  "$comment": "应用元数据（手工维护）。probe-apps.mjs 会探测每个应用的实际监听端口、运行状态与 git 同步状态，并与本文件合并生成前端使用的 apps.json。新增应用：先在 /root/applications 建目录并启动服务，再在此追加一条记录（id 必须与目录名一致）；漏配的应用若在监听也会被自动发现，标记为「待补充」。可选：顶层加 order 字段（id 数组）定义全局默认显示顺序，未列出的排后面。另顶层可加 remoteApps 数组：部署在本机之外主机上的应用（局域网外机 env=lan / 公网云服务器 env=public），通过 healthUrl 健康接口探查在线状态与版本号（不做 git 检查）。条目用 \"kinds\": [\"web\",\"app\",\"miniapp\",\"tv\",\"cli\"] 定义应用形式（可多选）；不含 web 时视为离线应用（纯 APP / 小程序 / 电视 / CLI），主页显示灰色「离线应用」，不做端口探测；含 web 则照常探测。另可加 \"env\": \"lan\"/\"public\" 定义部署位置（内网/公网，本机缺省 lan、远程缺省 public）；本机应用可加 \"https\": true 让访问链接使用 https://。技术栈用 \"languages\"/\"frontend\"/\"backend\" 数组描述；本机应用留空会自动识别，远程应用需手动填写。"
 }

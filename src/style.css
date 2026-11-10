@@ -531,7 +531,7 @@ button {
   font-size: 14px;
 }
 
-/* ===== 网络环境（内网 / 公网）===== */
+/* ===== 应用归属（本机 / 外机 / 公网）===== */
 .env-chip {
   display: inline-flex;
   align-items: center;
@@ -546,6 +546,11 @@ button {
 .env-chip.lan {
   background: var(--accent-soft);
   color: var(--accent);
+}
+
+.env-chip.ext {
+  background: var(--green-soft);
+  color: var(--green);
 }
 
 .env-chip.net {

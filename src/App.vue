@@ -5,6 +5,7 @@ import AppCard from './components/AppCard.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import MonitorView from './components/MonitorView.vue'
 import PageHero from './components/PageHero.vue'
+import { appScope } from './lib/app-utils.js'
 
 /* ---------- 页面信息（可在首页设置面板中修改） ---------- */
 const page = ref({
@@ -317,9 +318,9 @@ const displayApps = computed(() => {
 })
 
 const runningCount = computed(() => apps.value.filter((a) => a.status === 'running').length)
-const isPublic = (a) => (a.env ? a.env === 'public' : Boolean(a.remote))
-const lanCount = computed(() => apps.value.filter((a) => !isPublic(a)).length)
-const netCount = computed(() => apps.value.filter((a) => isPublic(a)).length)
+const localCount = computed(() => apps.value.filter((a) => appScope(a) === 'local').length)
+const externalCount = computed(() => apps.value.filter((a) => appScope(a) === 'external').length)
+const publicCount = computed(() => apps.value.filter((a) => appScope(a) === 'public').length)
 const gitUnsynced = computed(
   () => apps.value.filter((a) => a.git && a.git.status !== 'synced').length,
 )
@@ -419,10 +420,12 @@ onBeforeUnmount(() => {
         <span class="dot" :style="{ background: runningCount ? 'var(--green)' : 'var(--gray)' }" />
         <b>{{ runningCount }}</b> 个运行中
       </span>
-      <span class="stat-chip" title="按部署位置：内网 / 公网">
-        内网 <b style="color: var(--accent)">{{ lanCount }}</b>
+      <span class="stat-chip" title="按应用所在位置：本机 / 外机 / 公网">
+        本机 <b style="color: var(--accent)">{{ localCount }}</b>
         <span style="color: var(--gray)">·</span>
-        公网 <b style="color: var(--amber)">{{ netCount }}</b>
+        外机 <b style="color: var(--green)">{{ externalCount }}</b>
+        <span style="color: var(--gray)">·</span>
+        公网 <b style="color: var(--amber)">{{ publicCount }}</b>
       </span>
       <span class="stat-chip" title="源码与 GitHub 仓库的同步状态">
         <span class="dot" :style="{ background: gitUnsynced ? 'var(--amber)' : 'var(--green)' }" />

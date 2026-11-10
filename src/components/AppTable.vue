@@ -120,7 +120,7 @@ async function copyDir(app) {
           </td>
           <td>
             <div class="app-cell">
-              <span class="app-icon" :class="{ 'icon-net': envInfo(app).cls === 'net' }" aria-hidden="true">{{ app.icon }}</span>
+              <span class="app-icon" :class="{ 'icon-ext': envInfo(app).cls === 'ext', 'icon-net': envInfo(app).cls === 'net' }" aria-hidden="true">{{ app.icon }}</span>
               <div class="app-meta">
                 <span class="app-name">
                   <span class="env-chip" :class="envInfo(app).cls">{{ envInfo(app).label }}</span>
@@ -299,9 +299,17 @@ tr.dragging {
   background: var(--amber-soft);
 }
 
-/* 行首环境色条：内网蓝 / 公网橙 */
+.app-icon.icon-ext {
+  background: var(--green-soft);
+}
+
+/* 行首归属色条：本机蓝 / 外机绿 / 公网橙 */
 tbody tr.lan td:first-child {
   border-left: 3px solid var(--accent);
+}
+
+tbody tr.ext td:first-child {
+  border-left: 3px solid var(--green);
 }
 
 tbody tr.net td:first-child {

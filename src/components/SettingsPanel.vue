@@ -22,6 +22,14 @@ const editingApp = computed(() => {
 })
 const editingIsRemote = computed(() => editing.value?.list === 'remoteApps')
 
+/** 远程应用按归属拆分：外机（局域网其他主机）/ 公网（云服务器） */
+const externalApps = computed(() =>
+  form.value.remoteApps.map((a, i) => ({ a, i })).filter(({ a }) => a.env !== 'public'),
+)
+const publicApps = computed(() =>
+  form.value.remoteApps.map((a, i) => ({ a, i })).filter(({ a }) => a.env === 'public'),
+)
+
 function openEditor(list, index) {
   editing.value = { list, index }
 }
@@ -121,7 +129,7 @@ function healthHost(a) {
 }
 
 function rowMeta(a, isRemote) {
-  const parts = [...kindLabels(a), a.env === 'public' ? '公网' : '内网']
+  const parts = [...kindLabels(a), isRemote ? (a.env === 'public' ? '公网' : '外机') : '本机']
   if (isRemote) {
     const host = healthHost(a)
     if (host) parts.push(host)
@@ -198,8 +206,25 @@ function addLocal() {
   openEditor('apps', form.value.apps.length - 1)
 }
 
-function addRemote() {
-  form.value.remoteApps.push({ id: '', name: '', description: '', healthUrl: '', url: '', location: '阿里云', host: '', kinds: ['web'], env: 'public', languages: [], frontend: [], backend: [], github: '', tags: [], icon: '☁️' })
+function addRemote(env = 'lan') {
+  const isPublic = env === 'public'
+  form.value.remoteApps.push({
+    id: '',
+    name: '',
+    description: '',
+    healthUrl: '',
+    url: '',
+    location: isPublic ? '阿里云' : '内网服务器',
+    host: '',
+    kinds: ['web'],
+    env: isPublic ? 'public' : 'lan',
+    languages: [],
+    frontend: [],
+    backend: [],
+    github: '',
+    tags: [],
+    icon: isPublic ? '☁️' : '🖥️',
+  })
   openEditor('remoteApps', form.value.remoteApps.length - 1)
 }
 
@@ -299,15 +324,15 @@ async function save() {
             <p class="list-hint">点击应用条目编辑详情</p>
           </section>
 
-          <!-- 云服务器应用：列表 + 点击弹窗编辑 -->
+          <!-- 外机应用：局域网内其他主机，列表 + 点击弹窗编辑 -->
           <section>
             <h3>
-              云服务器应用（{{ form.remoteApps.length }}）
-              <button class="mini-btn add-btn" @click="addRemote">＋ 添加</button>
+              外机应用（{{ externalApps.length }}）
+              <button class="mini-btn add-btn" @click="addRemote('lan')">＋ 添加</button>
             </h3>
             <div class="app-list">
               <button
-                v-for="(a, i) in form.remoteApps"
+                v-for="{ a, i } in externalApps"
                 :key="i"
                 type="button"
                 class="app-row"
@@ -325,7 +350,36 @@ async function save() {
                 <span class="app-row-arrow">›</span>
               </button>
             </div>
-            <p class="list-hint">点击应用条目编辑详情</p>
+            <p class="list-hint">部署在局域网内其他服务器上的应用，通过健康接口探测在线状态</p>
+          </section>
+
+          <!-- 公网应用：云服务器等公网主机，列表 + 点击弹窗编辑 -->
+          <section>
+            <h3>
+              公网应用（{{ publicApps.length }}）
+              <button class="mini-btn add-btn" @click="addRemote('public')">＋ 添加</button>
+            </h3>
+            <div class="app-list">
+              <button
+                v-for="{ a, i } in publicApps"
+                :key="i"
+                type="button"
+                class="app-row"
+                @click="openEditor('remoteApps', i)"
+              >
+                <span class="app-row-icon">{{ a.icon }}</span>
+                <span class="app-row-main">
+                  <span class="app-row-name">
+                    {{ a.name || a.id || '未命名应用' }}
+                    <small class="mono">{{ a.id || '（新应用）' }}</small>
+                  </span>
+                  <span class="app-row-meta">{{ rowMeta(a, true) }}</span>
+                </span>
+                <span v-if="!a.id" class="tag">新</span>
+                <span class="app-row-arrow">›</span>
+              </button>
+            </div>
+            <p class="list-hint">部署在云服务器等公网主机上的应用，通过健康接口探测在线状态</p>
           </section>
         </div>
 
@@ -404,13 +458,10 @@ async function save() {
                 </label>
                 <span class="foot-note">未勾选 Web = 离线应用，不探测端口</span>
               </span>
-              <label class="env-fld">
+              <div class="env-fld">
                 <span>部署位置</span>
-                <select v-model="editingApp.env">
-                  <option value="lan">内网</option>
-                  <option value="public">公网</option>
-                </select>
-              </label>
+                <span class="foot-note">本机（本服务器）</span>
+              </div>
             </div>
             <div class="app-edit-foot">
               <span class="chk-group">
@@ -464,8 +515,8 @@ async function save() {
               <label class="env-fld">
                 <span>部署位置</span>
                 <select v-model="editingApp.env">
-                  <option value="lan">内网</option>
-                  <option value="public">公网</option>
+                  <option value="lan">外机（局域网）</option>
+                  <option value="public">公网（云服务器）</option>
                 </select>
               </label>
             </div>

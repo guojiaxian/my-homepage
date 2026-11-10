@@ -7,7 +7,7 @@
 
 ## 1. 这是什么
 
-个人应用展示主页（Vue 3 单页应用），列出部署在本机 `/root/applications` 下的自研应用**以及云服务器上的公网应用**，展示：名称、简介、实际访问端口、部署位置/目录、GitHub 地址、运行状态、git 源码同步状态。
+个人应用展示主页（Vue 3 单页应用），列出**本机 `/root/applications` 下的自研应用**、**局域网其他主机上的外机应用**以及**云服务器上的公网应用**，展示：名称、简介、实际访问端口、部署位置/目录、GitHub 地址、运行状态、git 源码同步状态。
 
 核心设计目标：**应用信息与状态全自动维护**——端口、上下线、源码同步情况由服务端定时探测，增删应用/改信息通过首页设置面板完成，日常无需登录服务器改文件。
 
@@ -20,7 +20,7 @@
 
 > ⚠️ 部署目录位于 `/root` 之下仍能正常访问，是因为本机 nginx 配置为 `user root;`（worker 也以 root 运行）。**若日后把 nginx 降权为 `nginx` 用户，站点会立刻 403**——届时需把 webroot 移出 `/root`（可用 `move-project.sh --webroot`）或放开目录遍历权限。
 
-> ℹ️ **本项目自身也作为普通应用登记在 `apps[]` 里**（id `my-homepage`，`expectedPort: 80`）。它由 nginx 托管，进程 cwd 不在项目目录，因此走「`expectedPort` TCP 兜底」探测；「是否对外监听」从 `ss` 端口表判定，不会误标「仅本机」。副作用：若此时跑 `npm run dev`，cwd 匹配会优先命中 5173 的开发实例（主页临时显示 :5173，属正常）。
+> ℹ️ **本项目自身也作为普通应用登记在 `apps[]` 里**（id `my-homepage`，`expectedPort: 80`）。它由 nginx 托管，进程 cwd 不在项目目录，因此走「`expectedPort` TCP 兜底」探测；「是否对外监听」从 `ss` 端口表判定，不会误标「仅本机」。副作用：若此时跑 `npm run dev`，cwd 匹配会优先命中 5173 的开发实例；**监控网关常驻 8301 且 cwd 在项目根，也会被 cwd 匹配命中，主页可能显示 :8301 并标「仅本机」（已知探测副作用，不影响导航）**。
 
 ---
 
@@ -40,7 +40,7 @@
 | 被监控主机 | 4 台：本机（local）+ netwatch(10.8.14.200, agent) + aliyun(47.95.140.199, ssh) + lan-1103(10.8.11.3, ssh)；均 ONLINE（2026-11-10） |
 | 探测定时器 | `my-homepage-probe-quick.timer` 每 3 分钟（`--no-fetch`）；`my-homepage-probe.timer` 每 5 分钟（完整，含 fetch） |
 | 前端轮询 | 主页每 60 秒拉一次 `apps.json`；监控看板每 5 秒拉 summary |
-| 已登记应用 | 11 个（含 2 个离线应用（纯 APP）+ 1 个公网远程） |
+| 已登记应用 | 12 个（9 个本机 + 2 个外机 + 1 个公网；含 2 个离线应用） |
 | 后端依赖 | 主站仍零依赖；监控网关新增 `ssh2`/`ws`（终端与远程采集），前端 vendor 库 echarts/xterm 随仓库提交 |
 
 **运行中的 systemd 单元（均已 enable）**
@@ -246,7 +246,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
   "location": "阿里云",                                      // 表格「服务器/目录」列显示「阿里云 · <host>」
   "host": "47.95.140.199",                                  // 缺省取 healthUrl 的 hostname
   "kinds": ["web"],                                         // 应用形式，可多选；缺省 ["web"]
-  "env": "public",                                          // 部署位置，缺省 public
+  "env": "public",                                          // public=公网应用（云服务器）；lan=外机应用（局域网其他主机）；缺省 public
   "languages": ["JavaScript/Node.js"],                      // 主要语言（远程应用手填）
   "frontend": ["Vue 3"],                                    // 前端框架
   "backend": ["Fastify"],                                   // 后端框架
@@ -389,7 +389,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 ### 8.3 视觉规范
 
 - 设计变量集中在 `src/style.css`：浅色为默认，`html[data-theme=dark]` 为 GitHub Dark 配色；主题存 localStorage `theme`，支持 `auto` 跟随系统
-- **内网 = 蓝（`--accent`） / 公网 = 橙（`--amber`）**，四种呈现同时生效：名称旁 `env-chip` 标签、表格行 `td:first-child` 左边色条、卡片左边框、应用图标底色（`icon-net`）。判定以 `app.env` 为准，旧数据缺 `env` 时回退 `app.remote`
+- **本机 = 蓝（`--accent`） / 外机 = 绿（`--green`） / 公网 = 橙（`--amber`）**，四种呈现同时生效：名称旁 `env-chip` 标签、表格行 `td:first-child` 左边色条、卡片左边框、应用图标底色（`icon-ext` / `icon-net`）。归属由 `appScope()` 判定：`apps[]` → 本机；`remoteApps[]` 的 `lan` → 外机、`public` → 公网
 - **应用形式 chip**：`kind-chip`（Web / APP / 小程序 / 电视 / CLI，可多选），按类型配色：Web 蓝、APP 绿、小程序青、电视紫、CLI 灰；表格显示在名称下方标签行，卡片显示在底部标签行
 - **技术栈文本**：表格在应用形式 chip 后显示最多两行 `语言 · 前端 · 后端`，在应用列固定宽度内垂直居中，超出两行省略、悬停看完整；卡片有独立「技术栈」行
 - **业务标签 `tags`**：仍保存在配置与设置页中，但当前不在首页表格/卡片展示（避免与形式/技术栈重复）
@@ -688,9 +688,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 
 ---
 
-## 13. 当前应用清单（2026-11-03 探测）
+## 13. 当前应用清单（2026-11-10 探测）
 
-| id | 名称 | 类型 | 端口/地址 | git |
+| id | 名称 | 归属 | 端口/地址 | git |
 |---|---|---|---|---|
 | cloud-monitor | 云计算监控大屏 | 本机 | 18001 | synced |
 | storage-monitor | 存储集群监控大屏 | 本机 | 18002 | synced |
@@ -698,11 +698,12 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | tv-show | 数智中心大屏聚合平台 | 本机 | 18000 | **dirty** |
 | expense-assistant | 财务报销附件助手 | 本机 | 19000 | synced（**曾无仓库**，后补建） |
 | wedding-plan | 备婚计划 | 本机 | 19002 | synced |
-| network-monitor | NetWatch 网络监控 | 本机 | 18003（+2222, 18099） | **dirty** |
-| jianji-ledger | 简记 · 账本 | 离线应用（kinds: app） | — | no-repo |
-| time-logger | 时间记录器 | Web + APP（kinds: web, app） | 19001（https） | synced |
-| study-log-cloud | StudyLog 公网版 | 远程（阿里云） | http://47.95.140.199:3000 · v1.1.0 | — |
-| my-homepage | 我的应用导航（本站） | 本机（nginx 托管） | 80 | synced（已纳入 git） |
+| jianji-ledger | 简记 · 账本 | 本机（离线应用，kinds: app） | — | no-repo |
+| time-logger | 时间记录器 | 本机（Web + APP） | 19001（https） | synced |
+| my-homepage | 我的应用导航（本站） | 本机（nginx 托管） | 80（探测可能误命中监控网关 8301） | 已纳入 git |
+| network-monitor | NetWatch 网络监控 | **外机**（10.8.14.200） | http://10.8.14.200 · v1.0.2 | — |
+| log-gpt-agent | 网络安全自动运维平台 | **外机**（10.8.11.3） | http://10.8.11.3/ · 页面 200 | — |
+| study-log-cloud | StudyLog 公网版 | **公网**（阿里云） | http://47.95.140.199:3000 · v1.2.0 | — |
 
 > 状态会随时变化，以上仅为撰写时快照。以 `curl -s http://127.0.0.1/apps.json` 为准。
 
@@ -729,8 +730,8 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 **新增一个离线应用（纯 APP / 小程序）**
 同上，但应用形式只勾选 APP / 小程序 / 电视 / CLI 中适用的项、不勾 Web（配置里写 `"kinds": ["app"]`），不需要期望端口；只要勾了 Web 就会照常探测。
 
-**新增一个云服务器应用**
-设置面板 → 云服务器应用「＋添加」→ 填 `healthUrl`（必填）、访问 URL、位置、主机，以及技术栈（主要语言 / 前端 / 后端，远程应用不会自动识别）；或编辑 `remoteApps` 后 `npm run probe`。
+**新增一个外机 / 公网应用**
+设置面板 → 「外机应用」或「公网应用」区块「＋添加」→ 填 `healthUrl`（必填）、访问 URL、位置、主机，以及技术栈（主要语言 / 前端 / 后端，远程应用不会自动识别）；`env` 决定归属（`lan`=外机 / `public`=公网）。或编辑 `remoteApps` 后 `npm run probe`。外机应用示例：`network-monitor`（10.8.14.200）、`log-gpt-agent`（10.8.11.3，健康接口用站点根路径，返回 HTML 也算在线）。
 
 **改页面文案 / 顶栏名称** → 设置面板「页面信息」→ 保存（改 `page` 段，无需重新构建）。
 

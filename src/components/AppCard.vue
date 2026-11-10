@@ -69,7 +69,7 @@ async function copyDir(app) {
             <circle cx="5" cy="16" r="1.8" /><circle cx="11" cy="16" r="1.8" />
           </svg>
         </span>
-        <span class="app-icon" :class="{ 'icon-net': envInfo(app).cls === 'net' }" aria-hidden="true">{{ app.icon }}</span>
+        <span class="app-icon" :class="{ 'icon-ext': envInfo(app).cls === 'ext', 'icon-net': envInfo(app).cls === 'net' }" aria-hidden="true">{{ app.icon }}</span>
         <div class="card-title">
           <h3>
             <span class="env-chip" :class="envInfo(app).cls">{{ envInfo(app).label }}</span>
@@ -173,9 +173,13 @@ async function copyDir(app) {
   box-shadow: var(--shadow-hover);
 }
 
-/* 内网蓝 / 公网橙：卡片左色边 + 图标底色 */
+/* 本机蓝 / 外机绿 / 公网橙：卡片左色边 + 图标底色 */
 .card.lan {
   border-left: 3px solid var(--accent);
+}
+
+.card.ext {
+  border-left: 3px solid var(--green);
 }
 
 .card.net {
@@ -184,6 +188,10 @@ async function copyDir(app) {
 
 .app-icon.icon-net {
   background: var(--amber-soft);
+}
+
+.app-icon.icon-ext {
+  background: var(--green-soft);
 }
 
 .card-head {

@@ -83,12 +83,21 @@ export function stackTitle(app) {
   return parts.join('；')
 }
 
-/** 部署位置：内网蓝色，公网橙色；优先使用配置的 env，旧数据回退到 remote */
+/**
+ * 应用归属：local（本机）/ external（局域网其他主机）/ public（公网远程）
+ * 本机应用来自 apps[]；remoteApps 中 env=lan 视为外机应用，env=public 视为公网应用。
+ */
+export function appScope(app) {
+  if (!app.remote) return 'local'
+  return app.env === 'public' ? 'public' : 'external'
+}
+
+/** 首页分类徽标：本机蓝色 / 外机绿色 / 公网橙色 */
 export function envInfo(app) {
-  const isPublic = app.env ? app.env === 'public' : Boolean(app.remote)
-  return isPublic
-    ? { cls: 'net', label: '公网', color: 'var(--amber)' }
-    : { cls: 'lan', label: '内网', color: 'var(--accent)' }
+  const scope = appScope(app)
+  if (scope === 'public') return { cls: 'net', label: '公网', color: 'var(--amber)' }
+  if (scope === 'external') return { cls: 'ext', label: '外机', color: 'var(--green)' }
+  return { cls: 'lan', label: '本机', color: 'var(--accent)' }
 }
 
 /** 显示用端口文本：优先实际探测端口，未监听时展示期望端口 */
