@@ -678,6 +678,12 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 31. **多会话并行改同一仓库：`git add -A` 会把别人未提交的工作扫进你的提交**
    优化轮期间检测到另一会话正在做终端加固（MonitorTerm/MonitorView/MonitorBatchTerm/terminal.js/glass-v2）：其 MonitorTerm 改动在 07:06 落盘、被 07:07 的 `git add -A` 收进我的提交，而 MonitorView 的对应改动 07:10 才落盘——一度两边都不调 window.open（子端删了、父端注释说「由子端负责」），「弹出」按钮谁都打不开。教训：提交前逐文件核对 `git status`/`git diff`，发现非本会话改动先确认归属与意图，再决定收编或避开；跨会话的职责约定必须落到同一处（本例收敛为「子端 emit、父级统一 window.open」）。另外并行会话与我在服务端 idleTs 上各自实现了同一修复，后写者 Edit 工具会报「modified since read」——这是发现并行编辑的信号，应停下重读而不是重试覆盖。
 
+32. **修竞态时误删「正常路径」代码，且回归没跑到就提交 = 产品 bug 直接入库**
+   glass-v2 `openBatch()` 修 60ms 关闭竞态（加 `if (!bt.open) return` 守卫）时，把紧随其后的 `for (hosts) connectPane(h)` 连接循环一并删掉——批量终端窗格永久停在「连接中…」，且该 bug 随 e4a14a0 提交（当时终轮回归该套件恰好没跑），两天后终验回归才暴露（2026-11-11 修复，commit 3155662）。教训：① 任何「在函数末尾加守卫」的改动，diff 必须逐行看——守卫与后续逻辑在同一异步流里，删循环等于阉割主功能；② 竞态类修复**必须当场重跑覆盖该路径的 E2E 再提交**，「上次跑过」不算数；③ E2E 断言要打在结果上（`.xterm-rows` 出现 = 真连上了），本案正是靠结果断言而非 DOM 存在性才暴露。
+
+33. **UI 重构改根类名/入口位置后，E2E 选择器要同轮更新**
+   da1db75 把监控设置弹窗对齐应用中心设计体系（根类 `.mon-modal` → `.settings-panel.mon`、入口从工具栏按钮移到顶栏常驻齿轮），但 e2e-spa / e2e-provision 仍按旧选择器找——表现为「设置弹窗打开」断言失败、后续点击被 `.settings-overlay` 拦截超时（2026-11-11 已同步更新，.verify 不入库故此记录留档）。教训：改组件根类名/挂载点时 grep 一遍 `.verify/` 下的测试脚本同步更新。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
