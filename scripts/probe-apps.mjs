@@ -581,14 +581,18 @@ async function runRemoteGitOnce(meta, dir, doFetch, now) {
   return parseRemoteGitOutput(stdout, now)
 }
 
-/** 探测日志里的 git 状态标签（本机 / 外机通用） */
+/** 探测日志里的 git 状态标签（本机 / 外机 / 线上机通用） */
 function gitLogTag(g) {
   if (!g) return ''
+  const prod = g.production === true
   const n = g.uncommitted || g.ahead || g.behind || g.untracked
   if (['dirty', 'ahead', 'behind', 'untracked'].includes(g.status)) {
-    return `  [git 未同步·${g.status === 'dirty' ? '未提交' : g.status === 'ahead' ? '未推送' : g.status === 'behind' ? '未拉取' : '未跟踪'}×${n}]`
+    const label = prod
+      ? { dirty: '线上已改', ahead: '线上提交未推送', behind: '可拉取', untracked: '未跟踪' }[g.status]
+      : { dirty: '未提交', ahead: '未推送', behind: '未拉取', untracked: '未跟踪' }[g.status]
+    return `  [git ${label}×${n}]`
   }
-  return `  [git ${g.status === 'synced' ? '已同步' : g.status === 'no-repo' ? '无仓库' : g.status === 'no-upstream' ? '未关联远端' : '检查失败'}]`
+  return `  [git ${g.status === 'synced' ? (prod ? '线上已同步' : '已同步') : g.status === 'no-repo' ? '无仓库' : g.status === 'no-upstream' ? '未关联远端' : '检查失败'}]`
 }
 
 /** 外机 git 检查失败的简短原因（避免把整条 ssh 命令行打进日志/提示） */
@@ -612,6 +616,8 @@ async function remoteGitSyncInfo(meta, dir, doFetch, now) {
     try {
       const info = await runRemoteGitOnce(meta, dir, doFetch, now)
       if (info) {
+        // 公网服务器 = 线上机：仅允许 pull，前端按线上语义展示（线上已改/线上提交 = 违规）
+        if (meta.env === 'public') info.production = true
         if (attempt > 0) console.log(`[probe] 远程 git ${meta.id} 重试成功`)
         return info
       }
@@ -621,7 +627,7 @@ async function remoteGitSyncInfo(meta, dir, doFetch, now) {
     }
   }
   console.log(`[probe] 远程 git ${meta.id} 重试 ${attempts} 次均失败，标记 error（下一轮完整探测自动再试）`)
-  return {
+  const errInfo = {
     status: 'error',
     repo: '',
     branch: '',
@@ -633,6 +639,8 @@ async function remoteGitSyncInfo(meta, dir, doFetch, now) {
     checkedAt: now,
     message: lastErr,
   }
+  if (meta.env === 'public') errInfo.production = true
+  return errInfo
 }
 
 /* ---------------- ss 解析 ---------------- */

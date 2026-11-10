@@ -136,10 +136,13 @@ export async function copyText(text) {
 /**
  * git 同步状态 → 展示用的 { text, cls, title }；无 git 信息时返回 null。
  * cls: ok（已同步）/ warn（可同步的差异）/ bad（源码未进 git）/ muted（无法核对）
+ * 线上机（git.production = true，公网服务器）：仅允许 pull——工作区脏或线上有本地提交
+ * 都按违规（红）显示，落后远端视为「可拉取」的正常待部署提示（橙）。
  */
 export function gitSyncView(git) {
   if (!git) return null
   const branch = git.branch || '（detached）'
+  const prod = git.production === true
   const counts = []
   if (git.uncommitted) counts.push(`未提交 ${git.uncommitted}`)
   if (git.ahead) counts.push(`未推送 ${git.ahead}`)
@@ -147,16 +150,27 @@ export function gitSyncView(git) {
   if (git.untracked) counts.push(`未跟踪 ${git.untracked}`)
   if (git.remoteOk === false) counts.push('远端不可达，以上为上次快照')
 
-  const map = {
-    synced: { text: '已同步', cls: 'ok' },
-    dirty: { text: `未提交 ${git.uncommitted}`, cls: 'bad' },
-    ahead: { text: `未推送 ${git.ahead}`, cls: 'warn' },
-    behind: { text: `未拉取 ${git.behind}`, cls: 'warn' },
-    untracked: { text: `未跟踪 ${git.untracked}`, cls: 'warn' },
-    'no-repo': { text: '无 Git 仓库', cls: 'muted' },
-    'no-upstream': { text: '未关联远端', cls: 'muted' },
-    error: { text: '检查失败', cls: 'muted' },
-  }
+  const map = prod
+    ? {
+        synced: { text: '线上已同步', cls: 'ok' },
+        dirty: { text: `线上已改 ${git.uncommitted}`, cls: 'bad' },
+        ahead: { text: `线上提交 ${git.ahead} 未推送`, cls: 'bad' },
+        behind: { text: `可拉取 ${git.behind}`, cls: 'warn' },
+        untracked: { text: `未跟踪 ${git.untracked}`, cls: 'warn' },
+        'no-repo': { text: '无 Git 仓库', cls: 'muted' },
+        'no-upstream': { text: '未关联远端', cls: 'muted' },
+        error: { text: '检查失败', cls: 'muted' },
+      }
+    : {
+        synced: { text: '已同步', cls: 'ok' },
+        dirty: { text: `未提交 ${git.uncommitted}`, cls: 'bad' },
+        ahead: { text: `未推送 ${git.ahead}`, cls: 'warn' },
+        behind: { text: `未拉取 ${git.behind}`, cls: 'warn' },
+        untracked: { text: `未跟踪 ${git.untracked}`, cls: 'warn' },
+        'no-repo': { text: '无 Git 仓库', cls: 'muted' },
+        'no-upstream': { text: '未关联远端', cls: 'muted' },
+        error: { text: '检查失败', cls: 'muted' },
+      }
   const view = map[git.status] ?? { text: '检查失败', cls: 'muted' }
 
   const detail = git.message
@@ -164,6 +178,8 @@ export function gitSyncView(git) {
     : counts.length
       ? counts.join(' · ')
       : `分支 ${branch} 与远端一致`
-  const title = git.repo ? `${git.repo}（${branch}）：${detail}` : `分支 ${branch}：${detail}`
+  const head = prod ? '线上机（仅允许 pull，禁止线上修改与 push）' : ''
+  const base = git.repo ? `${git.repo}（${branch}）：${detail}` : `分支 ${branch}：${detail}`
+  const title = head ? `${head} · ${base}` : base
   return { ...view, title }
 }

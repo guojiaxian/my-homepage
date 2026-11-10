@@ -228,7 +228,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - `expectedPort` 的作用见 §7.1「主端口选择」——**遇到目录下有多个监听时务必填写**。
 - `kinds` 是**应用形式**（可多选）：`web` / `app` / `miniapp` / `tv` / `cli`，同时决定是否探测：含 `web` 就探测 Web 端口；不含 `web` 则视为**离线应用**（纯 APP / 小程序 / 电视 / CLI），不做端口探测、状态显示灰色「离线应用」。例如 `["web","app"]` 既有网页又有 APK，仍会探测 Web。
 - `languages` / `frontend` / `backend` 是**技术栈展示字段**（字符串数组）。本机应用留空时由探测器自动识别（见 §7.2.1）；填写后以手动值为准。远程应用没有本机目录，必须手动填写。
-- 远程应用可选 **外机 git 检查字段**（2026-11-11 新增，见 §7.3.1）：`gitDir`（外机上项目目录绝对路径，配置了才做检查）、`gitSsh`（SSH 目标 user@host，缺省 `root@<host>`）、`gitKey`（私钥路径，推荐复用监控密钥 `data/monitor/keys/<hostId>`）。设置面板远程应用弹窗可编辑（白名单已放行）。
+- 远程应用可选 **外机 git 检查字段**（2026-11-11 新增，见 §7.3.1）：`gitDir`（外机上项目目录绝对路径，配置了才做检查）、`gitSsh`（SSH 目标 user@host，缺省 `root@<host>`）、`gitKey`（私钥路径，推荐复用监控密钥 `data/monitor/keys/<hostId>`）。设置面板远程应用弹窗可编辑（白名单已放行）。`env: public` 的公网机按**线上机**口径检查与展示（见 §7.3.1）。
 - 旧字段 `type: "app"` 仅作为缺省分类推断的兼容回退（`kinds` 缺省时 → `["app"]`），**不再参与探测判断**；设置面板已移除该勾选，保存配置时会被丢弃。
 - `env` 是展示用的部署位置，缺省 `lan`（本机应用）；远程应用缺省 `public`。它不影响端口探测与远程健康探查，只影响首页蓝色/橙色标签与统计。
 - `https: true` 让本机应用的访问链接使用 `https://`（缺省 false，即 http）。远程应用直接用 `url`，不受此字段影响。
@@ -333,7 +333,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - **并发与重试**：并发默认 2（`PROBE_REMOTE_GIT_CONCURRENCY`）；连接失败/超时/输出中断按 **4s → 10s 退避自动重试**（共 3 次尝试），仍失败标 `status:'error'`（前端灰色「检查失败」，悬停看原因），**下一轮完整探测自动再试**。单次超时：含 fetch 60s / 仅 status 25s。
 - **快速探测（--no-fetch）**：跳过远端 fetch 只查工作区与 ahead/behind（沿用上次远端快照，与本机语义一致），实测 2 台约 90ms；错误信息经 `remoteGitErr()` 提取 stderr 首行（不回显整条 ssh 命令行）。
 - **SSH 细节**：`BatchMode + ConnectTimeout=8 + accept-new + ControlMaster/Persist=120`；配置 `gitKey` 时加 `-i <key> -o IdentitiesOnly=yes`（踩坑 #16：指定钥匙确定性）。与监控采集不冲突（agent 模式主机只是被动收 git 检查的 1 条短连接，非监控采集双路）。
-- 实测：netwatch `/root/network-monitor` main 分支未提交 47、lan-1103 `/root/log_gpt_agent` VueRebuild 分支未提交 3；`github` 字段留空时由远端 repo url 兜底生成链接。
+- **线上机语义（2026-11-11）**：`env: 'public'`（公网服务器）视为线上机，检查结果带 `git.production: true`，前端同步列按线上口径显示——`synced`→绿「线上已同步」、`dirty`→红「线上已改 ×n」（违规：不允许线上改代码）、`ahead`→红「线上提交 ×n 未推送」（违规：不允许线上提交/push）、`behind`→橙「可拉取 ×n」（正常待部署）、title 注明「线上机（仅允许 pull，禁止线上修改与 push）」。当前 study-log-cloud（阿里云 `/root/applications/studylog`，main 分支）实测已同步。
+- 实测：netwatch `/root/network-monitor` main 分支未提交 47、lan-1103 `/root/log_gpt_agent` VueRebuild 分支未提交 3、阿里云 studylog main 已同步；`github` 字段留空时由远端 repo url 兜底生成链接。
 
 ### 7.4 输出 `apps.json` 结构
 
@@ -820,7 +821,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - ❌ **不要删除 `nginx.conf` 里的 paraportal `server` 块**——它承载 `/Platform` 等到 docker:8080 的代理。
 - ❌ **不要把 `deploy.sh` 改成先构建后探测**。
 - ❌ **不要给整行/整卡加 `draggable`**——只能是拖拽手柄。
-- ❌ **不要在探测中执行 `git pull / checkout / reset / gc`**——只允许只读命令与 `fetch`。
+- ❌ **不要在探测中执行 `git pull / checkout / reset / gc / push`**——只允许只读命令与 `fetch`；公网服务器是线上机，只允许 pull，探测对任何机器都绝不 push。
 - ❌ **agent 相关**：agent token 存 `credentials.json`（gitignored），勿入库勿外传；目标机 `my-homepage-agent.service` 只做采集推送，**不要往里面加写操作**；agent 模式主机的采集由推送驱动，勿再手工起 SSH 定时器（双路会打架）；公网机（无法内连中心）保持 SSH 拉取模式。
 - ❌ **不要用 `readFileSync` 读 `/proc/<pid>/cwd`**。
 - ❌ **不要把监控网关 8301 改绑 0.0.0.0 / 不经会话鉴权暴露监控 API**——凭据与终端入口都在里面；公网暴露前必须上 TLS。
