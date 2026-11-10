@@ -5,6 +5,7 @@ import MonitorDetail from './MonitorDetail.vue'
 import MonitorSettings from './MonitorSettings.vue'
 import MonitorHostEdit from './MonitorHostEdit.vue'
 import MonitorTerm from './MonitorTerm.vue'
+import MonitorBatchTerm from './MonitorBatchTerm.vue'
 
 /* active：是否为当前顶层视图（App.vue v-show 常驻，由父级告知）。
    authed：全站登录门状态（App.vue 持有；401 时向上抛 unauth，由父级展示全站登录层）。
@@ -21,6 +22,21 @@ const loadErr = ref('')
 const selectedId = ref('')
 const settingsOpen = ref(false)
 const termHost = ref(null) // { id, name }
+const batchPickerOpen = ref(false)
+const batchOpen = ref(false)
+const batchSel = reactive(new Set())
+const batchHosts = ref([])
+function toggleBatchSel(id) {
+  if (batchSel.has(id)) { batchSel.delete(id); return }
+  if (batchSel.size >= 6) { alert('批量终端最多支持 6 台'); return }
+  batchSel.add(id)
+}
+function openBatch() {
+  if (!batchSel.size) return
+  batchHosts.value = hosts.value.filter((h) => batchSel.has(h.id)).map((h) => ({ id: h.id, name: h.name }))
+  batchPickerOpen.value = false
+  batchOpen.value = true
+}
 
 let pollTimer = null
 let started = false
@@ -38,6 +54,19 @@ const containerCount = computed(() =>
 )
 const selectedHost = computed(() => hosts.value.find((h) => h.id === selectedId.value) || null)
 const thresholds = ref({})
+
+/* 主机卡列数随台数自适应：在 2..5 列里选「行数最少 → 末行空位最少 → 列数少（卡更宽）」的组合，
+   保证整行排满不塌空。实测：1→1 2→2 3→3 4→4 5→5 6→3(2行) 7→4 8→4 9→5 10→5 11→4 12→4 15→5 16→4 24→5 */
+const hostCols = computed(() => {
+  const n = hosts.value.length
+  if (n <= 1) return n || 4
+  let best = 4, bestScore = Infinity
+  for (let c = 2; c <= 5; c++) {
+    const score = Math.ceil(n / c) * 100 + (((c - (n % c)) % c) * 10) + c
+    if (score < bestScore) { bestScore = score; best = c }
+  }
+  return best
+})
 
 /* ---------- 数据 ---------- */
 async function refresh() {
@@ -194,12 +223,13 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
         <span class="sub">内网蓝 / 公网橙 · 点击卡片展开详情</span>
         <span class="grow" />
         <span class="sub num" v-if="summary">更新于 {{ new Date(summary.serverTime).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
+        <button class="ghost-btn" @click="batchPickerOpen = true">批量终端</button>
         <button class="ghost-btn" @click="settingsOpen = true">⚙ 监控设置</button>
       </div>
 
       <div v-if="!hosts.length" class="mon-empty">还没有纳管主机，点击右上角「⚙ 监控设置」添加。</div>
 
-      <div v-else class="host-grid">
+      <div v-else class="host-grid" :class="'c' + hostCols">
         <article
           v-for="h in hosts"
           :key="h.id"
@@ -256,6 +286,39 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
       />
       <div v-if="selectedHost" style="height: 8px" />
 
+    <!-- 批量终端主机多选器 -->
+    <div v-if="batchPickerOpen" class="batch-picker-mask" @click.self="batchPickerOpen = false">
+      <div class="batch-picker">
+        <div class="bp-head"><b>批量终端 · 选择主机</b><span class="sub">最多 6 台，命令将同时下发</span></div>
+        <div class="bp-list">
+          <label
+            v-for="h in hosts.filter((x) => x.credReady)"
+            :key="h.id"
+            class="bp-row"
+            :class="{ on: batchSel.has(h.id), dis: !batchSel.has(h.id) && batchSel.size >= 6 }"
+          >
+            <input
+              type="checkbox"
+              :checked="batchSel.has(h.id)"
+              :disabled="!batchSel.has(h.id) && batchSel.size >= 6"
+              @change="toggleBatchSel(h.id)"
+            />
+            <span>{{ h.name }}</span>
+            <span class="sub">{{ h.address }} · {{ h.online ? '在线' : '离线' }}</span>
+          </label>
+        </div>
+        <div class="bp-foot">
+          <span class="sub">已选 {{ batchSel.size }}/6</span>
+          <span class="grow" />
+          <button class="ghost-btn" @click="batchPickerOpen = false">取消</button>
+          <button class="login-btn" :disabled="!batchSel.size" @click="openBatch">打开批量终端（{{ batchSel.size }}）</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 批量终端 -->
+    <MonitorBatchTerm v-if="batchOpen" :hosts="batchHosts" @close="batchOpen = false" />
+
     <!-- 设置弹窗 -->
     <MonitorSettings :open="settingsOpen" @close="settingsOpen = false" @saved="onSaved" />
     <!-- 详情页 ⚙ 直连主机编辑弹窗（direct 模式：弹窗内「保存」直接 PUT 配置） -->
@@ -310,8 +373,13 @@ export default { name: 'MonitorView' }
 .ghost-btn:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 2px 10px rgb(37 99 235 / 0.18); }
 .mon-empty { color: var(--text-2); font-size: 13.5px; background: var(--bg-soft); border: 1px dashed var(--border); border-radius: 12px; padding: 28px; text-align: center; }
 
-/* ===== 主机卡片（4 列紧凑：大数字 + 迷你进度条） ===== */
-.host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; align-items: stretch; }
+/* ===== 主机卡片（列数随台数自适应，优先排满整行：.c1-.c5 由 hostCols 计算） ===== */
+.host-grid { display: grid; gap: 12px; align-items: stretch; }
+.host-grid.c1 { grid-template-columns: 1fr; }
+.host-grid.c2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.host-grid.c3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.host-grid.c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+.host-grid.c5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .host-card {
   background: var(--bg-soft);
   border: 1px solid var(--border);
@@ -377,11 +445,14 @@ export default { name: 'MonitorView' }
   .status-dot.err, .alert-dot { animation: none; }
   .host-card, .hm-bar i { transition: none; }
 }
-@media (max-width: 900px) {
-  .host-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
+@media (max-width: 1200px) {
+  .host-grid.c4, .host-grid.c5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 820px) {
+  .host-grid.c3, .host-grid.c4, .host-grid.c5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 640px) {
-  .host-grid { grid-template-columns: 1fr; }
+  .host-grid { grid-template-columns: 1fr !important; }
   .mon-hero .mh-stats { margin-left: 0; }
 }
 </style>
