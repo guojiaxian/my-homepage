@@ -23,7 +23,8 @@ const emit = defineEmits(['unauth', 'update:settingsOpen'])
 const summary = ref(null)
 const loadErr = ref('')
 const selectedId = ref('')
-const termHost = ref(null) // { id, name }
+const termHost = ref(null) // { id, name }；关闭抽屉仅隐藏，保留上次终端会话
+const termOpen = ref(false)
 const batchPickerOpen = ref(false)
 const batchOpen = ref(false)
 const batchSel = reactive(new Set())
@@ -117,7 +118,11 @@ watch(
 function toggleDetail(h) {
   selectedId.value = selectedId.value === h.id ? '' : h.id
 }
-function openTerm(h) { termHost.value = { id: h.id, name: h.name } }
+function openTerm(h) {
+  // 同一主机再次打开不重建组件，沿用上次的 WS 会话与滚动内容
+  if (!termHost.value || termHost.value.id !== h.id) termHost.value = { id: h.id, name: h.name }
+  termOpen.value = true
+}
 function onSaved() { refresh() }
 
 /* ---------- 详情页 ⚙：直连编辑单主机 ----------
@@ -331,7 +336,13 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
       @saved="onSaved"
     />
     <!-- 终端抽屉 -->
-    <MonitorTerm v-if="termHost" :host-id="termHost.id" :host-name="termHost.name" @close="termHost = null" />
+    <MonitorTerm
+      v-if="termHost"
+      :host-id="termHost.id"
+      :host-name="termHost.name"
+      :open="termOpen"
+      @close="termOpen = false"
+    />
   </div>
 </template>
 

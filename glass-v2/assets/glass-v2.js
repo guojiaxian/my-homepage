@@ -946,15 +946,20 @@
     function termStatus(txt, cls = '') { const el = $('#gv-term-status'); el.textContent = txt; el.className = 'gv-term-status ' + (cls || '') }
     function openTerm(hostId) {
       const h = state.summary?.hosts.find((x) => x.id === hostId)
+      const sameSession = termHostId === hostId && term
       termHostId = hostId
       $('#gv-term-drawer').hidden = false
       $('#gv-term-mask').hidden = false
       $('#gv-term-title').textContent = `终端 · ${h ? h.name : hostId}`
+      // 同一主机再次打开：沿用原会话与输出，仅重排/聚焦
+      if (sameSession) {
+        setTimeout(() => { try { termFit.fit(); term.focus() } catch { /* 忽略 */ } }, 60)
+        return
+      }
       connectTerm(hostId)
     }
     function closeTerm() {
-      if (termState()) { try { termWs && termWs.close() } catch { /* 已关 */ } try { term && term.dispose() } catch { /* 已释放 */ } }
-      term = termWs = termFit = null
+      // 仅隐藏抽屉，不关闭 WS / 不释放 xterm，重新打开保留之前内容
       $('#gv-term-drawer').hidden = true
       $('#gv-term-mask').hidden = true
     }
@@ -1007,7 +1012,12 @@
     $('#gv-term-mask').addEventListener('click', closeTerm)
     $('#gv-term-reconnect').addEventListener('click', () => { if (termHostId) connectTerm(termHostId) })
     $('#gv-term-popout').addEventListener('click', () => {
-      if (termHostId) window.open(`/monitor/terminal.html?host=${encodeURIComponent(termHostId)}`, '_blank', 'width=980,height=640')
+      if (!termHostId) return
+      // 弹出页需要独立会话：先释放抽屉会话，避免同主机并发占用
+      if (termState()) { try { termWs && termWs.close() } catch { /* 已关 */ } try { term && term.dispose() } catch { /* 已释放 */ } }
+      term = termWs = termFit = null
+      closeTerm()
+      window.open(`/monitor/terminal.html?host=${encodeURIComponent(termHostId)}`, '_blank', 'width=980,height=640')
     })
     window.addEventListener('resize', () => { if (termFit) { try { termFit.fit() } catch { /* 忽略 */ } } Object.values(state.charts).forEach((c) => c && c.resize()) })
 
