@@ -847,6 +847,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - **effectiveDirs（跟踪目录）**：`GET /api/monitor/config` 为每台主机附加只读 `effectiveDirs`（全局 + 本机主页登记 + 主机自有 + 运行时自动发现的容器目录）；`PUT` 时 `normalizeHost` 白名单会丢弃它，不会写回配置。主机弹窗「自动并入」目录只读展示（主页登记 / 全局 / 自动发现 chip），自有目录可增删；添加已并入路径会拦截。全局 `cfg.trackedDirs` 区仅非空时显示，标题「全局自定义目录（对所有主机生效）」。
 - **容器目录也要显示**：`open-webui` 这类 cgroup 自动发现的容器目录不是手工跟踪项，但设置页必须可见——服务端从 `lastSnap.dirs` 取 `source:'container'` 追加到 `effectiveDirs`，主机行摘要也随之显示 10 个（9 主页登记 + 1 容器），与卡片/图表一致。
 - **monitor-server.mjs 改动必须重启**：`systemctl restart my-homepage-monitor`（改 `monitor.config.json` 才是热加载）。
+- **应用中心 ↔ 监控中心的对应关系（单向、仅本机目录）**：应用中心 `apps[].directory`（且 `exclude` 不为 true）会作为**本机主机**的自动跟踪目录并入监控（`homepageDirs`）；`remoteApps` 不会自动变成监控主机，远程主机需在监控设置里单独添加并配置该机目录。监控侧的主机/跟踪目录**不会反向写入** `apps.config.json`。`monitor-server.mjs` 已监听 `scripts/apps.config.json`（600ms 防抖），设置页新增/删除/隐藏应用后自动 `reloadHomepageDirs()`，下一个 5s 采集周期生效，无需重启网关；日志出现「主页应用目录热加载完成」。反向的唯一“自动出现”来自主页端口探测：目录在 `/root/applications` 下且有监听端口的应用会被应用中心自动发现为「待补充」，与监控配置无关。
 - **验证方式**：Playwright 从 `data/monitor/sessions.json` 注入 `mh_mon` Cookie（只读），轮询页用 `domcontentloaded` + `waitForSelector`；本轮截图脚本在 `/tmp`，项目内保留 `.verify/` 截图（u1–u5、nw-cpu、dirs-ui 等）。
 
 ### 16.3 本轮涉及文件

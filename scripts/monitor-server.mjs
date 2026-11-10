@@ -150,14 +150,27 @@ function effectiveTrackedDirsFor(host) {
 }
 
 let configWatchTimer = null;
+let homepageWatchTimer = null;
 try {
+  const cfgName = path.basename(CONFIG_PATH);
+  const appsName = path.basename(APPS_CONFIG_PATH);
   fs.watch(path.dirname(CONFIG_PATH), (ev, fn) => {
-    if (fn !== path.basename(CONFIG_PATH)) return;
-    clearTimeout(configWatchTimer);
-    configWatchTimer = setTimeout(() => {
-      try { config = loadConfigSync(); reloadHomepageDirs(); applyCollectors(); log('配置热加载完成'); }
-      catch (e) { log('配置热加载失败（保留旧配置）:', e.message); }
-    }, 600);
+    if (fn === cfgName) {
+      clearTimeout(configWatchTimer);
+      configWatchTimer = setTimeout(() => {
+        try { config = loadConfigSync(); reloadHomepageDirs(); applyCollectors(); log('配置热加载完成'); }
+        catch (e) { log('配置热加载失败（保留旧配置）:', e.message); }
+      }, 600);
+      return;
+    }
+    /* 应用中心新增/删除/隐藏应用后，无需重启监控网关：自动刷新本机主页登记目录 */
+    if (fn === appsName) {
+      clearTimeout(homepageWatchTimer);
+      homepageWatchTimer = setTimeout(() => {
+        reloadHomepageDirs();
+        log('主页应用目录热加载完成');
+      }, 600);
+    }
   });
 } catch (e) { log('fs.watch 不可用:', e.message); }
 
