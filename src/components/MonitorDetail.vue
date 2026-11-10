@@ -101,14 +101,9 @@ function renderTrends() {
   c.setOption({
     ...cpuBase,
     legend: legendStyle(),
-    grid: { ...cpuBase.grid, right: 42, top: 30 },
-    yAxis: [
-      { ...cpuBase.yAxis },
-      { ...cpuBase.yAxis, splitLine: { show: false }, axisLabel: { ...cpuBase.yAxis.axisLabel, formatter: '{value}' } },
-    ],
+    grid: { ...cpuBase.grid, top: 30 },
     series: [
-      lineSeries('CPU %（左轴）', pts().map((p) => [t(p), p.cpu]), cssVar('--accent')),
-      lineSeries('负载（右轴）', pts().map((p) => [t(p), p.load]), cssVar('--amber'), { noArea: true, yAxisIndex: 1 }),
+      lineSeries('CPU %', pts().map((p) => [t(p), p.cpu]), cssVar('--accent')),
     ],
   }, { notMerge: true })
 
@@ -116,14 +111,9 @@ function renderTrends() {
   inst('mem', elMem.value).setOption({
     ...memBase,
     legend: legendStyle(),
-    grid: { ...memBase.grid, right: 46, top: 30 },
-    yAxis: [
-      { ...memBase.yAxis },
-      { ...memBase.yAxis, splitLine: { show: false } },
-    ],
+    grid: { ...memBase.grid, top: 30 },
     series: [
-      lineSeries('内存 %（左轴）', pts().map((p) => [t(p), p.mem]), cssVar('--purple')),
-      lineSeries('Swap %（右轴）', pts().map((p) => [t(p), p.swap]), cssVar('--teal'), { noArea: true, yAxisIndex: 1 }),
+      lineSeries('内存 %', pts().map((p) => [t(p), p.mem]), cssVar('--purple')),
     ],
   }, { notMerge: true })
 
@@ -264,10 +254,10 @@ onBeforeUnmount(() => {
 
     <p v-if="err" class="detail-err">加载失败：{{ err }}</p>
 
-    <div class="group-cap">资源趋势 <span>曲线颜色见各图图例 · 左右轴对应图例标注</span></div>
+    <div class="group-cap">资源趋势 <span>曲线颜色见各图图例</span></div>
     <div class="charts4">
-      <div class="chart-box"><h4>CPU / 负载</h4><div ref="elCpu" class="chart" /></div>
-      <div class="chart-box"><h4>内存 / Swap</h4><div ref="elMem" class="chart" /></div>
+      <div class="chart-box"><h4>CPU 使用率</h4><div ref="elCpu" class="chart" /></div>
+      <div class="chart-box"><h4>内存使用率</h4><div ref="elMem" class="chart" /></div>
       <div class="chart-box"><h4>网络（{{ host.snap?.net?.iface || '-' }}）</h4><div ref="elNet" class="chart" /></div>
       <div class="chart-box"><h4>磁盘 IO</h4><div ref="elDio" class="chart" /></div>
     </div>

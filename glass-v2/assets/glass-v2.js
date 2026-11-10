@@ -815,28 +815,18 @@
       inst('cpu', $('#gv-ch-cpu')).setOption({
         ...cpuBase,
         legend: legend(),
-        grid: { ...cpuBase.grid, right: 42, top: 30 },
-        yAxis: [
-          { ...cpuBase.yAxis },
-          { ...cpuBase.yAxis, splitLine: { show: false }, axisLabel: { ...cpuBase.yAxis.axisLabel, formatter: '{value}' } },
-        ],
+        grid: { ...cpuBase.grid, top: 30 },
         series: [
-          lineSeries('CPU %（左轴）', pts.map((p) => [t(p), p.cpu]), accent),
-          lineSeries('负载（右轴）', pts.map((p) => [t(p), p.load]), amber, { noArea: true, yAxisIndex: 1 }),
+          lineSeries('CPU %', pts.map((p) => [t(p), p.cpu]), accent),
         ],
       }, { notMerge: true })
       const memBase = baseOption('{value}%')
       inst('mem', $('#gv-ch-mem')).setOption({
         ...memBase,
         legend: legend(),
-        grid: { ...memBase.grid, right: 46, top: 30 },
-        yAxis: [
-          { ...memBase.yAxis },
-          { ...memBase.yAxis, splitLine: { show: false } },
-        ],
+        grid: { ...memBase.grid, top: 30 },
         series: [
-          lineSeries('内存 %（左轴）', pts.map((p) => [t(p), p.mem]), purple),
-          lineSeries('Swap %（右轴）', pts.map((p) => [t(p), p.swap]), teal, { noArea: true, yAxisIndex: 1 }),
+          lineSeries('内存 %', pts.map((p) => [t(p), p.mem]), purple),
         ],
       }, { notMerge: true })
       const netBase = baseOption('{value}')
