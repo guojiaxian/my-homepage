@@ -1268,6 +1268,7 @@
       } else bt.picked.delete(id)
       cb.closest('.gv-bt-picker-row').classList.toggle('on', cb.checked)
       $b('gv-bt-pick-n').textContent = `已选 ${bt.picked.size}/6`
+      $b('gv-bt-pick-ok').disabled = !bt.picked.size
       $b('gv-bt-pick-ok').style.opacity = bt.picked.size ? '1' : '0.5'
     }))
     $b('gv-bt-picker').hidden = false
@@ -1297,7 +1298,7 @@
     $b('gv-bt').hidden = false
     updateMode()
     await new Promise((r) => setTimeout(r, 60))
-    for (const h of hosts) connectPane(h)
+    if (!bt.open) return // closeBatch 已在 60ms 内被调用
   }
 
   function setStatusPane(pane, txt, cls) {
@@ -1308,6 +1309,15 @@
 
   function connectPane(h) {
     const el = $b('gv-bt-panes').querySelector(`.gv-bt-pane[data-id="${CSS.escape(h.id)}"]`)
+    /* 清理同 ID 的旧窗格（重连场景） */
+    const oldIdx = bt.panes.findIndex((x) => x.id === h.id)
+    if (oldIdx >= 0) {
+      const old = bt.panes[oldIdx]
+      try { old.ws && old.ws.close() } catch {}
+      try { old.term && old.term.dispose() } catch {}
+      bt.panes.splice(oldIdx, 1)
+    }
+    el.querySelector('.gv-bt-pane-term').innerHTML = ''
     const pane = { id: h.id, name: h.name, el, term: null, fit: null, ws: null }
     bt.panes.push(pane)
     const term = new Terminal({
@@ -1352,6 +1362,11 @@
     const targets = bt.solo ? [bt.solo] : bt.panes
     let n = 0
     for (const pane of targets) if (pane.ws && pane.ws.readyState === 1) { pane.ws.send(text + '\r'); n++ }
+    if (n === 0) {
+      $b('gv-bt-sent').textContent = '✗ 没有已连接的窗格'
+      $b('gv-bt-input').value = text
+      return
+    }
     $b('gv-bt-input').value = ''
     $b('gv-bt-sent').textContent = bt.solo ? `已下发到 ${n} 台（单机：${bt.solo.name}）` : `已下发到 ${n} 台`
   }

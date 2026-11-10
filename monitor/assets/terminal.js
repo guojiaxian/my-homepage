@@ -36,8 +36,9 @@
         if (msg.type === 'error') { status('错误：' + msg.message, 'bad'); term.writeln('\r\n\x1b[31m' + msg.message + '\x1b[0m'); }
       } catch { /* 普通输入 */ }
     };
-    ws.onclose = (ev) => status(ev.reason ? `已断开（${ev.reason}）` : '已断开', 'bad');
-    ws.onerror = () => status('连接失败（未登录或网关不可达）', 'bad');
+    let errored = false;
+    ws.onerror = () => { errored = true; status('连接失败（未登录或网关不可达）', 'bad'); };
+    ws.onclose = (ev) => { if (!errored) status(ev.reason ? `已断开（${ev.reason}）` : '已断开', 'bad'); };
     term.onData((d) => { if (ws.readyState === 1) ws.send(d); });
     term.onResize(({ cols, rows }) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
   }

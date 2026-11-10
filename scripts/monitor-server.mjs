@@ -1457,7 +1457,12 @@ function setupTerminal(ws, req) {
     if (closed) return;
     closed = true;
     clearInterval(idleTimer); clearTimeout(maxTimer);
-    if (counted) termSessions.set(hostId, Math.max(0, (termSessions.get(hostId) || 1) - 1));
+    if (counted) termSessions.set(hostId, Math.max(0, (termSessions.get(hostId) || 1) - 1))
+    /* 尾部未回车的命令也入审计 */
+    if (cmdBuf.trim()) {
+      const clean = cmdBuf.replace(/\x1b\[[0-9;?]*[a-zA-Z]/g, '').replace(/[^\x20-\x7e\u4e00-\u9fa5]/g, '').trim()
+      if (clean) cmds.push(clean.slice(0, 200))
+    };
     try { conn.end(); } catch {}
     audit('session_close', { sid: sessId, host: hostId, user: creds.username, ip, durationSec: Math.round((Date.now() - openedAt) / 1000), reason, commands: termCfg.recordCommands ? cmds.slice(-500) : undefined });
   };
@@ -1506,7 +1511,7 @@ function setupTerminal(ws, req) {
       termSessions.set(hostId, (termSessions.get(hostId) || 0) + 1);
       audit('session_open', { sid: sessId, host: hostId, user: creds.username, ip });
       while (pendingInput.length) shellStream.write(pendingInput.shift()); // 回放就绪前的输入
-      stream.on('data', (d) => { if (ws.readyState === 1) ws.send(d); });
+      stream.on('data', (d) => { ws.idleTs = Date.now(); if (ws.readyState === 1) ws.send(d); });
       stream.stderr.on('data', () => {});
       stream.on('close', () => { try { ws.close(4000, 'ssh_channel_closed'); } catch {} cleanup('ssh_close'); });
     });

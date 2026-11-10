@@ -79,7 +79,11 @@ function connect(pane) {
       if (msg.type === 'error') setStatus(pane, '错误：' + msg.message, 'bad')
     } catch { /* 非控制帧 */ }
   }
-  ws.onclose = (ev) => { if (pane.ws === ws) setStatus(pane, ev.reason ? `断开（${ev.reason}）` : '断开', 'bad') }
+  ws.onclose = (ev) => {
+    if (pane.ws !== ws) return
+    setStatus(pane, ev.reason ? `断开（${ev.reason}）` : '断开', 'bad')
+    if (solo.value === pane) { solo.value = null } // 断连窗格自动回广播
+  }
   ws.onerror = () => setStatus(pane, '连接失败', 'bad')
   term.onData((d) => { if (ws.readyState === 1) ws.send(d) }) // 单机交互：点击窗格聚焦后直接键入
   term.onResize(({ cols, rows }) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })) })

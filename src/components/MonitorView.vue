@@ -209,6 +209,7 @@ function popoutPane(key, hostId) {
     if (i >= 0) termPanes.value.splice(i, 1)
     delete termStatus[key]
   })
+  /* 子端只 emit 交回窗格生命周期；window.open 统一由父级调用（双端都开会变成双窗口） */
   window.open(`/monitor/terminal.html?host=${encodeURIComponent(hostId)}`, '_blank', 'width=980,height=640')
 }
 /* FLIP：布局变更前记录旧位置，更新后反向位移再过渡回原位，保证移动/缩放平滑 */

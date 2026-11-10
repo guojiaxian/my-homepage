@@ -675,6 +675,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 30. **解析外部命令输出前，先对照真实表头数一遍列**
    远程采集 `df -kPT` 数据行是 **7 列**（Filesystem Type 块 已用 可用 **配额** 挂载点），原代码 `mnt: f.slice(5)` 把配额列混进了挂载点——三台远程主机全部呈现 `mnt: "22% /"`，且告警 key `disk:<mnt>` 随使用率变化漂移（持续计时被重置）。修复为 `f.slice(6)`（2026-11-11）。同类风险：`String.raw`/awk 段、`/proc` 行格式改动时，先在目标机跑一遍真实输出再写解析。
 
+31. **多会话并行改同一仓库：`git add -A` 会把别人未提交的工作扫进你的提交**
+   优化轮期间检测到另一会话正在做终端加固（MonitorTerm/MonitorView/MonitorBatchTerm/terminal.js/glass-v2）：其 MonitorTerm 改动在 07:06 落盘、被 07:07 的 `git add -A` 收进我的提交，而 MonitorView 的对应改动 07:10 才落盘——一度两边都不调 window.open（子端删了、父端注释说「由子端负责」），「弹出」按钮谁都打不开。教训：提交前逐文件核对 `git status`/`git diff`，发现非本会话改动先确认归属与意图，再决定收编或避开；跨会话的职责约定必须落到同一处（本例收敛为「子端 emit、父级统一 window.open」）。另外并行会话与我在服务端 idleTs 上各自实现了同一修复，后写者 Edit 工具会报「modified since read」——这是发现并行编辑的信号，应停下重读而不是重试覆盖。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）

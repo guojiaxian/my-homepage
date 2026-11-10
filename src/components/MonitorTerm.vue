@@ -68,9 +68,8 @@ async function connect() {
   if (gen !== connectGen) { try { socket.close() } catch {} return }
   ws = socket
   socket.binaryType = 'arraybuffer'
-  socket.onopen = () => { setStatus('已连接', 'ok'); retryCount = 0; socket.idleTs = Date.now() }
+  socket.onopen = () => { setStatus('已连接', 'ok'); retryCount = 0 }
   socket.onmessage = (ev) => {
-    ws.idleTs = Date.now() // 服务端输出也算活跃（tail -f / top 不应被判空闲）
     if (ev.data instanceof ArrayBuffer) { term.write(new Uint8Array(ev.data)); return }
     try {
       const msg = JSON.parse(ev.data)
@@ -131,7 +130,6 @@ window.addEventListener('resize', onResizeWin)
 onBeforeUnmount(() => {
   clearRetry()
   window.removeEventListener('resize', onResizeWin)
-  if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
   if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
   if (term) { try { term.dispose() } catch { /* 已释放 */ } term = null }
   fit = null
