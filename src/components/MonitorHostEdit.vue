@@ -13,7 +13,35 @@ const props = defineProps({
   saving: { type: Boolean, default: false },
   err: { type: String, default: '' },
 })
-const emit = defineEmits(['close', 'save', 'del'])
+const emit = defineEmits(['close', 'save', 'del', 'saved'])
+
+/* ---------- 自动部署：密码 → 免密 + Agent 安装（中心代劳） ---------- */
+const provPw = ref('')
+const provBusy = ref(false)
+const provSteps = ref([])
+const provTip = ref('')
+const provTipCls = ref('ok')
+async function doProvision() {
+  if (!props.host.address) { provTip.value = '请先填写目标机地址'; provTipCls.value = 'bad'; return }
+  if (!props.host.username) { provTip.value = '请先填写用户名'; provTipCls.value = 'bad'; return }
+  if (!provPw.value) { provTip.value = '请输入目标机密码'; provTipCls.value = 'bad'; return }
+  provBusy.value = true; provSteps.value = []; provTip.value = ''
+  try {
+    const r = await monApi('/api/monitor/hosts/provision', {
+      method: 'POST',
+      body: { host: JSON.parse(JSON.stringify(props.host)), password: provPw.value },
+    })
+    provSteps.value = r.steps || []
+    if (r.host) Object.assign(props.host, r.host) // keyPath/mode 等同步回草稿
+    provPw.value = ''
+    provTip.value = '部署完成 ✓（免密与 Agent 均已配置，等待首个推送）'
+    provTipCls.value = 'ok'
+    emit('saved')
+  } catch (e) {
+    provTip.value = '部署失败：' + e.message
+    provTipCls.value = 'bad'
+  } finally { provBusy.value = false }
+}
 
 /* 兜底：本机主机必须有 terminal 子对象（表单直接绑定其字段） */
 watch(
@@ -80,6 +108,7 @@ function onDelete() {
         </div>
         <div class="mhe-body">
           <div class="form-grid">
+            <label class="fitem"><span>主机标识 id（密钥/审计用，创建后勿改）</span><input v-model="host.id" type="text" spellcheck="false" style="font-family:var(--mono)" /></label>
             <label class="fitem"><span>名称</span><input v-model="host.name" type="text" /></label>
             <label class="fitem"><span>分组（内网=蓝 / 公网=橙）</span><input v-model="host.group" type="text" /></label>
             <template v-if="host.type === 'ssh'">
@@ -107,6 +136,27 @@ function onDelete() {
               </label>
               <label class="fitem span2"><span>私钥路径</span><input v-model="host.terminal.keyPath" type="text" /></label>
             </template>
+          </div>
+
+          <div v-if="host.type === 'ssh'" class="he-dirs">
+            <div class="sub" style="margin-bottom:4px">
+              自动部署：输入目标机密码，中心自动 SSH 完成——① 免密密钥分发 ② Agent 安装并启动 ③ 切换推送模式（密码仅本次使用，另加密存档备用）
+            </div>
+            <div class="dir-row" style="align-items:center">
+              <input
+                v-model="provPw"
+                type="password"
+                placeholder="目标机密码"
+                autocomplete="new-password"
+                style="flex:1;margin:0"
+                @keydown.enter="doProvision"
+              />
+              <button class="mini-btn" :disabled="provBusy" @click="doProvision">{{ provBusy ? '部署中…' : '自动安装 Agent 并配置免密' }}</button>
+            </div>
+            <ol v-if="provSteps.length" class="prov-steps">
+              <li v-for="(st, i) in provSteps" :key="i">{{ st }}</li>
+            </ol>
+            <p v-if="provTip" class="sub" :style="{ color: provTipCls === 'ok' ? 'var(--green)' : 'var(--red)' }">{{ provTip }}</p>
           </div>
           <p v-if="host.note" class="sub">{{ host.note }}</p>
 
@@ -174,6 +224,8 @@ export default { name: 'MonitorHostEdit' }
 .fitem input, .fitem select { width: 100%; }
 .fitem.span2 { grid-column: span 2; }
 .he-dirs { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.prov-steps { margin: 8px 0 4px; padding-left: 20px; color: var(--text-2); font-size: 12px; }
+.prov-steps li { margin: 2px 0; }
 .dir-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--bg); }
 .d-path { font-family: var(--mono); font-size: 12.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; }
 .d-src { font-size: 11px; border-radius: 999px; padding: 0 8px; background: var(--purple-soft); color: var(--purple); }

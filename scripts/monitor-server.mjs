@@ -326,13 +326,17 @@ setInterval(() => {
   persistSessions();
 }, 60_000).unref();
 
-const failCounter = new Map(); // ip -> {count, win}
+const failCounter = new Map(); // ip -> {count, win}：只统计失败次数，成功登录不消耗配额
 function rateLimited(ip) {
+  const e = failCounter.get(ip);
+  if (!e || Date.now() - e.win > 60_000) return false;
+  return e.count >= (config.auth.maxFailPerMin || 5);
+}
+function recordAuthFail(ip) {
   const now = Date.now();
   const e = failCounter.get(ip);
-  if (!e || now - e.win > 60_000) { failCounter.set(ip, { count: 1, win: now }); return false; }
-  e.count += 1;
-  return e.count > (config.auth.maxFailPerMin || 5);
+  if (!e || now - e.win > 60_000) failCounter.set(ip, { count: 1, win: now });
+  else e.count += 1;
 }
 
 /* ============================ 审计 ============================ */
@@ -427,8 +431,8 @@ function connectSSH(creds, timeoutMs = 12_000, externalConn = null) {
       return true;
     };
     if (creds.authType === 'password') {
-      const rec = credentials[creds._hostId];
-      const pw = rec && rec.password ? decSecret(rec.password) : null;
+      // _password = 一次性明文（provision 流程传入），否则读加密存档
+      const pw = creds._password || (rec && rec.password ? decSecret(rec.password) : null);
       if (!pw) { done(new Error('未配置密码凭据（CLI --set-cred 或看板设置）')); return; }
       opt.password = pw;
     } else {
@@ -1070,6 +1074,112 @@ fi
 }
 
 
+/* ============================ 自动纳管（密码 → 免密 + Agent 安装） ============================ */
+function sshKeygen(hostId) {
+  const dir = path.join(DATA_DIR, 'keys');
+  ensureDirSync(dir);
+  const keyPath = path.join(dir, hostId);
+  return new Promise((resolve, reject) => {
+    if (fs.existsSync(keyPath)) return resolve({ keyPath, created: false });
+    execFile('ssh-keygen', ['-t', 'ed25519', '-f', keyPath, '-N', '', '-C', 'my-homepage-monitor-' + hostId, '-q'], (err) => {
+      if (err) return reject(err);
+      try { fs.chmodSync(keyPath, 0o600); } catch { /* 忽略 */ }
+      resolve({ keyPath, created: true });
+    });
+  });
+}
+
+/* 一次 SSH exec 完成：免密公钥写入 + agent 安装器直灌（不经 HTTP，无 curl 依赖） */
+async function sshExecScript(creds, script, timeoutMs = 30_000) {
+  const conn = await connectSSH(creds, 15_000);
+  try {
+    return await new Promise((resolve, reject) => {
+      conn.exec('sh -s', (err, stream) => {
+        if (err) return reject(err);
+        let out = '';
+        const t = setTimeout(() => reject(new Error('执行超时')), timeoutMs);
+        stream.on('data', (d) => { out += d.toString(); });
+        stream.stderr.on('data', () => {});
+        stream.on('close', (code) => { clearTimeout(t); code === 0 ? resolve(out) : reject(new Error('远端执行失败 exit=' + code + '：' + out.slice(-300))); });
+        stream.end(script);
+      });
+    });
+  } finally { try { conn.end(); } catch { /* 已关 */ } }
+}
+
+async function provisionHost(hostDraft, password, ip) {
+  const steps = [];
+  const draft = normalizeHost({ ...hostDraft, mode: 'ssh' });
+  if (!draft) throw new Error('主机配置无效（id 仅限字母数字-_，且必填）');
+  if (draft.type !== 'ssh') throw new Error('仅远程 SSH 主机支持自动部署');
+  if (!draft.address) throw new Error('缺少目标机地址');
+  if (!password) throw new Error('缺少目标机密码');
+  audit('provision_start', { host: draft.id, ip });
+
+  // 注意：saveConfig 末尾会 loadConfigSync() 重建 config.hosts，
+  // 因此每次改动都必须「重定位当前主机对象 → 改 → 立刻保存」，不能跨保存持有旧引用。
+  const upsert = (mut) => {
+    const i = config.hosts.findIndex((h) => h.id === draft.id);
+    const base = i >= 0 ? config.hosts[i] : normalizeHost({ ...draft });
+    if (i >= 0) config.hosts[i] = base; else config.hosts.push(base);
+    mut(base);
+    saveConfig({ hosts: config.hosts });
+    return config.hosts.find((h) => h.id === draft.id);
+  };
+
+  // 1) 入库（部署期先用密码连接）
+  const saved0 = upsert((h) => {
+    h.name = draft.name; h.group = draft.group; h.mode = 'ssh';
+    h.address = draft.address; h.port = draft.port; h.username = draft.username;
+    h.authType = 'password'; delete h.keyPath; h.trackedDirs = h.trackedDirs || [];
+  });
+  steps.push(`主机配置已保存（${saved0.id} @ ${saved0.address}）`);
+
+  // 2) 监控专用密钥（无则生成）
+  const { keyPath, created } = await sshKeygen(draft.id);
+  steps.push(created ? '已生成监控专用密钥 ed25519' : '复用已有监控专用密钥');
+
+  // 3) 一次 SSH（密码认证）：写免密公钥 + 直灌 agent 安装器
+  const pub = fs.readFileSync(keyPath + '.pub', 'utf8').trim();
+  const installer = buildAgentInstaller({ ...saved0, keyPath }, config.collect.remoteIntervalSec || 20);
+  const remoteScript = [
+    'set -e',
+    'mkdir -p ~/.ssh && chmod 700 ~/.ssh',
+    'touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys',
+    `grep -qF '${pub}' ~/.ssh/authorized_keys 2>/dev/null || echo '${pub}' >> ~/.ssh/authorized_keys`,
+    "cat > /tmp/.my-agent-install.sh <<'INSTALLER_EOF'",
+    installer,
+    'INSTALLER_EOF',
+    'sh /tmp/.my-agent-install.sh',
+    'rm -f /tmp/.my-agent-install.sh',
+  ].join('\n');
+  const creds = { ...getConnCreds(saved0), authType: 'password', _password: password };
+  const out = await sshExecScript(creds, remoteScript, 40_000);
+  const tail = out.trim().split('\n').pop().trim();
+  steps.push('免密公钥已写入 authorized_keys；agent 安装器已执行（' + tail.slice(0, 90) + '）');
+
+  // 4) 免密验证（key 认证；验证后必须关闭连接，否则 keepalive 会长期挂着）
+  const verifyConn = await connectSSH({ ...creds, authType: 'key', keyPath }, 12_000);
+  try { verifyConn.end(); } catch { /* 已关 */ }
+  steps.push('免密登录验证通过（BatchMode，无密码）');
+
+  // 5) 落盘 keyPath + 切换 Agent 推送模式；密码凭据加密存档备用
+  const saved = upsert((h) => {
+    h.keyPath = keyPath;
+    h.authType = 'key';
+    h.mode = 'agent';
+  });
+  credentials[draft.id] = { ...(credentials[draft.id] || {}), password: encSecret(password) };
+  saveCredentials();
+  steps.push('已切换为 Agent 推送模式 + 密码凭据加密存档（备用；不落明文不入 git）');
+  steps.push(`等待首次推送（≤${config.collect.remoteIntervalSec || 20}s）`);
+
+  // 6) 立即触发一次采集管线（applyCollectors 已按新配置重建定时器）
+  applyCollectors();
+  audit('provision_ok', { host: saved.id, ip });
+  return { host: saved, steps };
+}
+
 /* ============================ 终端网关（WS + ssh2 shell） ============================ */
 const wss = new WebSocketServer({ noServer: true });
 const termSessions = new Map(); // hostId -> count
@@ -1213,6 +1323,7 @@ function summaryPayload() {
       online: st.online, error: st.error,
       lastOk: st.lastOk ? new Date(st.lastOk).toISOString() : null,
       credReady: hostCredReady(h),
+      mode: h.mode || 'ssh',
       snap: st.lastSnap,
     };
   });
@@ -1271,7 +1382,7 @@ async function route(req, res) {
   if (p === '/api/monitor/login' && req.method === 'POST') {
     if (rateLimited(ip)) { audit('auth_fail', { ip, reason: 'rate_limited' }); return sendJson(res, 429, { error: '尝试过于频繁，请稍后再试' }); }
     const body = JSON.parse((await readBody(req)) || '{}');
-    if (!verifyPassword(body.password || '', currentPasswordHash())) { audit('auth_fail', { ip }); return sendJson(res, 401, { error: '密码错误' }); }
+    if (!verifyPassword(body.password || '', currentPasswordHash())) { recordAuthFail(ip); audit('auth_fail', { ip }); return sendJson(res, 401, { error: '密码错误' }); }
     const token = createSession(ip);
     audit('auth_ok', { ip });
     return sendJson(res, 200, { ok: true }, { 'Set-Cookie': `${COOKIE_NAME}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${(config.auth.sessionTtlHours || 12) * 3600}` });
@@ -1286,6 +1397,19 @@ async function route(req, res) {
   if (!getSession(req)) return sendJson(res, 401, { error: '未登录或会话已过期' });
 
   if (p === '/api/monitor/summary' && req.method === 'GET') return sendJson(res, 200, summaryPayload());
+
+  if (p === '/api/monitor/hosts/provision' && req.method === 'POST') {
+    if (!guard(req, res)) return;
+    const body = JSON.parse((await readBody(req)) || '{}');
+    if (!body.host || !body.password) return sendJson(res, 400, { error: '缺少主机信息或密码' });
+    try {
+      const r = await provisionHost(body.host, String(body.password), ip);
+      return sendJson(res, 200, { ok: true, host: r.host, steps: r.steps });
+    } catch (e) {
+      audit('provision_fail', { ip, host: body.host?.id, error: String(e.message || e).slice(0, 200) });
+      return sendJson(res, 500, { error: String(e.message || e) });
+    }
+  }
 
   if (p === '/api/monitor/password' && req.method === 'POST') {
     if (!guard(req, res)) return;

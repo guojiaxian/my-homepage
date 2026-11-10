@@ -428,6 +428,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **批量终端（2026-11-10）**：`MonitorBatchTerm.vue`——监控工具栏「批量终端」→ 主机多选器（仅 credReady 主机，**最多 6 台**）→ 多窗格并排；**命令栏一条输入广播到全部窗格**（`text+\r` 逐 WS 下发），点击某窗格进入**单机交互**（密码/交互式提示，命令栏同步切单机语义），「返回广播」切回；布局规则：≤3 台一行并排、≥4 台两行×3 列（`gridTemplateColumns` 动态）；支持全屏切换、每窗格独立重连/状态点。每窗格即一条普通 WS 会话（走既有网关，审计天然覆盖，注意 `maxSessionsPerHost` 默认 2 的并发上限）。glass-v2 同款（vanilla 实现，xterm 用 vendor 全局 `Terminal`/`FitAddon.FitAddon`）。
 
+**自动纳管（2026-11-10，一键零手工）**：设置页主机弹窗「自动部署」区输入**目标机密码** → `POST /api/monitor/hosts/provision` → 中心 SSH（密码认证）一次 exec 完成：写 authorized_keys（监控专用 ed25519）+ 直灌 agent 安装器（不用 curl/HTTP，无对外依赖）→ **key 认证复验免密** → 落盘 keyPath + mode=agent → 密码 AES-GCM 加密存档备用；返回逐步日志给 UI。实测 netwatch 清零点全流程 **1.1 秒** 6 步完成，之后监控零 SSH 连接、终端照常、目标机 25 个既有服务未受任何影响。CLI 等价：`node scripts/monitor-server.mjs --agent-install-cmd <hostId>`（需先有密钥）。坑：`saveConfig()` 末尾会 `loadConfigSync()` 重建 `config.hosts`，**跨保存持有主机对象会写到游离对象上**（曾导致 keyPath/mode 丢写）→ 每次都 `upsert()` 重定位再改；免密复验连接必须 `end()`（否则 keepalive 长期挂起，实测残留 1 条 ESTABLISHED）。
+
 **Agent 推送模式（2026-11-10）**：`hosts[].mode: 'agent'` 切换——目标机常驻零依赖 sh agent（采集代码与 SSH 探测**同源**，指标口径一致），每 20s `curl POST /api/monitor/agent/push`（X-Agent-Token 鉴权，token 存 credentials.json agents 段，CLI/凭据库 fs.watch 热同步）；中心复用 parseRemoteOutput→buildSnapshot 管线，**监控零 SSH 连接**（终端仍 SSH）；推送断流 >70s 看门狗判离线。一键安装：`GET /api/monitor/agent/install.sh?token=`（token 门禁）返回自带采集器/systemd 单元的幂等安装脚本（无 systemd 兜底 nohup+cron）；设置页主机弹窗「采集方式=Agent 推送」可生成/复制命令，CLI `--agent-install-cmd <hostId>` 同效。适用内网可达中心的机器；**公网不可内连的主机（如阿里云）保持 SSH 拉取模式**（中心 20s 短连接外连采集，即当前定制方案）。netwatch 已实测切换（推送驱动/掉线告警/恢复/终端不受影响）；目标机单元名 `my-homepage-agent.service`，push URL 走 nginx `/api/monitor/agent/*`（8301 仅回环）。设置页主机弹窗含「采集方式」下拉与安装命令生成/复制；CLI `--agent-install-cmd <hostId>` 同效。
 
 ### 8.8 毛玻璃 v2 对比端点（`/glass-v2/`，2026-11-10，unslop skill 产出）
@@ -631,6 +633,18 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 24. **配置「校验报错」类测试必须挑 SSH 主机，别用本机主机**
    本机（type=local）的展示地址留空时 `normalizeHost` 会默认填 `127.0.0.1`——清空地址点「保存」不会触发 400，反而**把展示地址真实改掉**（实测把 `10.8.11.4` 改成了 `127.0.0.1`，靠同一条 PUT API 改回）。SSH 主机才有「缺 address → 400 `主机 xx 缺少 address`」的校验路径，且失败不落盘。
 
+
+25. **`saveConfig()` 会重建 config.hosts，跨保存持有主机对象 = 写丢**
+   `saveConfig` 末尾执行 `config = loadConfigSync()`，之前捕获的 `host` 引用即成为游离对象；`host.keyPath = …` / `host.mode = 'agent'` 写到它身上不会落盘（实测 netwatch 纳管后 keyPath 为空、mode 仍 ssh，导致终端「未配置私钥」+ SSH 采集失败覆盖 agent 推送）。修复：统一走 `upsert(mut)` —— 每次重新 `find` 当前主机 → 改 → 立刻保存，从不跨保存持有引用。
+
+26. **ssh2 连接用完必须 end()，否则 keepalive 长期挂 ESTABLISHED**
+   provision 的「免密验证」连接当时只 await 没关闭，`keepaliveInterval: 15s` 让它一直存活——`ss` 里能看到网关到目标的常连，违背「agent 模式零 SSH 连接」的设计承诺。凡 `connectSSH()` 得到连接，业务结束必须 `conn.end()`（探测/终端路径已有 finally，新增路径容易漏）。
+
+27. **登录限速必须只计失败，别计入成功登录**
+   原 `rateLimited()` 在每次 login 请求都自增，5 次/分连**正确密码**也会被 429（连续跑 E2E 时必现）。改为 `rateLimited()` 只读判定 + 新增 `recordAuthFail()` 仅在密码错误时计数（实测：连续 7 次正确密码全 200；连续错误密码 5×401 后 429）。
+
+28. **原生 DOM 写内容后立刻重渲染 = 内容被冲掉**
+   设置面板把 provision 步骤写进 `<ol>` 后马上调 `renderSettings()`（模板字符串全量重建），刚写的日志被清空、只剩占位「正在连接…」。正确做法：状态驱动——步骤存 `host._provSteps`，模板负责渲染，任何时候重渲染都能保真。
 
 ---
 

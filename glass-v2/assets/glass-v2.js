@@ -1072,6 +1072,14 @@
             `}
           </div>
           ${h.note ? `<p class="gv-sub" style="margin:6px 0 0">${esc(h.note)}</p>` : ''}
+          ${h.type === 'ssh' ? `<div class="gv-he-dirs">
+            <div class="gv-sub" style="margin-bottom:4px">自动部署：输入目标机密码，中心自动 SSH 完成 免密密钥分发 → Agent 安装启动 → 切换推送模式（密码仅本次使用，另加密存档备用）</div>
+            <div class="gv-dir-row">
+              <input type="password" class="gv-prov-pw" data-prov="${esc(h.id)}" placeholder="目标机密码" autocomplete="new-password" style="flex:1;background:transparent;border:0;color:var(--gv-text);outline:none;font:inherit" />
+              <button type="button" class="gv-minibtn" data-prov-run="${esc(h.id)}">自动安装 Agent 并配置免密</button>
+            </div>
+            <ol class="gv-prov-steps" id="gv-prov-steps-${esc(h.id)}" style="margin:6px 0 0;padding-left:18px;color:var(--gv-text-2);font-size:12px">${(h._provSteps || []).map((st) => `<li${st.startsWith('部署失败') ? ' style="color:var(--gv-red)"' : st.startsWith('部署完成') ? ' style="color:var(--gv-green)"' : ''}>${esc(st)}</li>`).join('')}</ol>
+          </div>` : ''}
           <div class="gv-he-dirs">
             <div class="sub" style="margin-bottom:4px">该主机跟踪目录（目录级资源统计${h.type === 'local' ? '；主页登记的应用目录已自动并入' : ''}）</div>
             ${(h.trackedDirs || []).map((d, di) => `<div class="gv-dir-row"><span class="gv-d-path">${esc(d.path)}</span>
@@ -1082,6 +1090,34 @@
       $$('#gv-set-hosts [data-del-host]').forEach((b) => b.addEventListener('click', () => {
         const i = +b.dataset.delHost
         if (confirm(`删除主机 ${setEdit.hosts[i].id}？（保存后生效）`)) { setEdit.hosts.splice(i, 1); renderSettings() }
+      }))
+      $$('#gv-set-hosts [data-prov-run]').forEach((b) => b.addEventListener('click', async () => {
+        const hid = b.dataset.provRun
+        const host = setEdit.hosts.find((x) => x.id === hid)
+        const pwInput = document.querySelector(`.gv-prov-pw[data-prov="${CSS.escape(hid)}"]`)
+        const pw = pwInput ? pwInput.value : ''
+        const ol = document.getElementById('gv-prov-steps-' + hid)
+        if (!pw) { host._provSteps = ['请输入目标机密码']; renderSettings(); return }
+        b.disabled = true
+        const old = b.textContent
+        b.textContent = '部署中…'
+        host._provSteps = ['正在连接并部署…']
+        renderSettings()
+        try {
+          const res = await fetch('/api/monitor/hosts/provision', {
+            method: 'POST', credentials: 'same-origin',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+            body: JSON.stringify({ host, password: pw }),
+          })
+          const d = await res.json()
+          if (!res.ok) throw new Error(d.error || ('HTTP ' + res.status))
+          if (d.host) Object.assign(host, d.host)
+          host._provSteps = [...(d.steps || []), '部署完成 ✓（免密与 Agent 已配置，等待首个推送）']
+          renderSettings()
+        } catch (e) {
+          host._provSteps = ['部署失败：' + e.message]
+          renderSettings()
+        } finally { /* 按钮随重渲染复位 */ }
       }))
       $$('#gv-set-hosts [data-del-hdir]').forEach((b) => b.addEventListener('click', () => {
         const [hi, di] = b.dataset.delHdir.split(':').map(Number)
@@ -1103,6 +1139,7 @@
       $$('#gv-set-hosts input, #gv-set-hosts select').forEach((inp) => inp.addEventListener('change', () => {
         const h = setEdit.hosts[+inp.closest('.gv-host-edit').dataset.i]
         const k = inp.dataset.k
+        if (!k) return
         if (k.startsWith('t_')) h.terminal = { ...(h.terminal || {}), [k.slice(2)]: k === 't_port' ? +inp.value : inp.value }
         else if (k === 'port') h.port = +inp.value
         else h[k] = inp.value

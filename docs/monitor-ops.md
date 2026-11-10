@@ -75,7 +75,15 @@ echo '目标机密码' | node scripts/monitor-server.mjs --set-cred <hostId> --p
 | 监控期 SSH 连接 | 每周期一次短连接 | **零**（SSH 仅用于终端） |
 | 掉线判定 | 探测失败 | 推送断流 >70s（看门狗） |
 
-一键安装（目标机 root 执行；设置页主机弹窗「采集方式=Agent 推送」可生成/复制，或 CLI）：
+**自动纳管（推荐，零手工）**：⚙ 监控设置 → 添加/编辑主机 → 填地址、用户名 → 「自动部署」区输入**目标机密码** → 点「自动安装 Agent 并配置免密」。中心自动完成：写入免密公钥 → 安装并启动 agent → 免密复验 → 切 agent 模式 → 密码加密存档（备用）。弹窗内逐步显示 6 步日志；实测约 1 秒。亦可走 API：
+
+```bash
+curl -X POST http://127.0.0.1/api/monitor/hosts/provision \
+  -H 'Content-Type: application/json' -H 'X-Requested-With: XMLHttpRequest' -b cookie \
+  -d '{"host":{"id":"node1","name":"节点1","type":"ssh","group":"内网","address":"10.8.11.9","port":22,"username":"root"},"password":"***"}'
+```
+
+手工安装（目标机 root 执行；设置页主机弹窗「采集方式=Agent 推送」可生成/复制，或 CLI）：
 
 ```bash
 node scripts/monitor-server.mjs --agent-install-cmd <hostId>   # 打印命令

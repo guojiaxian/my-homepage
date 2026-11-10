@@ -330,6 +330,7 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
       :err="hostEdit.err"
       @close="hostEdit.open = false"
       @save="saveDirectEdit"
+      @saved="onSaved"
     />
     <!-- 终端抽屉 -->
     <MonitorTerm v-if="termHost" :host-id="termHost.id" :host-name="termHost.name" @close="termHost = null" />
