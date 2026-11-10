@@ -4,6 +4,7 @@ import AppTable from './components/AppTable.vue'
 import AppCard from './components/AppCard.vue'
 import SettingsPanel from './components/SettingsPanel.vue'
 import MonitorView from './components/MonitorView.vue'
+import PageHero from './components/PageHero.vue'
 
 /* ---------- 页面信息（可在首页设置面板中修改） ---------- */
 const page = ref({
@@ -81,6 +82,12 @@ const probedAt = ref('')
 const loading = ref(true)
 const loadError = ref('')
 const settingsOpen = ref(false)
+const monitorSettingsOpen = ref(false)
+/* 顶栏齿轮常驻：按当前视图打开对应设置，避免切换时图标显隐导致右侧跳动 */
+function openSettings() {
+  if (topView.value === 'monitor') monitorSettingsOpen.value = true
+  else settingsOpen.value = true
+}
 const syncing = ref(false)
 const syncError = ref('')
 const POLL_MS = 60_000
@@ -385,7 +392,7 @@ onBeforeUnmount(() => {
             />
           </svg>
         </a>
-        <button v-if="topView === 'apps'" class="icon-btn" title="设置" @click="settingsOpen = true">
+        <button class="icon-btn" :title="topView === 'monitor' ? '监控设置' : '设置'" @click="openSettings">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
             <circle cx="12" cy="12" r="3" />
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.08a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.08a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.08a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" />
@@ -406,27 +413,23 @@ onBeforeUnmount(() => {
 
   <main class="container">
     <div v-show="topView === 'apps'">
-    <section class="hero">
-      <h1>{{ page.heroTitle }}</h1>
-      <p class="sub">{{ page.heroSubtitle }}</p>
-      <div class="stats">
-        <span class="stat-chip"><b>{{ apps.length }}</b> 个应用</span>
-        <span class="stat-chip">
-          <span class="dot" :style="{ background: runningCount ? 'var(--green)' : 'var(--gray)' }" />
-          <b>{{ runningCount }}</b> 个运行中
-        </span>
-        <span class="stat-chip" title="按部署位置：内网 / 公网">
-          内网 <b style="color: var(--accent)">{{ lanCount }}</b>
-          <span style="color: var(--gray)">·</span>
-          公网 <b style="color: var(--amber)">{{ netCount }}</b>
-        </span>
-        <span class="stat-chip" title="源码与 GitHub 仓库的同步状态">
-          <span class="dot" :style="{ background: gitUnsynced ? 'var(--amber)' : 'var(--green)' }" />
-          <template v-if="gitUnsynced"><b>{{ gitUnsynced }}</b> 个源码未同步</template>
-          <template v-else>源码全部已同步</template>
-        </span>
-      </div>
-    </section>
+    <PageHero :title="page.heroTitle" :subtitle="page.heroSubtitle">
+      <span class="stat-chip"><b>{{ apps.length }}</b> 个应用</span>
+      <span class="stat-chip">
+        <span class="dot" :style="{ background: runningCount ? 'var(--green)' : 'var(--gray)' }" />
+        <b>{{ runningCount }}</b> 个运行中
+      </span>
+      <span class="stat-chip" title="按部署位置：内网 / 公网">
+        内网 <b style="color: var(--accent)">{{ lanCount }}</b>
+        <span style="color: var(--gray)">·</span>
+        公网 <b style="color: var(--amber)">{{ netCount }}</b>
+      </span>
+      <span class="stat-chip" title="源码与 GitHub 仓库的同步状态">
+        <span class="dot" :style="{ background: gitUnsynced ? 'var(--amber)' : 'var(--green)' }" />
+        <template v-if="gitUnsynced"><b>{{ gitUnsynced }}</b> 个源码未同步</template>
+        <template v-else>源码全部已同步</template>
+      </span>
+    </PageHero>
 
     <div class="toolbar">
       <div class="sort-box">
@@ -510,6 +513,8 @@ onBeforeUnmount(() => {
     <MonitorView
       :active="topView === 'monitor'"
       :authed="siteAuthed"
+      :settings-open="monitorSettingsOpen"
+      @update:settings-open="monitorSettingsOpen = $event"
       @unauth="siteAuthed = false"
     />
   </main>

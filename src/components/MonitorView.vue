@@ -6,6 +6,7 @@ import MonitorSettings from './MonitorSettings.vue'
 import MonitorHostEdit from './MonitorHostEdit.vue'
 import MonitorTerm from './MonitorTerm.vue'
 import MonitorBatchTerm from './MonitorBatchTerm.vue'
+import PageHero from './PageHero.vue'
 
 /* active：是否为当前顶层视图（App.vue v-show 常驻，由父级告知）。
    authed：全站登录门状态（App.vue 持有；401 时向上抛 unauth，由父级展示全站登录层）。
@@ -13,14 +14,15 @@ import MonitorBatchTerm from './MonitorBatchTerm.vue'
 const props = defineProps({
   active: { type: Boolean, default: false },
   authed: { type: Boolean, default: false },
+  /* 设置弹窗由 App.vue 顶栏常驻齿轮统一控制（与应用中心复用同一入口） */
+  settingsOpen: { type: Boolean, default: false },
 })
-const emit = defineEmits(['unauth'])
+const emit = defineEmits(['unauth', 'update:settingsOpen'])
 
 /* ---------- 状态 ---------- */
 const summary = ref(null)
 const loadErr = ref('')
 const selectedId = ref('')
-const settingsOpen = ref(false)
 const termHost = ref(null) // { id, name }
 const batchPickerOpen = ref(false)
 const batchOpen = ref(false)
@@ -187,26 +189,20 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
 
 <template>
   <div v-show="active">
-    <!-- 概览 hero 一行化：标题左 / 统计右（未鉴权时被 App.vue 的全站登录层覆盖） -->
-    <section class="mon-hero">
-      <div class="mh-left">
-        <h1>监控中心</h1>
-        <p class="sub">本机与远程服务器实时指标 · 每 5 秒自动刷新 · 点击卡片查看详情并进入终端</p>
-      </div>
-      <div class="mh-stats">
-        <span class="stat-chip">
-          <span class="dot" :style="{ background: onlineCount === hosts.length && hosts.length ? 'var(--green)' : 'var(--amber)' }" />
-          <b>{{ onlineCount }}</b>/{{ hosts.length }} 主机在线
-        </span>
-        <span class="stat-chip" :style="alerts.length ? 'color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border))' : ''">
-          <span class="dot" :style="{ background: alerts.length ? 'var(--red)' : 'var(--green)' }" />
-          <template v-if="alerts.length"><b>{{ alerts.length }}</b> 个活跃告警</template>
-          <template v-else>无活跃告警</template>
-        </span>
-        <span class="stat-chip">跟踪 <b>{{ trackedDirCount }}</b> 个目录</span>
-        <span class="stat-chip"><b>{{ containerCount }}</b> 个容器</span>
-      </div>
-    </section>
+    <!-- 与应用中心共用同一页头组件，切换时标题/统计区位置完全一致 -->
+    <PageHero title="监控中心" subtitle="本机与远程服务器实时指标 · 每 5 秒自动刷新 · 点击卡片查看详情并进入终端">
+      <span class="stat-chip">
+        <span class="dot" :style="{ background: onlineCount === hosts.length && hosts.length ? 'var(--green)' : 'var(--amber)' }" />
+        <b>{{ onlineCount }}</b>/{{ hosts.length }} 主机在线
+      </span>
+      <span class="stat-chip" :style="alerts.length ? 'color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border))' : ''">
+        <span class="dot" :style="{ background: alerts.length ? 'var(--red)' : 'var(--green)' }" />
+        <template v-if="alerts.length"><b>{{ alerts.length }}</b> 个活跃告警</template>
+        <template v-else>无活跃告警</template>
+      </span>
+      <span class="stat-chip">跟踪 <b>{{ trackedDirCount }}</b> 个目录</span>
+      <span class="stat-chip"><b>{{ containerCount }}</b> 个容器</span>
+    </PageHero>
 
       <!-- 活跃告警横幅 -->
       <div v-if="alerts.length" class="alert-banner">
@@ -224,10 +220,9 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
         <span class="grow" />
         <span class="sub num" v-if="summary">更新于 {{ new Date(summary.serverTime).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
         <button class="ghost-btn" @click="batchPickerOpen = true">批量终端</button>
-        <button class="ghost-btn" @click="settingsOpen = true">⚙ 监控设置</button>
       </div>
 
-      <div v-if="!hosts.length" class="mon-empty">还没有纳管主机，点击右上角「⚙ 监控设置」添加。</div>
+      <div v-if="!hosts.length" class="mon-empty">还没有纳管主机，点击顶栏 ⚙ 添加。</div>
 
       <div v-else class="host-grid" :class="'c' + hostCols">
         <article
@@ -319,8 +314,8 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
     <!-- 批量终端 -->
     <MonitorBatchTerm v-if="batchOpen" :hosts="batchHosts" @close="batchOpen = false" />
 
-    <!-- 设置弹窗 -->
-    <MonitorSettings :open="settingsOpen" @close="settingsOpen = false" @saved="onSaved" />
+    <!-- 设置弹窗（入口在顶栏常驻齿轮） -->
+    <MonitorSettings :open="settingsOpen" @close="emit('update:settingsOpen', false)" @saved="onSaved" />
     <!-- 详情页 ⚙ 直连主机编辑弹窗（direct 模式：弹窗内「保存」直接 PUT 配置） -->
     <MonitorHostEdit
       :open="hostEdit.open"
@@ -356,15 +351,8 @@ export default { name: 'MonitorView' }
 .alert-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex: none; animation: monPulse 2s ease-in-out infinite; }
 .alert-item.warn .alert-dot { background: var(--amber); }
 
-/* ===== 概览 hero 一行化 ===== */
-.mon-hero { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; margin: 2px 0 14px; }
-.mon-hero .mh-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
-.mon-hero h1 { margin: 0; font-size: 22px; }
-.mon-hero .mh-left .sub { margin: 0; }
-.mon-hero .mh-stats { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
-
 /* ===== 工具行 ===== */
-.mon-toolbar { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 14px; flex-wrap: wrap; }
+.mon-toolbar { display: flex; align-items: center; gap: 10px; margin: 8px 0 20px; flex-wrap: wrap; }
 .mon-toolbar h2 { font-size: 16px; margin: 0; font-weight: 600; }
 .ghost-btn {
   border: 0; background: var(--accent-soft); color: var(--accent);
@@ -454,6 +442,5 @@ export default { name: 'MonitorView' }
 }
 @media (max-width: 640px) {
   .host-grid { grid-template-columns: 1fr !important; }
-  .mon-hero .mh-stats { margin-left: 0; }
 }
 </style>

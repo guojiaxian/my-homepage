@@ -156,7 +156,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 │       ├── MonitorDetail.vue  # ★ 监控内联详情（4 趋势图 + 分区/目录占比 + 目录对比 + 进程明细）
 │       ├── MonitorSettings.vue# ★ 监控设置弹窗（主机紧凑列表/目录/阈值/终端/改密/审计）
 │       ├── MonitorHostEdit.vue# ★ 单主机编辑弹窗（草稿/直连双模式，被设置面板与详情页 ⚙ 复用）
-│       └── MonitorTerm.vue    # ★ Web 终端抽屉（xterm 动态分包；弹窗放大走 monitor/terminal.html）
+│       ├── MonitorTerm.vue    # ★ Web 终端抽屉（xterm 动态分包；弹窗放大走 monitor/terminal.html）
+│       └── PageHero.vue       # 应用中心 / 监控中心共用页头（标题 + 副标题 + 统计 chip 插槽）
 ├── src/lib/
 │   ├── app-utils.js           # 纯函数（主页共用）
 │   ├── monitor-api.js         # 监控 API 封装 + 格式化
@@ -371,6 +372,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - `onSaved(savedAt)`：设置保存后先刷一次，再每 1.5s 轮询直到 `probedAt > savedAt`（上限 40 次）→ 再刷一次
 - `syncNow()`：「立刻同步」按钮 → `POST /api/probe` → 每 2s 轮询直到 `probedAt > 服务端 startedAt`（上限 90 次）→ 刷新；期间按钮禁用并显示「同步中…」
 - 页脚「最后探测」固定按 `Asia/Shanghai` 显示（避免浏览器时区不同导致偏差）
+- **两视图共用页头与顶栏入口（2026-11-10）**：应用中心与监控中心都用 `PageHero.vue`（同一 `.hero` 结构：标题/副标题/统计 chip），切换时标题与统计区零位移；顶栏齿轮**常驻**，按 `topView` 打开应用设置或监控设置（原监控视图齿轮隐藏导致右侧图标横移、旧 `.mon-hero` 紧凑版导致内容上跳，均已修复）；`.brand-tab` 两档统一 `font-weight:600`，避免激活态字重变化造成标题宽度抖动。
 - 三视图状态：`view: 'table' | 'card'`（移动端 `≤760px` 默认卡片，用户手动选过后尊重其选择）
 
 ### 8.2 排序（两种机制并存）
@@ -471,7 +473,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **前端视觉**：白底（`--bg-soft #fff`），变量与 `src/style.css` 完全同源（`--accent #2563eb` 主蓝，深色为可选项，默认浅色）；内网蓝/公网橙沿用。动效（全部 `prefers-reduced-motion` 降级，只动 transform/opacity/box-shadow）：数字 rAF 滚动 260ms easeOutCubic、卡片 hover 抬升 160ms `cubic-bezier(.2,.8,.2,1)`、告警点脉冲 2s、ECharts smooth 0.3 + 渐变面积 + `animationDurationUpdate 300 cubicOut`、入场 fadeUp stagger 仅首次（`state.entered` 标记，同 glass 踩坑 #6 教训）、骨架屏 shimmer、brand mark 扫光一次。
 
-**布局重排（2026-11-10，对照 1Panel 诊断后）**：用户反馈「1Panel 布局好看，我们的总感觉有点奇怪」。诊断结论：hero 三层堆叠占 ~230px、3+1 网格右侧塌空、conic 圆环里塞 12.5px 小数字、左色条+env-chip 双重编码、dashed 虚线过多、详情四块全宽无分组且滚动丢上下文。按 1Panel 的三条纪律重排（**信息密度均匀 / 单一卡片体系 / 颜色只表达语义**，白底语言与双 tab 导航不变）：① hero 一行化 `.mon-hero`（标题左 / 统计 chip 右，不再用全局 hero 堆叠）；② 主机卡列数随台数自适应（`hostCols` computed：2..5 列里选「行数最少 → 末行空位最少 → 卡更宽」，`.host-grid.c1-.c5` 类绑定 + ≤1200/≤820px media 降 3/2 列；4 台=c4，5 台=5 列，6 台=3×2 整行排满，13 台以上仍 5 列封顶）：conic 圆环 → 三列「21px mono 大数字 + 4px 迷你进度条」`.hc-metrics`（≥70 橙 / ≥88 红），负载/网络/运行并为一行弱信息 `.hc-line`，删卡片左色条（env 编码只留 env-chip），卡内虚线全换实线，`@property --v` 随圆环一并删除；③ 详情 sticky 上下文头（`.detail-head` 负 margin 铺满卡片宽、`top: 59px` 贴顶栏下沿，滚动中主机名+时间范围常驻）+ 三组分组标题「资源趋势 / 目录维度 / 进程明细」（`.group-cap` 带拉通 hairline；进程明细的 h4 不再重复标题，只留统计与清除过滤）。glass-v2 **未同步**此重排（毛玻璃端点自身布局另议）。
+**布局重排（2026-11-10，对照 1Panel 诊断后）**：用户反馈「1Panel 布局好看，我们的总感觉有点奇怪」。诊断结论：hero 三层堆叠占 ~230px、3+1 网格右侧塌空、conic 圆环里塞 12.5px 小数字、左色条+env-chip 双重编码、dashed 虚线过多、详情四块全宽无分组且滚动丢上下文。按 1Panel 的三条纪律重排（**信息密度均匀 / 单一卡片体系 / 颜色只表达语义**，白底语言与双 tab 导航不变）：① hero 与应用中心共用 `PageHero`（标题/副标题/统计 chip 同结构，切换零位移；原 `.mon-hero` 一行化已移除）；② 主机卡列数随台数自适应（`hostCols` computed：2..5 列里选「行数最少 → 末行空位最少 → 卡更宽」，`.host-grid.c1-.c5` 类绑定 + ≤1200/≤820px media 降 3/2 列；4 台=c4，5 台=5 列，6 台=3×2 整行排满，13 台以上仍 5 列封顶）：conic 圆环 → 三列「21px mono 大数字 + 4px 迷你进度条」`.hc-metrics`（≥70 橙 / ≥88 红），负载/网络/运行并为一行弱信息 `.hc-line`，删卡片左色条（env 编码只留 env-chip），卡内虚线全换实线，`@property --v` 随圆环一并删除；③ 详情 sticky 上下文头（`.detail-head` 负 margin 铺满卡片宽、`top: 59px` 贴顶栏下沿，滚动中主机名+时间范围常驻）+ 三组分组标题「资源趋势 / 目录维度 / 进程明细」（`.group-cap` 带拉通 hairline；进程明细的 h4 不再重复标题，只留统计与清除过滤）。glass-v2 **未同步**此重排（毛玻璃端点自身布局另议）。
 
 **实测基线**（2026-11-10）：网关常驻 ~35MB；本机 516 进程全扫 + 50 个归属进程聚合，单 tick <100ms；WS 终端端到端自检通过（`.verify/term-test.mjs`，审计正确记录命令）。
 
