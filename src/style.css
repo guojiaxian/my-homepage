@@ -59,6 +59,8 @@ html,
 body {
   margin: 0;
   padding: 0;
+  /* 固定预留滚动条宽度：应用中心（长列表）与监控中心（常无滚动条）切换时页面不横向抖动 */
+  scrollbar-gutter: stable;
 }
 
 body {

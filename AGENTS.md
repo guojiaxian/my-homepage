@@ -372,7 +372,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - `onSaved(savedAt)`：设置保存后先刷一次，再每 1.5s 轮询直到 `probedAt > savedAt`（上限 40 次）→ 再刷一次
 - `syncNow()`：「立刻同步」按钮 → `POST /api/probe` → 每 2s 轮询直到 `probedAt > 服务端 startedAt`（上限 90 次）→ 刷新；期间按钮禁用并显示「同步中…」
 - 页脚「最后探测」固定按 `Asia/Shanghai` 显示（避免浏览器时区不同导致偏差）
-- **两视图共用页头与顶栏入口（2026-11-10）**：应用中心与监控中心都用 `PageHero.vue`（同一 `.hero` 结构：标题/副标题/统计 chip），切换时标题与统计区零位移；顶栏齿轮**常驻**，按 `topView` 打开应用设置或监控设置（原监控视图齿轮隐藏导致右侧图标横移、旧 `.mon-hero` 紧凑版导致内容上跳，均已修复）；`.brand-tab` 两档统一 `font-weight:600`，避免激活态字重变化造成标题宽度抖动。
+- **两视图共用页头与顶栏入口（2026-11-10）**：应用中心与监控中心都用 `PageHero.vue`（同一 `.hero` 结构：标题/副标题/统计 chip），切换时标题与统计区零位移；顶栏齿轮**常驻**，按 `topView` 打开应用设置或监控设置（原监控视图齿轮隐藏导致右侧图标横移、旧 `.mon-hero` 紧凑版导致内容上跳，均已修复）；`.brand-tab` 两档统一 `font-weight:600`，避免激活态字重变化造成标题宽度抖动；`html, body` 加 `scrollbar-gutter: stable`，避免长/短视图切换时滚动条出现导致整页横向抖动。
 - 三视图状态：`view: 'table' | 'card'`（移动端 `≤760px` 默认卡片，用户手动选过后尊重其选择）
 
 ### 8.2 排序（两种机制并存）
@@ -444,6 +444,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - **文件**：`glass-v2/index.html` + `assets/glass-v2.css` + `assets/glass-v2.js`（应用逻辑移植自 `/unslop/` 成熟实现，监控逻辑移植自 git 历史版 monitor.js）+ `assets/vendor/`（echarts/xterm 自包含——**不要跨端点引用 /monitor/assets/vendor**，echarts.min.js 已在 SPA 化时从那里删除，会落 try_files 兜底返回 HTML）。
 - nginx：两处 server 块各一个 `/glass-v2/` location（`root` + `try_files`），备份 `*.bak-glassv2-20261110`。
 - 踩坑：`.gv-gauge` 忘写 `position: relative` → `::after` 内圆孔与 `.gv-gval` 数值锚到卡片上漂移；自定义属性过渡必须 `@property` 注册。
+- 顶栏标题防跳（2026-11-10）：激活 tab 的呼吸点 `::before` 曾只加在 `.gv-tab.is-active` 上，导致激活 tab 比非激活宽 15px（103 vs 88），切换时两个标题左右跳。改为 `.gv-tab::before` 常驻占位 + 非激活 `visibility:hidden`；两 tab 固定同宽，实测 x 坐标切换前后一致。
+- 页面宽度防抖：`html, body { scrollbar-gutter: stable }`（主站 `src/style.css` 同步加），避免应用列表（长页）与监控（短页）切换时滚动条出现/消失造成整页横向位移。
 - **与主站的同步状态（2026-11-10）**：目录历史对比默认全选 + 全选/清空（`state.seededDirs`、`#gv-cmp-all/#gv-cmp-none`）**已同步**；主站主机设置改紧凑列表 + `MonitorHostEdit.vue` 双通道后，此端点的设置弹窗**未同步**（仍为主机平铺表单版）——如需对齐，照 `glass-v2.js` 既有「渲染函数 + addEventListener」模式移植，勿引 Vue。
 
 ### 8.7 监控中心与 Web 终端（并入主站 SPA，2026-11-10；首版为独立 /monitor/ 页，同日按用户反馈合并）

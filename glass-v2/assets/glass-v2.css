@@ -54,7 +54,7 @@ html[data-theme='light'] {
 @property --v { syntax: "<number>"; inherits: true; initial-value: 0; }
 
 * { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; }
+html, body { margin: 0; padding: 0; scrollbar-gutter: stable; }
 body.gv-body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', 'Noto Sans CJK SC', sans-serif;
   font-size: 15px; line-height: 1.6; color: var(--gv-text);
@@ -110,7 +110,9 @@ html[data-theme='light'] .gv-tabs { background: rgba(255, 255, 255, 0.4); }
 .gv-tab { padding: 6px 16px; border-radius: 9px; font-size: 14px; font-weight: 500; color: var(--gv-text-2); transition: color 0.16s var(--gv-ease), background 0.16s var(--gv-ease), box-shadow 0.16s var(--gv-ease); }
 .gv-tab:hover { color: var(--gv-text); }
 .gv-tab.is-active { color: var(--gv-text); background: var(--gv-panel-strong); box-shadow: inset 0 0 0 1px var(--gv-hairline-strong), 0 2px 12px rgba(77, 159, 255, 0.18); }
-.gv-tab.is-active::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--gv-accent); margin-right: 8px; box-shadow: 0 0 8px var(--gv-accent); animation: gvBreath 2.4s ease-in-out infinite; }
+/* 呼吸点常驻占位（非激活时 visibility:hidden），保证切换时两个标题宽度不变、不左右跳动 */
+.gv-tab::before { content: ''; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--gv-accent); margin-right: 8px; box-shadow: 0 0 8px var(--gv-accent); visibility: hidden; }
+.gv-tab.is-active::before { visibility: visible; animation: gvBreath 2.4s ease-in-out infinite; }
 @keyframes gvBreath { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 .gv-topbar__actions { margin-left: auto; display: flex; align-items: center; gap: 8px; }
 .gv-iconbtn {
