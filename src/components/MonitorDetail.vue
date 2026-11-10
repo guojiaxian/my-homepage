@@ -85,6 +85,9 @@ async function renderAll() {
 function onResize() { if (charts) charts.instances.forEach((c) => c.resize()) }
 
 function pts() { return hist.value || [] }
+/* 当前值 / 区间峰值：图头直接展示，解释纵轴为何按峰值自适应 */
+const cpuNow = computed(() => (hist.value.length ? hist.value[hist.value.length - 1].cpu : null))
+const cpuPeak = computed(() => hist.value.reduce((m, p) => Math.max(m, p.cpu ?? 0), 0))
 
 function renderTrends() {
   const { baseOption, lineSeries, legendStyle, cssVar } = mod()
@@ -102,6 +105,7 @@ function renderTrends() {
     ...cpuBase,
     legend: legendStyle(),
     grid: { ...cpuBase.grid, top: 30 },
+    tooltip: { ...cpuBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v}%`) },
     series: [
       lineSeries('CPU %', pts().map((p) => [t(p), p.cpu]), cssVar('--accent')),
     ],
@@ -112,6 +116,7 @@ function renderTrends() {
     ...memBase,
     legend: legendStyle(),
     grid: { ...memBase.grid, top: 30 },
+    tooltip: { ...memBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v}%`) },
     series: [
       lineSeries('内存 %', pts().map((p) => [t(p), p.mem]), cssVar('--purple')),
     ],
@@ -122,6 +127,7 @@ function renderTrends() {
     ...netBase,
     legend: legendStyle(),
     grid: { ...netBase.grid, top: 30 },
+    tooltip: { ...netBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v} Mbps`) },
     yAxis: { ...netBase.yAxis, ...unit('Mbps') },
     series: [
       lineSeries('下行 Mbps', pts().map((p) => [t(p), p.netI]), cssVar('--accent')),
@@ -134,6 +140,7 @@ function renderTrends() {
     ...dioBase,
     legend: legendStyle(),
     grid: { ...dioBase.grid, top: 30 },
+    tooltip: { ...dioBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v} MB/s`) },
     yAxis: { ...dioBase.yAxis, ...unit('MB/s') },
     series: [
       lineSeries('读 MB/s', pts().map((p) => [t(p), p.dioR]), cssVar('--teal')),
@@ -289,9 +296,12 @@ onBeforeUnmount(() => {
 
     <p v-if="err" class="detail-err">加载失败：{{ err }}</p>
 
-    <div class="group-cap">资源趋势 <span>曲线颜色见各图图例</span></div>
+    <div class="group-cap">资源趋势 <span>曲线颜色见各图图例 · 纵轴按所选时段的峰值自适应</span></div>
     <div class="charts4">
-      <div class="chart-box"><h4>CPU 使用率</h4><div ref="elCpu" class="chart" /></div>
+      <div class="chart-box">
+        <h4>CPU 使用率 <span v-if="cpuNow != null" class="hint">当前 {{ cpuNow.toFixed(1) }}% · 峰值 {{ cpuPeak.toFixed(1) }}%</span></h4>
+        <div ref="elCpu" class="chart" />
+      </div>
       <div class="chart-box"><h4>内存使用率</h4><div ref="elMem" class="chart" /></div>
       <div class="chart-box"><h4>网络（{{ host.snap?.net?.iface || '-' }}）</h4><div ref="elNet" class="chart" /></div>
       <div class="chart-box"><h4>磁盘 IO</h4><div ref="elDio" class="chart" /></div>
