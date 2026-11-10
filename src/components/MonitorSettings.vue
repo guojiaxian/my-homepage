@@ -51,7 +51,7 @@ function delHost(i) { cfg.hosts.splice(i, 1) }
 function hostSummary(h) {
   const kind = h.type === 'local' ? '本机' : 'SSH 远程'
   const addr = h.type === 'ssh' ? `${h.address || '未配置地址'}:${h.port || 22}` : (h.address || '127.0.0.1')
-  const n = (h.trackedDirs || []).length
+  const n = (h.effectiveDirs || h.trackedDirs || []).length
   return `${kind} · ${h.group || '未分组'} · ${addr}${n ? ` · ${n} 个跟踪目录` : ''}`
 }
 
@@ -126,14 +126,14 @@ async function changePw() {
             <p class="sub" style="margin:8px 0 0">点击主机条目编辑连接信息与跟踪目录；弹窗内修改为草稿，由底部「保存配置」统一提交。</p>
           </section>
 
-          <section class="msec">
-            <h3>跟踪目录（主页登记应用目录自动并入）</h3>
+          <section v-if="cfg.trackedDirs.length" class="msec">
+            <h3>全局自定义目录（对所有主机生效）</h3>
+            <p class="sub" style="margin:0 0 8px">通常无需在此添加：本机的主页登记应用目录会自动并入，远程主机请在主机编辑弹窗里添加该机目录。</p>
             <div v-for="(d, i) in cfg.trackedDirs" :key="d.path" class="dir-row">
               <span class="d-path">{{ d.path }}</span>
               <span class="d-src">自定义</span>
               <button class="mini-btn danger" @click="delDir(i)">移除</button>
             </div>
-            <p v-if="!cfg.trackedDirs.length" class="sub">暂无自定义跟踪目录</p>
             <button class="mini-btn" @click="addDir">＋添加目录</button>
           </section>
 

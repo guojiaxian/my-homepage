@@ -1,5 +1,5 @@
 <script setup>
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { monApi } from '../lib/monitor-api.js'
 
 /* 单主机编辑弹窗，两处复用：
@@ -86,11 +86,21 @@ function addDir() {
   if (!p.startsWith('/')) { alert('必须是绝对路径'); return }
   if (p === '/') { alert('不允许跟踪根目录（不越界采集）'); return }
   const clean = p.replace(/\/+$/, '')
+  if ((props.host.effectiveDirs || []).some((d) => d.path === clean)) {
+    alert('该目录已自动并入（主页登记 / 全局目录），无需重复添加')
+    return
+  }
   const list = h.trackedDirs || (h.trackedDirs = [])
   if (list.some((d) => d.path === clean)) { alert('该目录已在列表中'); return }
   list.push({ path: clean, source: 'host' })
 }
 function delDir(i) { props.host.trackedDirs.splice(i, 1) }
+
+/* 自动并入的只读目录（本机=主页登记；全部主机=全局自定义），与自有目录分开展示 */
+const inheritedDirs = computed(() => {
+  const own = new Set((props.host.trackedDirs || []).map((d) => d.path))
+  return (props.host.effectiveDirs || []).filter((d) => d.source !== 'host' && !own.has(d.path))
+})
 function onDelete() {
   if (confirm(`删除主机 ${props.host.id}？（保存后生效）`)) emit('del')
 }
@@ -162,14 +172,19 @@ function onDelete() {
 
           <div class="he-dirs">
             <div class="sub" style="margin-bottom:4px">
-              该主机跟踪目录（目录级资源统计{{ host.type === 'local' ? '；主页登记的应用目录已自动并入' : '' }}）
+              该主机跟踪目录（目录级资源统计{{ host.type === 'local' ? '；主页登记的应用目录已自动并入' : '；全局目录已自动并入' }}）
+            </div>
+            <div v-for="d in inheritedDirs" :key="'in-' + d.path" class="dir-row inherited">
+              <span class="d-path">{{ d.path }}</span>
+              <span class="d-src" :class="d.source">{{ d.source === 'homepage' ? '主页登记' : '全局' }}</span>
             </div>
             <div v-for="(d, di) in host.trackedDirs" :key="d.path" class="dir-row">
               <span class="d-path">{{ d.path }}</span>
               <span class="d-src">主机目录</span>
               <button class="mini-btn danger" @click="delDir(di)">移除</button>
             </div>
-            <button class="mini-btn" @click="addDir">＋添加目录</button>
+            <p v-if="!inheritedDirs.length && !(host.trackedDirs || []).length" class="sub">暂无跟踪目录</p>
+            <button class="mini-btn" @click="addDir">＋添加该主机目录</button>
           </div>
 
           <div v-if="host.type === 'ssh' && host.mode === 'agent'" class="he-dirs">
@@ -227,8 +242,11 @@ export default { name: 'MonitorHostEdit' }
 .prov-steps { margin: 8px 0 4px; padding-left: 20px; color: var(--text-2); font-size: 12px; }
 .prov-steps li { margin: 2px 0; }
 .dir-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--bg); }
+.dir-row.inherited { background: transparent; border-style: dashed; }
 .d-path { font-family: var(--mono); font-size: 12.5px; flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.d-src { font-size: 11px; border-radius: 999px; padding: 0 8px; background: var(--purple-soft); color: var(--purple); }
+.d-src { font-size: 11px; border-radius: 999px; padding: 0 8px; background: var(--purple-soft); color: var(--purple); flex: none; }
+.d-src.homepage { background: var(--accent-soft); color: var(--accent); }
+.d-src.custom { background: var(--amber-soft); color: var(--amber); }
 .cred-tip { margin: 10px 0 8px; line-height: 1.6; }
 code { font-family: var(--mono); font-size: 11.5px; background: var(--bg-hover); border-radius: 4px; padding: 0 4px; }
 .mhe-foot { display: flex; align-items: center; gap: 10px; padding: 12px 16px 14px; border-top: 1px solid var(--border); flex-wrap: wrap; }

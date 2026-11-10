@@ -1424,7 +1424,10 @@ async function route(req, res) {
 
   if (p === '/api/monitor/config' && req.method === 'GET') {
     const { auth, ...rest } = config;
-    return sendJson(res, 200, { ...rest, hasPassword: !!auth?.passwordHash });
+    /* effectiveDirs：只读的生效目录集（全局 + 本机主页登记 + 该主机自有），供设置页展示；
+       PUT 时 normalizeHost 会丢弃该字段，不会写回配置 */
+    const hosts = (rest.hosts || []).map(h => ({ ...h, effectiveDirs: effectiveTrackedDirsFor(h) }));
+    return sendJson(res, 200, { ...rest, hosts, hasPassword: !!auth?.passwordHash });
   }
   if (p === '/api/monitor/config' && req.method === 'PUT') {
     if (!guard(req, res)) return;
