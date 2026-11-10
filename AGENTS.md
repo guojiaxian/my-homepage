@@ -832,7 +832,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - **纵轴要自适应且有单位**：`scale:true`，不再固定 0–100；网络/磁盘轴名标 `Mbps` / `MB/s`，百分比轴刻度带 `%`。
 - **不要负载、Swap**：CPU 图只保留 CPU%，内存图只保留内存%，删除左右双轴与两条辅助曲线。
 - **要解释颜色/轴**：每图显示图例；图例名带单位；CPU 图头显示「当前 X% · 峰值 Y%」；tooltip 数值带单位；资源趋势标题旁注明「曲线颜色见各图图例 · 纵轴按所选时段的峰值自适应」。
-- **主机副标题格式**：`N核 CPU型号 · 内存GB · 磁盘TB/GB · 操作系统`（本机 `32核 7390 · 30GB · 0.9TB · Kylin V10`）。
+- **主机副标题格式**：`N核 CPU型号 · 内存GB · 磁盘TB/GB · 操作系统`（本机 `32核 Hygon C86 7390 · 32GB · 0.9TB · Kylin V10`）。CPU 型号必须用采集体里的**真实完整型号**（含 Hygon/Intel 厂商前缀，不能只留数字）；内存按**标称容量**显示（`MemTotal` 会少 1–2GB，32GB 机器不能显示成 30GB）。
 - **表头排序时列位置不能动**：排序箭头固定占位 11px（`.sort-arrow`），实测切换列 0 位移。
 - **黑色方格要删**：目录占比图容器项的 `⬛` 后缀已移除（容器仍显示为「容器 xxx」）。
 - **选择控件要好看**：目录指标下拉改胶囊 + 自绘箭头；目录 chip 复选框改 13px 自绘方框。
@@ -846,6 +846,9 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - **进程表排序**：`PROC_COLS` 统一生成 11 个 th；数字列默认降序、文本列升序，再点切方向；空值始终排最后；默认 CPU% 降序。箭头必须始终占位，否则切换列时表头宽度变化。
 - **effectiveDirs（跟踪目录）**：`GET /api/monitor/config` 为每台主机附加只读 `effectiveDirs`（全局 + 本机主页登记 + 主机自有 + 运行时自动发现的容器目录）；`PUT` 时 `normalizeHost` 白名单会丢弃它，不会写回配置。主机弹窗「自动并入」目录只读展示（主页登记 / 全局 / 自动发现 chip），自有目录可增删；添加已并入路径会拦截。全局 `cfg.trackedDirs` 区仅非空时显示，标题「全局自定义目录（对所有主机生效）」。
 - **容器目录也要显示**：`open-webui` 这类 cgroup 自动发现的容器目录不是手工跟踪项，但设置页必须可见——服务端从 `lastSnap.dirs` 取 `source:'container'` 追加到 `effectiveDirs`，主机行摘要也随之显示 10 个（9 主页登记 + 1 容器），与卡片/图表一致。
+- **主机卡等高的实现**：`.host-card` 改 `display:flex; flex-direction:column`，`.hc-line` 固定 `min-height:38px`（预留两行，避免网络/运行信息换行导致卡片高低不一），`.hc-foot { margin-top:auto }` 把操作按钮压到底部。实测 1500/1200/1024/900/640 宽度下同排卡片高度完全一致（226 或 230px）。
+- **CPU 型号采集**：`snap.cpu.model` 由本机 `os.cpus()[0].model`、远程/agent 的 `===CPUINFO===` 段（`/proc/cpuinfo` 的 model name / Hardware / Model）提供；前端只去掉 `Processor (series)`、`(R)`、`CPU`、`@xGHz` 噪声，保留真实厂商型号。**旧 agent 的采集脚本不含 CPUINFO**，需重跑一键安装器更新（2026-11-10 已对 netwatch / lan-1103 重装，型号分别为 Hygon C86 7151 / Hygon C86 7390）。
+- **内存标称容量**：`MemTotal` 是内核可用内存，会少 1–2GB（本机 30837MB）。`nominalMemGb()` 向上取常见内存档位 `[1,2,4,6,8,12,16,24,32,48,64,...]`，本机显示 32GB、NetWatch 8GB、阿里云 2GB；不要再直接 `Math.round(totalMb/1024)`。
 - **monitor-server.mjs 改动必须重启**：`systemctl restart my-homepage-monitor`（改 `monitor.config.json` 才是热加载）。
 - **应用中心 ↔ 监控中心的对应关系（单向、仅本机目录）**：应用中心 `apps[].directory`（且 `exclude` 不为 true）会作为**本机主机**的自动跟踪目录并入监控（`homepageDirs`）；`remoteApps` 不会自动变成监控主机，远程主机需在监控设置里单独添加并配置该机目录。监控侧的主机/跟踪目录**不会反向写入** `apps.config.json`。`monitor-server.mjs` 已监听 `scripts/apps.config.json`（600ms 防抖），设置页新增/删除/隐藏应用后自动 `reloadHomepageDirs()`，下一个 5s 采集周期生效，无需重启网关；日志出现「主页应用目录热加载完成」。反向的唯一“自动出现”来自主页端口探测：目录在 `/root/applications` 下且有监听端口的应用会被应用中心自动发现为「待补充」，与监控配置无关。
 - **验证方式**：Playwright 从 `data/monitor/sessions.json` 注入 `mh_mon` Cookie（只读），轮询页用 `domcontentloaded` + `waitForSelector`；本轮截图脚本在 `/tmp`，项目内保留 `.verify/` 截图（u1–u5、nw-cpu、dirs-ui 等）。

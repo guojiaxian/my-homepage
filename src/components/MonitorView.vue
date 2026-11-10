@@ -240,23 +240,30 @@ function barWidth(v) {
   return `${isFinite(x) ? Math.max(0, Math.min(100, x)) : 0}%`
 }
 function dirCount(h) { return h.snap?.dirs?.length || 0 }
+/* 内存按标称容量显示：/proc/meminfo 的 MemTotal 会扣掉内核保留（32GB 机器常见 ~30GB），
+   向上取到常见内存档位，避免把 32GB 显示成 30GB */
+const MEM_STEPS = [1, 2, 4, 6, 8, 12, 16, 24, 32, 48, 64, 96, 128, 192, 256, 384, 512, 768, 1024, 1536, 2048]
+function nominalMemGb(mb) {
+  const gb = mb / 1024
+  return MEM_STEPS.find((s) => gb <= s) || Math.ceil(gb / 1024) * 1024
+}
 /* 主机副标题：核心数 + CPU 型号 · 内存 · 磁盘 · 操作系统 */
 function hostSubtitle(h) {
   const s = h.snap
   if (!s) return ''
   const raw = s.os || ''
   const [osPart, cpuRaw] = raw.split(' · ')
-  const cpu = (cpuRaw || '')
-    .replace(/\s*Processor\s*$/i, '')
-    .replace(/^Hygon\s+C86\s+/i, '')
-    .replace(/^Intel\(R\)\s+Xeon\(R\)\s+CPU\s+/i, '')
-    .replace(/^AMD\s+/i, '')
+  /* 使用采集体提供的真实 CPU 型号（含厂商），只清理 Processor/(R)/@GHz 等噪声 */
+  const cpu = (s.cpu?.model || cpuRaw || '')
+    .replace(/\s*Processor(\s+series)?\s*$/i, '')
+    .replace(/\(R\)|\(TM\)/gi, '')
     .replace(/\s+CPU\s+/i, ' ')
     .replace(/\s*@\s*[\d.]+GHz$/i, '')
+    .replace(/\s+/g, ' ')
     .trim()
   const cores = s.cpu?.cores
   const cpuText = cores ? `${cores}核${cpu ? ' ' + cpu : ''}` : cpu
-  const mem = s.mem?.totalMb ? `${Math.round(s.mem.totalMb / 1024)}GB` : ''
+  const mem = s.mem?.totalMb ? `${nominalMemGb(s.mem.totalMb)}GB` : ''
   const diskGb = (s.disks || [])
     .filter((d) => !/^(tmpfs|devtmpfs|overlay|squashfs|iso9660|proc|sysfs)$/i.test(d.type || ''))
     .reduce((a, d) => a + (Number(d.totalGb) || 0), 0)
@@ -467,6 +474,8 @@ export default { name: 'MonitorView' }
 .host-grid.c4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .host-grid.c5 { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .host-card {
+  display: flex;
+  flex-direction: column;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 12px;
@@ -505,13 +514,13 @@ export default { name: 'MonitorView' }
 .hm.crit .hm-val { color: var(--red); }
 
 /* 负载 / 网络 / 运行：单行弱信息 */
-.hc-line { display: flex; align-items: baseline; gap: 3px 10px; flex-wrap: wrap; margin-bottom: 9px; }
+.hc-line { display: flex; align-items: baseline; gap: 3px 10px; flex-wrap: wrap; margin-bottom: 9px; min-height: 38px; align-content: flex-start; }
 .hc-line > span { display: flex; align-items: baseline; gap: 3px; min-width: 0; }
 .hc-line i { font-style: normal; color: var(--text-2); font-size: 11px; }
 .hc-line b { font-family: var(--mono); font-size: 12px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .hc-line em { font-style: normal; font-weight: 400; color: var(--text-2); font-size: 10.5px; }
 
-.hc-foot { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
+.hc-foot { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); margin-top: auto; }
 .hc-foot .hint { color: var(--text-2); font-size: 12px; }
 .mini-btn {
   border: 0; background: var(--bg-hover); color: var(--text-2);

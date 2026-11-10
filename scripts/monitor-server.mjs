@@ -422,6 +422,8 @@ echo "===DF==="
 df -kPT 2>/dev/null
 echo "===OS==="
 grep -m2 -E '^(NAME|VERSION_ID)=' /etc/os-release 2>/dev/null
+echo "===CPUINFO==="
+grep -m1 -E '^(model name|Hardware|Model)[[:space:]]*:' /proc/cpuinfo 2>/dev/null
 echo "===END==="
 `;
 const REMOTE_PROBE_SCRIPT = REMOTE_PROBE_AWK + REMOTE_PROBE_SHELL;
@@ -485,7 +487,7 @@ async function sshProbe(host) {
 /* ============================ 远程输出解析 → 计数器 ============================ */
 const REAL_FS = new Set(['ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'f2fs', 'vfat', 'fuseblk', 'jfs', 'reiserfs']);
 function parseRemoteOutput(text) {
-  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], osName: '' };
+  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], osName: '', cpuModel: '' };
   let section = 'MAIN';
   for (const line of text.split('\n')) {
     const t = line.trim();
@@ -494,6 +496,7 @@ function parseRemoteOutput(text) {
     if (t === '===PWD===') { section = 'PWD'; continue; }
     if (t === '===DF===') { section = 'DF'; continue; }
     if (t === '===OS===') { section = 'OS'; continue; }
+    if (t === '===CPUINFO===') { section = 'CPUINFO'; continue; }
     if (t === '===END===' || t === '') continue;
     if (section === 'MAIN') {
       const f = t.split(/\s+/);
@@ -532,6 +535,9 @@ function parseRemoteOutput(text) {
     } else if (section === 'OS') {
       const kv = t.split('=', 2);
       if (kv[0] === 'NAME' && kv[1]) c.osName = kv[1].replace(/"/g, '');
+    } else if (section === 'CPUINFO') {
+      const idx = t.indexOf(':');
+      if (idx > 0) c.cpuModel = t.slice(idx + 1).trim();
     }
   }
   // 同一设备多次挂载（bind）去重：保留最上层（首次出现）挂载点
@@ -542,7 +548,7 @@ function parseRemoteOutput(text) {
 
 /* ============================ 本机采集（直读 /proc，零子进程） ============================ */
 function readLocalCounters(trackedDirs) {
-  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], osName: '' };
+  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], osName: '', cpuModel: '' };
   try {
     for (const line of fs.readFileSync('/proc/stat', 'utf8').split('\n')) {
       if (/^cpu[0-9]*\s/.test(line)) c.cpuLines.push(line.trim().split(/\s+/).slice(1).map(Number));
@@ -568,7 +574,8 @@ function readLocalCounters(trackedDirs) {
       const f = line.split(/\s+/);
       if (f.length >= 3 && REAL_FS.has(f[2])) c.mnts.push(f[1]);
     }
-    c.osName = `${os.type()} ${os.release()} · ${os.cpus()[0] ? os.cpus()[0].model.trim() : ''}`;
+    c.cpuModel = os.cpus()[0] ? os.cpus()[0].model.trim() : '';
+    c.osName = `${os.type()} ${os.release()}`;
   } catch (e) { log('本机 /proc 读取异常:', e.message); }
 
   // 磁盘用量（statfs；跳过已有挂载点的子路径 = 同一文件系统的 bind/子目录）
@@ -779,7 +786,7 @@ function buildSnapshot(hostId, counters, prev, intervalSec, isFirst, dirsCfg) {
   const snap = {
     hostId, t: Date.now(), online: true,
     os: counters.osName || '', uptimeSec: Math.round(counters.up || 0),
-    cpu: { pct: cpu.pct == null ? null : +cpu.pct.toFixed(1), cores: coreN, perCore: cpu.perCore.map(x => x == null ? null : +x.toFixed(1)), load1: counters.load?.[0] ?? null, load5: counters.load?.[1] ?? null, load15: counters.load?.[2] ?? null, loadPerCore: counters.load ? +(counters.load[0] / coreN).toFixed(2) : null },
+    cpu: { pct: cpu.pct == null ? null : +cpu.pct.toFixed(1), cores: coreN, model: counters.cpuModel || '', perCore: cpu.perCore.map(x => x == null ? null : +x.toFixed(1)), load1: counters.load?.[0] ?? null, load5: counters.load?.[1] ?? null, load15: counters.load?.[2] ?? null, loadPerCore: counters.load ? +(counters.load[0] / coreN).toFixed(2) : null },
     mem: { totalMb: Math.round(memTotal / 1024), usedMb: memTotal ? Math.round((memTotal - memAvail) / 1024) : null, pct: memPct, swapPct },
     disks: counters.df.map(d => ({ mnt: d.mnt, type: d.type, totalGb: +(d.totalKb / 1048576).toFixed(1), usedGb: +(d.usedKb / 1048576).toFixed(1), pct: d.totalKb ? +(d.usedKb / d.totalKb * 100).toFixed(1) : null })),
     diskIo: { readMbs: dioR, writeMbs: dioW },
