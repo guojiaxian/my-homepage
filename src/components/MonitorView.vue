@@ -149,29 +149,35 @@ function gaugeCls(v) {
   if (!isFinite(x)) return ''
   return x >= 88 ? 'crit' : x >= 70 ? 'warn' : ''
 }
+function barWidth(v) {
+  const x = Number(v)
+  return `${isFinite(x) ? Math.max(0, Math.min(100, x)) : 0}%`
+}
 function dirCount(h) { return h.snap?.dirs?.length || 0 }
 </script>
 
 <template>
   <div v-show="active">
-    <!-- 概览 hero：与主页同结构（未鉴权时被 App.vue 的全站登录层覆盖） -->
-    <section class="hero">
+    <!-- 概览 hero 一行化：标题左 / 统计右（未鉴权时被 App.vue 的全站登录层覆盖） -->
+    <section class="mon-hero">
+      <div class="mh-left">
         <h1>监控中心</h1>
         <p class="sub">本机与远程服务器实时指标 · 每 5 秒自动刷新 · 点击卡片查看详情并进入终端</p>
-        <div class="stats">
-          <span class="stat-chip">
-            <span class="dot" :style="{ background: onlineCount === hosts.length && hosts.length ? 'var(--green)' : 'var(--amber)' }" />
-            <b>{{ onlineCount }}</b>/{{ hosts.length }} 主机在线
-          </span>
-          <span class="stat-chip" :style="alerts.length ? 'color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border))' : ''">
-            <span class="dot" :style="{ background: alerts.length ? 'var(--red)' : 'var(--green)' }" />
-            <template v-if="alerts.length"><b>{{ alerts.length }}</b> 个活跃告警</template>
-            <template v-else>无活跃告警</template>
-          </span>
-          <span class="stat-chip">跟踪 <b>{{ trackedDirCount }}</b> 个目录</span>
-          <span class="stat-chip"><b>{{ containerCount }}</b> 个容器</span>
-        </div>
-      </section>
+      </div>
+      <div class="mh-stats">
+        <span class="stat-chip">
+          <span class="dot" :style="{ background: onlineCount === hosts.length && hosts.length ? 'var(--green)' : 'var(--amber)' }" />
+          <b>{{ onlineCount }}</b>/{{ hosts.length }} 主机在线
+        </span>
+        <span class="stat-chip" :style="alerts.length ? 'color: var(--red); border-color: color-mix(in srgb, var(--red) 40%, var(--border))' : ''">
+          <span class="dot" :style="{ background: alerts.length ? 'var(--red)' : 'var(--green)' }" />
+          <template v-if="alerts.length"><b>{{ alerts.length }}</b> 个活跃告警</template>
+          <template v-else>无活跃告警</template>
+        </span>
+        <span class="stat-chip">跟踪 <b>{{ trackedDirCount }}</b> 个目录</span>
+        <span class="stat-chip"><b>{{ containerCount }}</b> 个容器</span>
+      </div>
+    </section>
 
       <!-- 活跃告警横幅 -->
       <div v-if="alerts.length" class="alert-banner">
@@ -198,7 +204,7 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
           v-for="h in hosts"
           :key="h.id"
           class="host-card"
-          :class="{ public: isPublic(h), selected: selectedId === h.id, offline: !h.online }"
+          :class="{ selected: selectedId === h.id, offline: !h.online }"
           @click="toggleDetail(h)"
         >
           <div class="hc-top">
@@ -211,25 +217,17 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
           <div class="hc-os" :title="h.snap?.os">{{ h.snap?.os || (h.credReady ? '' : 'SSH 凭据待配置') }}</div>
 
           <template v-if="h.online && h.snap">
-            <div class="hc-main">
-              <div class="gauges">
-                <div
-                  v-for="g in gauges(h)"
-                  :key="g.cap"
-                  class="gauge"
-                  :class="gaugeCls(g.v)"
-                  :style="{ '--v': isFinite(+g.v) ? +g.v : 0 }"
-                  :title="g.title || g.cap"
-                >
-                  <span class="g-val">{{ fmtPct(g.v) }}<i>%</i></span>
-                  <span class="g-cap">{{ g.cap }}</span>
-                </div>
+            <div class="hc-metrics">
+              <div v-for="g in gauges(h)" :key="g.cap" class="hm" :class="gaugeCls(g.v)" :title="g.title || g.cap">
+                <span class="hm-label">{{ g.cap }}</span>
+                <span class="hm-val">{{ fmtPct(g.v) }}<i>%</i></span>
+                <span class="hm-bar"><i :style="{ width: barWidth(g.v) }" /></span>
               </div>
-              <div class="hc-stats">
-                <div><span>负载</span><b>{{ h.snap.cpu?.load1 ?? '-' }} <i>/ {{ h.snap.cpu?.loadPerCore ?? '-' }} 核</i></b></div>
-                <div><span>网络</span><b>↑ {{ fmtMbs(h.snap.net?.outMbs) }} <i>↓ {{ fmtMbs(h.snap.net?.inMbs) }} Mbps</i></b></div>
-                <div><span>运行</span><b>{{ fmtUptime(h.snap.uptimeSec) }}</b></div>
-              </div>
+            </div>
+            <div class="hc-line">
+              <span title="1 分钟负载 / 核数"><i>负载</i><b>{{ h.snap.cpu?.load1 ?? '-' }}<em>/{{ h.snap.cpu?.loadPerCore ?? '-' }}核</em></b></span>
+              <span title="出 / 入流量 Mbps"><i>网络</i><b>↑{{ fmtMbs(h.snap.net?.outMbs) }}<em>↓{{ fmtMbs(h.snap.net?.inMbs) }}</em></b></span>
+              <span title="运行时长"><i>运行</i><b>{{ fmtUptime(h.snap.uptimeSec) }}</b></span>
             </div>
             <div class="hc-foot">
               <span class="hint">跟踪 {{ dirCount(h) }} 目录<template v-if="h.snap.containersCount"> · 容器 {{ h.snap.containersCount }}</template></span>
@@ -279,15 +277,6 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
 export default { name: 'MonitorView' }
 </script>
 
-<style>
-/* @property 供仪表环数值过渡（全局 at-rule） */
-@property --v {
-  syntax: '<number>';
-  inherits: true;
-  initial-value: 0;
-}
-</style>
-
 <style scoped>
 .grow { flex: 1; }
 .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
@@ -303,6 +292,13 @@ export default { name: 'MonitorView' }
 .alert-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--red); flex: none; animation: monPulse 2s ease-in-out infinite; }
 .alert-item.warn .alert-dot { background: var(--amber); }
 
+/* ===== 概览 hero 一行化 ===== */
+.mon-hero { display: flex; align-items: center; gap: 12px 16px; flex-wrap: wrap; margin: 2px 0 14px; }
+.mon-hero .mh-left { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; min-width: 0; }
+.mon-hero h1 { margin: 0; font-size: 22px; }
+.mon-hero .mh-left .sub { margin: 0; }
+.mon-hero .mh-stats { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+
 /* ===== 工具行 ===== */
 .mon-toolbar { display: flex; align-items: baseline; gap: 10px; margin: 10px 0 14px; flex-wrap: wrap; }
 .mon-toolbar h2 { font-size: 16px; margin: 0; font-weight: 600; }
@@ -314,25 +310,20 @@ export default { name: 'MonitorView' }
 .ghost-btn:hover { background: color-mix(in srgb, var(--accent) 22%, transparent); box-shadow: 0 2px 10px rgb(37 99 235 / 0.18); }
 .mon-empty { color: var(--text-2); font-size: 13.5px; background: var(--bg-soft); border: 1px dashed var(--border); border-radius: 12px; padding: 28px; text-align: center; }
 
-/* ===== 主机卡片 ===== */
-.host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 14px; align-items: stretch; }
+/* ===== 主机卡片（4 列紧凑：大数字 + 迷你进度条） ===== */
+.host-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(285px, 1fr)); gap: 12px; align-items: stretch; }
 .host-card {
-  --net: var(--accent);
-  position: relative;
   background: var(--bg-soft);
   border: 1px solid var(--border);
   border-radius: 12px;
   box-shadow: var(--shadow);
-  padding: 14px 16px 12px;
+  padding: 12px 14px;
   cursor: pointer;
-  overflow: hidden;
   transition: transform 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.16s cubic-bezier(0.2, 0.8, 0.2, 1), border-color 0.16s;
 }
-.host-card::before { content: ''; position: absolute; left: 0; top: 14px; bottom: 14px; width: 3px; border-radius: 0 3px 3px 0; background: var(--net); }
-.host-card.public { --net: var(--amber); }
-.host-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); border-color: color-mix(in srgb, var(--net) 35%, var(--border)); }
-.host-card.selected { border-color: var(--net); box-shadow: 0 0 0 1px var(--net), var(--shadow-hover); }
-.host-card.offline { --net: var(--gray); cursor: default; }
+.host-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-hover); border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.host-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-hover); }
+.host-card.offline { cursor: default; }
 .host-card.offline:hover { transform: none; }
 
 .hc-top { display: flex; align-items: center; gap: 8px; }
@@ -340,58 +331,33 @@ export default { name: 'MonitorView' }
 .status-dot.ok { background: var(--green); }
 .status-dot.off { background: var(--gray); }
 .status-dot.err { background: var(--red); animation: monPulse 2s ease-in-out infinite; }
-.hc-name { font-weight: 600; font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.env-chip { font-size: 11.5px; border-radius: 999px; padding: 1px 8px; background: var(--accent-soft); color: var(--accent); flex: none; }
+.hc-name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.env-chip { font-size: 11px; border-radius: 999px; padding: 1px 7px; background: var(--accent-soft); color: var(--accent); flex: none; }
 .env-chip.public { background: var(--amber-soft); color: var(--amber); }
-.hc-addr { color: var(--text-2); font-size: 12px; font-family: var(--mono); flex: none; }
+.hc-addr { color: var(--text-2); font-size: 11px; font-family: var(--mono); flex: none; }
 .hc-os { color: var(--text-2); font-size: 12px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 19px; }
 
-.hc-main { display: flex; align-items: center; gap: 14px; margin: 12px 0 10px; }
-.gauges { display: flex; gap: 14px; }
-.gauge {
-  --v: 0;
-  width: 64px;
-  display: flex; flex-direction: column; align-items: center; gap: 3px;
-  transition: --v 0.6s cubic-bezier(0.2, 0.8, 0.2, 1);
-}
-.gauge::before {
-  content: '';
-  width: 52px; height: 52px; border-radius: 50%;
-  background: conic-gradient(var(--gc, var(--accent)) calc(var(--v) * 1%), var(--bg-hover) 0);
-  display: block;
-  position: relative;
-}
-.gauge { position: relative; }
-.gauge::after {
-  content: '';
-  position: absolute; top: 7px; left: 50%; transform: translateX(-50%);
-  width: 38px; height: 38px; border-radius: 50%;
-  background: var(--bg-soft);
-}
-.gauge .g-val {
-  position: absolute; top: 19px; left: 0; right: 0;
-  text-align: center;
-  font-size: 12.5px; font-weight: 600; font-family: var(--mono); color: var(--text);
-  z-index: 1;
-}
-.gauge .g-val i { font-style: normal; font-size: 9px; color: var(--text-2); }
-.gauge .g-cap { font-size: 11px; color: var(--text-2); }
-.gauge.warn::before { --gc: var(--amber); }
-.gauge.crit::before { --gc: var(--red); }
+/* 三列大数字 + 迷你进度条（替代原 conic 圆环：数字放大到页首层级，一眼可读） */
+.hc-metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 11px 0 10px; }
+.hm { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.hm-label { font-size: 11px; color: var(--text-2); }
+.hm-val { font-size: 21px; font-weight: 600; font-family: var(--mono); line-height: 1.15; font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+.hm-val i { font-style: normal; font-size: 11.5px; font-weight: 400; color: var(--text-2); margin-left: 1px; }
+.hm-bar { height: 4px; border-radius: 999px; background: var(--bg-hover); overflow: hidden; margin-top: 2px; }
+.hm-bar i { display: block; height: 100%; border-radius: 999px; background: var(--green); transition: width 0.5s cubic-bezier(0.2, 0.8, 0.2, 1); }
+.hm.warn .hm-bar i { background: var(--amber); }
+.hm.crit .hm-bar i { background: var(--red); }
+.hm.warn .hm-val { color: var(--amber); }
+.hm.crit .hm-val { color: var(--red); }
 
-.hc-stats {
-  margin-left: auto;
-  display: flex; flex-direction: column; gap: 4px;
-  border-left: 1px dashed var(--border);
-  padding-left: 14px;
-  min-width: 128px;
-}
-.hc-stats > div { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
-.hc-stats span { font-size: 11.5px; color: var(--text-2); flex: none; }
-.hc-stats b { font-size: 12.5px; font-family: var(--mono); font-weight: 600; text-align: right; white-space: nowrap; }
-.hc-stats b i { font-style: normal; font-weight: 400; color: var(--text-2); font-size: 11px; }
+/* 负载 / 网络 / 运行：单行弱信息 */
+.hc-line { display: flex; align-items: baseline; gap: 3px 10px; flex-wrap: wrap; margin-bottom: 9px; }
+.hc-line > span { display: flex; align-items: baseline; gap: 3px; min-width: 0; }
+.hc-line i { font-style: normal; color: var(--text-2); font-size: 11px; }
+.hc-line b { font-family: var(--mono); font-size: 12px; font-weight: 600; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.hc-line em { font-style: normal; font-weight: 400; color: var(--text-2); font-size: 10.5px; }
 
-.hc-foot { display: flex; align-items: center; gap: 8px; padding-top: 9px; border-top: 1px dashed var(--border); }
+.hc-foot { display: flex; align-items: center; gap: 8px; padding-top: 8px; border-top: 1px solid var(--border); }
 .hc-foot .hint { color: var(--text-2); font-size: 12px; }
 .mini-btn {
   border: 0; background: var(--bg-hover); color: var(--text-2);
@@ -409,11 +375,13 @@ export default { name: 'MonitorView' }
 }
 @media (prefers-reduced-motion: reduce) {
   .status-dot.err, .alert-dot { animation: none; }
-  .host-card, .gauge { transition: none; }
+  .host-card, .hm-bar i { transition: none; }
+}
+@media (max-width: 900px) {
+  .host-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); }
 }
 @media (max-width: 640px) {
   .host-grid { grid-template-columns: 1fr; }
-  .hc-main { flex-wrap: wrap; }
-  .hc-stats { border-left: 0; padding-left: 0; margin-left: 0; width: 100%; flex-direction: row; justify-content: space-between; }
+  .mon-hero .mh-stats { margin-left: 0; }
 }
 </style>

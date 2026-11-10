@@ -250,6 +250,7 @@ onBeforeUnmount(() => {
 
     <p v-if="err" class="detail-err">加载失败：{{ err }}</p>
 
+    <div class="group-cap">资源趋势</div>
     <div class="charts4">
       <div class="chart-box"><h4>CPU / 负载</h4><div ref="elCpu" class="chart" /></div>
       <div class="chart-box"><h4>内存 / Swap</h4><div ref="elMem" class="chart" /></div>
@@ -257,6 +258,7 @@ onBeforeUnmount(() => {
       <div class="chart-box"><h4>磁盘 IO</h4><div ref="elDio" class="chart" /></div>
     </div>
 
+    <div class="group-cap">目录维度 <span>按主页登记 / 监控设置的跟踪目录聚合</span></div>
     <div class="chart-box" style="margin-bottom:12px">
       <h4 class="with-ctl">应用 / 目录资源占比
         <select v-model="dirMetric" class="mini-select">
@@ -283,8 +285,9 @@ onBeforeUnmount(() => {
       <p v-if="!compareSet.size" class="compare-empty">未选择目录 —— 勾选上方目录名，即可把多个应用的 CPU% 曲线叠在同一时间轴上对比。</p>
     </div>
 
+    <div class="group-cap">进程明细 <span>仅归属到跟踪目录的进程</span></div>
     <div class="chart-box">
-      <h4 class="with-ctl">进程明细
+      <h4 class="with-ctl">
         <span class="hint">归属进程 {{ procsList.length }} / 主机总进程 {{ procsTotal }}
           <template v-if="dirFilter"> · 已过滤「{{ dirsList.find((d) => d.path === dirFilter)?.name || dirFilter }}」</template>
         </span>
@@ -332,7 +335,21 @@ onBeforeUnmount(() => {
   padding: 16px 18px;
   margin-top: 16px;
 }
-.detail-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+/* sticky 上下文头：负 margin 铺满卡片宽度，滚过图表/表格时主机名与时间范围常驻 */
+.detail-head {
+  position: sticky;
+  top: 59px; /* 顶栏 60px 高 - 1px 边框 */
+  z-index: 15;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin: -16px -18px 12px; padding: 12px 18px;
+  background: var(--bg-soft);
+  border-bottom: 1px solid var(--border);
+  border-radius: 12px 12px 0 0;
+}
+.group-cap { display: flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 600; color: var(--text-2); margin: 16px 0 8px; }
+.group-cap:first-of-type { margin-top: 2px; }
+.group-cap span { font-weight: 400; font-size: 11.5px; color: var(--text-3, var(--gray)); }
+.group-cap::after { content: ''; flex: 1; height: 1px; background: var(--border); }
 .detail-bar { width: 4px; height: 22px; border-radius: 2px; background: var(--accent); flex: none; }
 .detail-bar.public { background: var(--amber); }
 .detail-title { display: flex; flex-direction: column; min-width: 200px; }
