@@ -228,6 +228,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 - `expectedPort` 的作用见 §7.1「主端口选择」——**遇到目录下有多个监听时务必填写**。
 - `kinds` 是**应用形式**（可多选）：`web` / `app` / `miniapp` / `tv` / `cli`，同时决定是否探测：含 `web` 就探测 Web 端口；不含 `web` 则视为**离线应用**（纯 APP / 小程序 / 电视 / CLI），不做端口探测、状态显示灰色「离线应用」。例如 `["web","app"]` 既有网页又有 APK，仍会探测 Web。
 - `languages` / `frontend` / `backend` 是**技术栈展示字段**（字符串数组）。本机应用留空时由探测器自动识别（见 §7.2.1）；填写后以手动值为准。远程应用没有本机目录，必须手动填写。
+- 远程应用可选 **外机 git 检查字段**（2026-11-11 新增，见 §7.3.1）：`gitDir`（外机上项目目录绝对路径，配置了才做检查）、`gitSsh`（SSH 目标 user@host，缺省 `root@<host>`）、`gitKey`（私钥路径，推荐复用监控密钥 `data/monitor/keys/<hostId>`）。设置面板远程应用弹窗可编辑（白名单已放行）。
 - 旧字段 `type: "app"` 仅作为缺省分类推断的兼容回退（`kinds` 缺省时 → `["app"]`），**不再参与探测判断**；设置面板已移除该勾选，保存配置时会被丢弃。
 - `env` 是展示用的部署位置，缺省 `lan`（本机应用）；远程应用缺省 `public`。它不影响端口探测与远程健康探查，只影响首页蓝色/橙色标签与统计。
 - `https: true` 让本机应用的访问链接使用 `https://`（缺省 false，即 http）。远程应用直接用 `url`，不受此字段影响。
@@ -260,7 +261,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 {"status":"ok","dbReady":true,"rssMb":78,"uptimeSec":1088946,"version":"1.1.0","time":"…"}
 ```
 
-解析规则：`version`（兼容 `data.version`）→ 应用名旁 `v1.1.0` 标签；`dbReady`/`uptimeSec`/`rssMb` → 状态徽标悬停明细；**在线判定 = HTTP 2xx 且（若有 `status` 字段）值为 `ok`**。远程应用不做 git 同步检查。
+解析规则：`version`（兼容 `data.version`）→ 应用名旁 `v1.1.0` 标签；`dbReady`/`uptimeSec`/`rssMb` → 状态徽标悬停明细；**在线判定 = HTTP 2xx 且（若有 `status` 字段）值为 `ok`**。外机 git 同步检查见 §7.3.1（可选，配置 `gitDir` 才做）。
 
 ### 6.3 `page` — 页面文案（设置面板可改）
 
@@ -324,6 +325,16 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 `fetch(healthUrl)`，6 秒超时（`AbortSignal.timeout`），解析见 §6.2；失败时 `error` 记录 HTTP 码 / 超时 / 连接错误，前端状态显示红色「未运行」。
 
+### 7.3.1 外机项目目录 git 检查（2026-11-11）
+
+对配置了 `gitDir` 的 `remoteApps[]` 条目（当前 network-monitor@netwatch、log-gpt-agent@lan-1103），每轮探测通过 **SSH 在外机上执行只读脚本**检查 git 同步状态，结果写入 `apps.json` 的 `git` 字段（结构同本机），前端同步列/卡片自动渲染，无需区分来源：
+
+- **一次 SSH 跑完**：`cd <gitDir>` + `rev-parse` 仓库校验 → branch/repo(url) → `fetch --no-tags`（远端 git 用**远端自己的凭据与网络**）→ `status --porcelain` → `rev-list --left-right --count @{upstream}...HEAD`，用 `@branch@/@repo@/@fetch@/@st@/@count@/@end@` 行标记分段，Node 侧解析（输出缺 `@end@` = 被中断 → 视为瞬态失败）。
+- **并发与重试**：并发默认 2（`PROBE_REMOTE_GIT_CONCURRENCY`）；连接失败/超时/输出中断按 **4s → 10s 退避自动重试**（共 3 次尝试），仍失败标 `status:'error'`（前端灰色「检查失败」，悬停看原因），**下一轮完整探测自动再试**。单次超时：含 fetch 60s / 仅 status 25s。
+- **快速探测（--no-fetch）**：跳过远端 fetch 只查工作区与 ahead/behind（沿用上次远端快照，与本机语义一致），实测 2 台约 90ms；错误信息经 `remoteGitErr()` 提取 stderr 首行（不回显整条 ssh 命令行）。
+- **SSH 细节**：`BatchMode + ConnectTimeout=8 + accept-new + ControlMaster/Persist=120`；配置 `gitKey` 时加 `-i <key> -o IdentitiesOnly=yes`（踩坑 #16：指定钥匙确定性）。与监控采集不冲突（agent 模式主机只是被动收 git 检查的 1 条短连接，非监控采集双路）。
+- 实测：netwatch `/root/network-monitor` main 分支未提交 47、lan-1103 `/root/log_gpt_agent` VueRebuild 分支未提交 3；`github` 字段留空时由远端 repo url 兜底生成链接。
+
 ### 7.4 输出 `apps.json` 结构
 
 ```jsonc
@@ -359,7 +370,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 }
 ```
 
-> `git` 字段对远程应用为 `null`；`appOnly` 条目（`kinds` 不含 `web`）的 `port` 为 `null` 且不做端口探测。
+> `git` 字段对未配置 `gitDir` 的远程应用为 `null`（配置了则同本机结构，checkedAt 随每轮探测刷新）；`appOnly` 条目（`kinds` 不含 `web`）的 `port` 为 `null` 且不做端口探测。
 
 ---
 

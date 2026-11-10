@@ -499,6 +499,17 @@ async function save() {
               <label class="fld"><span>后端框架</span><input :value="listText(editingApp.backend)" placeholder="如 Fastify" @input="setList(editingApp, 'backend', $event)" /></label>
             </div>
             <span class="stack-note">远程应用不在本机目录，技术栈需手动填写。</span>
+            <div class="grid2">
+              <label class="fld" title="配置后每轮探测通过 SSH 检查该目录的 git 同步状态（fetch + 工作区 + 未推送/未拉取）">
+                <span>外机项目目录（可选，配置后检测其 git 同步）</span>
+                <input v-model="editingApp.gitDir" class="mono" placeholder="/root/myapp" />
+              </label>
+              <label class="fld"><span>SSH 目标（可选，默认 root@主机）</span><input v-model="editingApp.gitSsh" class="mono" placeholder="root@10.8.11.3" /></label>
+            </div>
+            <label class="fld" title="推荐复用监控网关的专用密钥；留空则用系统默认身份">
+              <span>SSH 私钥路径（可选）</span>
+              <input v-model="editingApp.gitKey" class="mono" placeholder="/root/applications/my-homepage/data/monitor/keys/lan-1103" />
+            </label>
             <label class="fld"><span>简介</span><textarea v-model="editingApp.description" rows="2" /></label>
             <div class="app-edit-foot">
               <span class="chk-group">

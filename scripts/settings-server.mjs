@@ -105,6 +105,10 @@ function sanitizeConfig(body) {
     if (str(a?.url)) out.url = str(a?.url)
     if (str(a?.name)) out.name = str(a?.name)
     if (str(a?.description)) out.description = str(a?.description)
+    // 外机项目目录 git 检查（可选）：配置 gitDir 才对该机做远程 git 同步检测
+    if (str(a?.gitDir)) out.gitDir = str(a.gitDir)
+    if (str(a?.gitSsh)) out.gitSsh = str(a.gitSsh)
+    if (str(a?.gitKey)) out.gitKey = str(a.gitKey)
     return out
   })
 

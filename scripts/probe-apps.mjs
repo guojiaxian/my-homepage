@@ -47,6 +47,12 @@ const OUTPUT_FILES = [
 const TCP_TIMEOUT_MS = 1500
 const REMOTE_TIMEOUT_MS = 6000
 const FETCH_CONCURRENCY = Math.max(1, Number(process.env.PROBE_FETCH_CONCURRENCY) || 6)
+// 外机项目目录 git 检查：每台外机一次 SSH，并发默认 2（PROBE_REMOTE_GIT_CONCURRENCY 覆盖）；
+// 连接失败 / 超时 / 输出中断等瞬态错误按退避自动重试，仍失败标记 error 等下一轮完整探测再试
+const REMOTE_GIT_CONCURRENCY = Math.max(1, Number(process.env.PROBE_REMOTE_GIT_CONCURRENCY) || 2)
+const REMOTE_GIT_TIMEOUT_FETCH_MS = 60_000
+const REMOTE_GIT_TIMEOUT_STATUS_MS = 25_000
+const REMOTE_GIT_RETRY_DELAYS = [4_000, 10_000]
 // 定时器可能同时触发"完整探测"和"快速探测"，用临时锁避免两个进程同时写 apps.json
 const LOCK_FILE = path.join(os.tmpdir(), 'my-homepage-probe.lock')
 const LOCK_STALE_MS = 5 * 60_000
@@ -475,6 +481,160 @@ function gitSyncInfo(dir, remoteOk, now) {
   return info
 }
 
+/* ---------------- 外机项目目录 git 检测 ----------------
+   remoteApps[] 可选配置（settings 面板白名单同步放行）：
+     gitDir  外机上项目目录绝对路径——配置了才对该机做远程 git 检查
+     gitSsh  SSH 目标（user@host；缺省 root@<host>，本机 sshd 以 root 运行）
+     gitKey  私钥路径（缺省用系统默认身份；推荐复用监控网关的专用密钥）
+   每台外机一次 SSH 执行远端只读脚本（fetch + status + ahead/behind 一次跑完，
+   远端 git 用远端自己的凭据与网络）；--no-fetch 快速探测时跳过 fetch 只查工作区。 */
+
+const shQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
+
+function buildRemoteGitScript(dir, doFetch) {
+  return [
+    'DIR=' + shQuote(dir),
+    'FETCH=' + (doFetch ? 1 : 0),
+    'cd "$DIR" 2>/dev/null || { echo "@err@ 目录不存在或不可进入"; exit 0; }',
+    'git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "@err@ 不是 git 仓库"; exit 0; }',
+    'b=$(git branch --show-current 2>/dev/null)',
+    'echo "@branch@ $b"',
+    'echo "@repo@ $(git config --get remote.origin.url 2>/dev/null)"',
+    'rn=$(git config --get "branch.$b.remote" 2>/dev/null)',
+    '[ -z "$rn" ] && rn=origin',
+    'if [ "$FETCH" = 1 ] && [ "$rn" != "." ] && [ -n "$(git config --get remote.$rn.url 2>/dev/null)" ]; then',
+    '  git --no-optional-locks -c gc.auto=0 fetch --quiet --no-tags --no-recurse-submodules "$rn" >/dev/null 2>&1',
+    '  echo "@fetch@ $?"',
+    'else',
+    '  echo "@fetch@ skip"',
+    'fi',
+    "git status --porcelain=v1 2>/dev/null | sed 's/^/@st@ /'",
+    "git rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null | sed 's/^/@count@ /'",
+    'echo "@end@"',
+  ].join('\n')
+}
+
+/** 解析远端脚本输出为与 gitSyncInfo 同构的 git 信息；输出被截断（中断/超时）返回 null 交由重试 */
+function parseRemoteGitOutput(out, now) {
+  const lines = out.split('\n')
+  if (!lines.includes('@end@')) return null
+  const info = {
+    status: 'error',
+    repo: '',
+    branch: '',
+    uncommitted: 0,
+    untracked: 0,
+    ahead: 0,
+    behind: 0,
+    remoteOk: null,
+    checkedAt: now,
+    message: '',
+  }
+  let hasCount = false
+  for (const line of lines) {
+    if (line.startsWith('@err@ ')) {
+      info.status = 'no-repo'
+      info.message = line.slice(6).trim()
+      return info
+    }
+    if (line.startsWith('@branch@ ')) info.branch = line.slice(9).trim()
+    else if (line.startsWith('@repo@ ')) info.repo = normalizeRepo(line.slice(7).trim())
+    else if (line.startsWith('@fetch@ ')) {
+      const v = line.slice(8).trim()
+      info.remoteOk = v === 'skip' ? null : v === '0'
+    } else if (line.startsWith('@st@ ')) {
+      const s = line.slice(5)
+      if (s.startsWith('?? ')) info.untracked++
+      else info.uncommitted++
+    } else if (line.startsWith('@count@ ')) {
+      const [behind, ahead] = line.slice(8).trim().split(/\s+/)
+      info.behind = Number(behind) || 0
+      info.ahead = Number(ahead) || 0
+      hasCount = true
+    }
+  }
+  if (info.uncommitted > 0) info.status = 'dirty'
+  else if (info.ahead > 0) info.status = 'ahead'
+  else if (info.behind > 0) info.status = 'behind'
+  else if (info.untracked > 0) info.status = 'untracked'
+  else if (!hasCount) info.status = 'no-upstream'
+  else info.status = 'synced'
+  return info
+}
+
+async function runRemoteGitOnce(meta, dir, doFetch, now) {
+  const target = String(meta.gitSsh || '').trim() || `root@${meta.host || ''}`
+  const args = [
+    '-o', 'BatchMode=yes',
+    '-o', 'ConnectTimeout=8',
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'ControlMaster=auto',
+    '-o', 'ControlPersist=120',
+    '-o', 'ControlPath=/tmp/my-homepage-ssh-%C',
+  ]
+  if (meta.gitKey) args.push('-i', meta.gitKey, '-o', 'IdentitiesOnly=yes')
+  args.push('--', target, buildRemoteGitScript(dir, doFetch))
+  const { stdout } = await execFileAsync('ssh', args, {
+    timeout: doFetch ? REMOTE_GIT_TIMEOUT_FETCH_MS : REMOTE_GIT_TIMEOUT_STATUS_MS,
+    encoding: 'utf8',
+  })
+  return parseRemoteGitOutput(stdout, now)
+}
+
+/** 探测日志里的 git 状态标签（本机 / 外机通用） */
+function gitLogTag(g) {
+  if (!g) return ''
+  const n = g.uncommitted || g.ahead || g.behind || g.untracked
+  if (['dirty', 'ahead', 'behind', 'untracked'].includes(g.status)) {
+    return `  [git 未同步·${g.status === 'dirty' ? '未提交' : g.status === 'ahead' ? '未推送' : g.status === 'behind' ? '未拉取' : '未跟踪'}×${n}]`
+  }
+  return `  [git ${g.status === 'synced' ? '已同步' : g.status === 'no-repo' ? '无仓库' : g.status === 'no-upstream' ? '未关联远端' : '检查失败'}]`
+}
+
+/** 外机 git 检查失败的简短原因（避免把整条 ssh 命令行打进日志/提示） */
+function remoteGitErr(err, doFetch) {
+  if (err?.killed) return `超时（>${Math.round((doFetch ? REMOTE_GIT_TIMEOUT_FETCH_MS : REMOTE_GIT_TIMEOUT_STATUS_MS) / 1000)}s）`
+  const lines = String(err?.stderr || '').split('\n').map((s) => s.trim()).filter(Boolean)
+  const line = lines.find((l) => !/^warning:/i.test(l)) || lines[0]
+  return (line || `SSH 连接失败（exit ${err?.code ?? '?'}）`).slice(0, 120)
+}
+
+/** 带退避重试的外机 git 检查：连接失败/超时/输出中断自动重试，最终失败返回 status='error' */
+async function remoteGitSyncInfo(meta, dir, doFetch, now) {
+  const attempts = REMOTE_GIT_RETRY_DELAYS.length + 1
+  let lastErr = ''
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) {
+      const delay = REMOTE_GIT_RETRY_DELAYS[Math.min(attempt - 1, REMOTE_GIT_RETRY_DELAYS.length - 1)]
+      console.log(`[probe] 远程 git ${meta.id} 检查失败：${lastErr}，${Math.round(delay / 1000)}s 后自动重试（${attempt + 1}/${attempts}）`)
+      await sleep(delay)
+    }
+    try {
+      const info = await runRemoteGitOnce(meta, dir, doFetch, now)
+      if (info) {
+        if (attempt > 0) console.log(`[probe] 远程 git ${meta.id} 重试成功`)
+        return info
+      }
+      lastErr = '输出不完整（连接中断或超时）'
+    } catch (err) {
+      lastErr = remoteGitErr(err, doFetch)
+    }
+  }
+  console.log(`[probe] 远程 git ${meta.id} 重试 ${attempts} 次均失败，标记 error（下一轮完整探测自动再试）`)
+  return {
+    status: 'error',
+    repo: '',
+    branch: '',
+    uncommitted: 0,
+    untracked: 0,
+    ahead: 0,
+    behind: 0,
+    remoteOk: null,
+    checkedAt: now,
+    message: lastErr,
+  }
+}
+
 /* ---------------- ss 解析 ---------------- */
 
 function parseSsListen() {
@@ -889,9 +1049,25 @@ async function runProbe(NO_FETCH) {
       `[probe] fetch ${gitDirs.length} 个仓库，并发 ${Math.min(FETCH_CONCURRENCY, gitDirs.length)}，用时 ${Date.now() - started}ms${failed ? `，失败 ${failed}` : ''}`,
     )
   }
+  // 3.5) 外机项目目录 git 检查：每台一次 SSH 跑完 fetch+status+ahead/behind
+  //      并发默认 2；瞬态失败按退避自动重试，仍失败标记 error，下一轮完整探测自动再试
+  const remoteGitMap = new Map()
+  const remoteGitJobs = (config.remoteApps ?? []).filter((m) => m.id && m.gitDir)
+  if (remoteGitJobs.length) {
+    const started = Date.now()
+    const outcomes = await mapLimit(
+      remoteGitJobs,
+      REMOTE_GIT_CONCURRENCY,
+      (m) => remoteGitSyncInfo(m, m.gitDir, !NO_FETCH, now),
+    )
+    remoteGitJobs.forEach((m, i) => remoteGitMap.set(m.id, outcomes[i]))
+    console.log(
+      `[probe] 远程 git 检查 ${remoteGitJobs.length} 台外机，并发 ${Math.min(REMOTE_GIT_CONCURRENCY, remoteGitJobs.length)}${NO_FETCH ? '（免 fetch）' : ''}，用时 ${Date.now() - started}ms`,
+    )
+  }
   for (const r of results) {
-    // 远程应用没有本地目录，不做 git 检查
-    r.git = r.directory ? gitSyncInfo(r.directory, remoteOkMap.get(r.directory) ?? null, now) : null
+    // 远程应用没有本地目录：配置了 gitDir 的走外机检查结果，否则不做 git 检查
+    r.git = remoteGitMap.get(r.id) ?? (r.directory ? gitSyncInfo(r.directory, remoteOkMap.get(r.directory) ?? null, now) : null)
     // 配置未填 github 时，用仓库远程地址兜底生成网页链接
     if (!r.github && r.git?.repo?.startsWith('github.com/')) {
       r.github = `https://${r.git.repo}`
@@ -926,7 +1102,7 @@ async function runProbe(NO_FETCH) {
       const ver = info.version ? ` v${info.version}` : ''
       const ms = info.responseMs != null ? ` ${info.responseMs}ms` : ''
       const err = info.error ? `（${info.error}）` : ''
-      console.log(`  - ${r.status === 'running' ? '●' : '○'} ${r.id}  ${r.url}  ${r.status === 'running' ? '在线' : '离线'}${ver}${ms}${err}`)
+      console.log(`  - ${r.status === 'running' ? '●' : '○'} ${r.id}  ${r.url}  ${r.status === 'running' ? '在线' : '离线'}${ver}${ms}${err}${gitLogTag(r.git)}`)
       continue
     }
     if (r.appOnly) {
@@ -935,16 +1111,8 @@ async function runProbe(NO_FETCH) {
     }
     const ports = [r.port, ...(r.extraPorts ?? [])].filter(Boolean)
     const suffix = r.status === 'running' && !r.external ? '（仅本机）' : ''
-    let gitTag = ''
-    if (r.git) {
-      const g = r.git
-      const n = g.uncommitted || g.ahead || g.behind || g.untracked
-      gitTag = ['dirty', 'ahead', 'behind', 'untracked'].includes(g.status)
-        ? `  [git 未同步·${g.status === 'dirty' ? '未提交' : g.status === 'ahead' ? '未推送' : g.status === 'behind' ? '未拉取' : '未跟踪'}×${n}]`
-        : `  [git ${g.status === 'synced' ? '已同步' : g.status === 'no-repo' ? '无仓库' : g.status === 'no-upstream' ? '未关联远端' : '检查失败'}]`
-    }
     console.log(
-      `  - ${r.status === 'running' ? '●' : '○'} ${r.id}  ${ports.join(', ') || '未监听'}${suffix}${gitTag}${r.pending ? '  [待补充]' : ''}`,
+      `  - ${r.status === 'running' ? '●' : '○'} ${r.id}  ${ports.join(', ') || '未监听'}${suffix}${gitLogTag(r.git)}${r.pending ? '  [待补充]' : ''}`,
     )
   }
   if (written.length === 0) {
