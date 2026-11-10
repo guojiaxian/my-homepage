@@ -240,6 +240,31 @@ function barWidth(v) {
   return `${isFinite(x) ? Math.max(0, Math.min(100, x)) : 0}%`
 }
 function dirCount(h) { return h.snap?.dirs?.length || 0 }
+/* 主机副标题：核心数 + CPU 型号 · 内存 · 磁盘 · 操作系统 */
+function hostSubtitle(h) {
+  const s = h.snap
+  if (!s) return ''
+  const raw = s.os || ''
+  const [osPart, cpuRaw] = raw.split(' · ')
+  const cpu = (cpuRaw || '')
+    .replace(/\s*Processor\s*$/i, '')
+    .replace(/^Hygon\s+C86\s+/i, '')
+    .replace(/^Intel\(R\)\s+Xeon\(R\)\s+CPU\s+/i, '')
+    .replace(/^AMD\s+/i, '')
+    .replace(/\s+CPU\s+/i, ' ')
+    .replace(/\s*@\s*[\d.]+GHz$/i, '')
+    .trim()
+  const cores = s.cpu?.cores
+  const cpuText = cores ? `${cores}核${cpu ? ' ' + cpu : ''}` : cpu
+  const mem = s.mem?.totalMb ? `${Math.round(s.mem.totalMb / 1024)}GB` : ''
+  const diskGb = (s.disks || [])
+    .filter((d) => !/^(tmpfs|devtmpfs|overlay|squashfs|iso9660|proc|sysfs)$/i.test(d.type || ''))
+    .reduce((a, d) => a + (Number(d.totalGb) || 0), 0)
+  const disk = diskGb ? (diskGb >= 512 ? `${(diskGb / 1024).toFixed(1)}TB` : `${Math.round(diskGb)}GB`) : ''
+  let osName = osPart || ''
+  if (/ky10/i.test(osName)) osName = 'Kylin V10' // 本机 os 字段是内核串，映射为发行版名
+  return [cpuText, mem, disk, osName].filter(Boolean).join(' · ')
+}
 </script>
 
 <template>
@@ -294,7 +319,7 @@ function dirCount(h) { return h.snap?.dirs?.length || 0 }
             <span class="grow" />
             <span class="hc-addr">{{ h.address }}</span>
           </div>
-          <div class="hc-os" :title="h.snap?.os">{{ h.snap?.os || (h.credReady ? '' : 'SSH 凭据待配置') }}</div>
+          <div class="hc-os" :title="hostSubtitle(h)">{{ hostSubtitle(h) || (h.credReady ? '' : 'SSH 凭据待配置') }}</div>
 
           <template v-if="h.online && h.snap">
             <div class="hc-metrics">

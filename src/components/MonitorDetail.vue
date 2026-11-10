@@ -485,7 +485,7 @@ onBeforeUnmount(() => {
 .proc-table th.sortable { cursor: pointer; user-select: none; transition: color 0.15s ease; }
 .proc-table th.sortable:hover { color: var(--text); }
 .proc-table th.sortable.on { color: var(--accent); }
-.sort-arrow { margin-left: 2px; font-size: 10px; opacity: 0.8; }
+.sort-arrow { display: inline-block; width: 11px; margin-left: 2px; font-size: 10px; text-align: center; opacity: 0.8; }
 .proc-table td.num, .proc-table th.num { text-align: right; font-family: var(--mono); }
 .proc-table tbody tr { transition: background 0.12s ease; }
 .proc-table tbody tr:hover { background: var(--bg-hover); }
