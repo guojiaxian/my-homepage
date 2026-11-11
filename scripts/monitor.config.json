@@ -72,6 +72,7 @@
       "username": "root",
       "authType": "key",
       "keyPath": "/root/applications/my-homepage/data/monitor/keys/lan-1103",
+      "appSync": true,
       "trackedDirs": [
         {
           "path": "/root/log_gpt_agent",
@@ -91,6 +92,7 @@
       "username": "root",
       "authType": "key",
       "keyPath": "/root/applications/my-homepage/data/monitor/keys/aliyun",
+      "appSync": true,
       "trackedDirs": [
         {
           "path": "/root/applications/studylog",

@@ -167,7 +167,7 @@
         "云服务器"
       ],
       "icon": "☁️",
-      "location": "阿里云",
+      "location": "公网",
       "host": "47.95.140.199",
       "languages": [
         "JavaScript/Node.js"
@@ -179,7 +179,7 @@
         "Fastify"
       ],
       "url": "http://47.95.140.199:3000",
-      "name": "StudyLog 公网版",
+      "name": "阿里云 · 公网版",
       "description": "部署在阿里云服务器上的公网版 StudyLog 学习成绩记录系统，面向外网提供访问，数据与内网版本相互独立。",
       "gitDir": "/root/applications/studylog",
       "gitKey": "/root/applications/my-homepage/data/monitor/keys/aliyun"
@@ -226,7 +226,7 @@
         "运维"
       ],
       "icon": "🛡️",
-      "location": "网络安全自动运维服务器",
+      "location": "内网",
       "host": "10.8.11.3",
       "languages": [
         "Python",
@@ -239,7 +239,7 @@
         "Flask"
       ],
       "url": "http://10.8.11.3/",
-      "name": "网络安全自动运维平台",
+      "name": "网络自动运维系统",
       "description": "多智能体网络安全监控与自动化运维平台（log_gpt_agent），部署在内网另一台服务器 10.8.11.3，提供安全事件监控、研判告警与自动化处置。",
       "gitDir": "/root/log_gpt_agent",
       "gitKey": "/root/applications/my-homepage/data/monitor/keys/lan-1103"
