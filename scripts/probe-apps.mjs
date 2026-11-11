@@ -291,6 +291,7 @@ async function probeRemote(meta, now) {
     info.error = err?.name === 'TimeoutError' ? `超时（>${REMOTE_TIMEOUT_MS / 1000}s）` : String(err?.cause?.message ?? err.message ?? err).slice(0, 120)
   }
 
+  const kinds = normKinds(meta.kinds, ['web'])
   return {
     id: meta.id,
     name: meta.name || meta.id,
@@ -301,7 +302,7 @@ async function probeRemote(meta, now) {
     extraPorts: [],
     external: true,
     status: info.online ? 'running' : 'down',
-    kinds: normKinds(meta.kinds, ['web']),
+    kinds,
     env: meta.env === 'lan' ? 'lan' : 'public',
     languages: normList(meta.languages),
     frontend: normList(meta.frontend),
@@ -311,7 +312,8 @@ async function probeRemote(meta, now) {
     icon: meta.icon || '☁️',
     pending: false,
     remote: true,
-    url: meta.url || base,
+    // 纯 APP / 小程序远程条目没有可访问网页：不要用健康接口端口拼出一个错误的本地链接
+    url: meta.url || (kinds.includes('web') ? base : ''),
     location: meta.location || '远程',
     host: meta.host || host,
     remoteInfo: info,

@@ -19,8 +19,12 @@ const detectedApps = ref(new Map())
 const syncOpen = ref(false)
 /* 已配对的应用 id：包含「应用 → 监控」和「监控 → 应用」两个方向，用于统一「已同步监控」标志 */
 const syncedAppIds = ref(new Set())
+/* appId → 配对信息（含 truth: 'app' | 'host'，用于识别主机为主的应用） */
+const syncPairMap = ref(new Map())
 /* 本机主机实际生效的监控目录；本机应用目录被自动并入 homepageDirs 后也显示同一标志 */
 const localMonitoredDirs = ref(new Set())
+/* 打开面板时的应用名快照，用于判断本次保存是否改名 */
+const originalNames = ref(new Map())
 
 const normDir = (p) => String(p || '').replace(/\/+$/, '')
 
@@ -29,9 +33,9 @@ async function loadSyncedApps() {
     monApi('/api/monitor/sync-check'),
     monApi('/api/monitor/config'),
   ])
-  syncedAppIds.value = syncRes.status === 'fulfilled'
-    ? new Set((syncRes.value.pairs || []).map((p) => p.appId).filter(Boolean))
-    : new Set()
+  const pairs = syncRes.status === 'fulfilled' ? (syncRes.value.pairs || []) : []
+  syncedAppIds.value = new Set(pairs.map((p) => p.appId).filter(Boolean))
+  syncPairMap.value = new Map(pairs.filter((p) => p.appId).map((p) => [p.appId, p]))
   if (cfgRes.status === 'fulfilled') {
     const local = (cfgRes.value.hosts || []).find((h) => h.type === 'local')
     localMonitoredDirs.value = new Set(
@@ -51,6 +55,31 @@ function isLocalMonitored(a) {
   if (!a || a.exclude) return false
   const dir = normDir(a.directory)
   return Boolean(dir) && localMonitoredDirs.value.has(dir)
+}
+
+/* 主机为主的应用：名称最终以监控主机为准，改名需同时写回主机 */
+function hostOwnedPair(a) {
+  if (!a?.id) return null
+  const p = syncPairMap.value.get(a.id)
+  return p?.truth === 'host' ? p : null
+}
+
+async function syncHostNamesForRenames() {
+  const changed = form.value.remoteApps.filter((a) => {
+    const p = hostOwnedPair(a)
+    const name = String(a?.name || '').trim()
+    return Boolean(p && name && name !== (originalNames.value.get(a.id) ?? ''))
+  })
+  if (!changed.length) return
+  const cfg = await monApi('/api/monitor/config')
+  let touched = false
+  for (const a of changed) {
+    const p = hostOwnedPair(a)
+    const h = (cfg.hosts || []).find((x) => x.id === p.hostId)
+    const name = String(a.name).trim()
+    if (h && h.name !== name) { h.name = name; touched = true }
+  }
+  if (touched) await monApi('/api/monitor/config', { method: 'PUT', body: cfg })
 }
 
 function monitorSyncTitle(a) {
@@ -228,6 +257,9 @@ async function load() {
       remoteApps: (cfg.remoteApps ?? []).map((a) => normalizeEntry(a, true, probedApps.get(a.id))),
       page: { siteName: '', heroTitle: '', heroSubtitle: '', ...cfg.page },
     }
+    originalNames.value = new Map(
+      [...form.value.apps, ...form.value.remoteApps].map((a) => [a.id, String(a.name || '').trim()]),
+    )
     existingIds.value = new Set([...(cfg.apps ?? []), ...(cfg.remoteApps ?? [])].map((a) => a.id))
   } catch (err) {
     error.value = `加载配置失败：${err.message}（请确认设置服务已运行：systemctl status my-homepage-settings）`
@@ -294,6 +326,8 @@ async function save() {
   error.value = ''
   savedOk.value = false
   try {
+    // 主机为主的应用：先把新名称写回监控主机，避免 direction 2 立即用旧主机名覆盖
+    await syncHostNamesForRenames()
     const res = await fetch('/api/config', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -533,17 +567,26 @@ async function save() {
 
           <!-- 云服务器应用编辑 -->
           <template v-else>
+            <p v-if="hostOwnedPair(editingApp)" class="host-owned-note">
+              已与监控主机「{{ hostOwnedPair(editingApp).hostName }}」双向同步（主机为主）：改名会同时更新主机名称；位置 / 主机 IP 由监控设置维护，此处只读。
+            </p>
             <div class="grid3">
               <label class="fld">
                 <span>id{{ existingIds.has(editingApp.id) ? '（不可改）' : '' }}</span>
                 <input v-model="editingApp.id" :readonly="existingIds.has(editingApp.id)" />
               </label>
               <label class="fld"><span>图标 emoji</span><input v-model="editingApp.icon" /></label>
-              <label class="fld"><span>位置</span><input v-model="editingApp.location" placeholder="阿里云" /></label>
+              <label class="fld"><span>位置</span><input v-model="editingApp.location" :readonly="!!hostOwnedPair(editingApp)" placeholder="阿里云" /></label>
             </div>
             <div class="grid2">
-              <label class="fld"><span>名称</span><input v-model="editingApp.name" /></label>
-              <label class="fld"><span>主机 IP / 域名</span><input v-model="editingApp.host" class="mono" /></label>
+              <label class="fld">
+                <span>名称</span>
+                <input
+                  v-model="editingApp.name"
+                  :title="hostOwnedPair(editingApp) ? '改名会同时更新监控主机名称' : ''"
+                />
+              </label>
+              <label class="fld"><span>主机 IP / 域名</span><input v-model="editingApp.host" :readonly="!!hostOwnedPair(editingApp)" class="mono" /></label>
             </div>
             <label class="fld"><span>健康接口 URL（必填）</span><input v-model="editingApp.healthUrl" class="mono" placeholder="http://…/api/v1/health" /></label>
             <label class="fld"><span>访问页面 URL（可选，默认取健康接口同源）</span><input v-model="editingApp.url" class="mono" /></label>
@@ -925,6 +968,16 @@ section h3 {
 .stack-note {
   font-size: 12px;
   color: var(--gray);
+}
+
+.host-owned-note {
+  margin: 0 0 10px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .env-fld {

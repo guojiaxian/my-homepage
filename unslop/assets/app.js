@@ -57,6 +57,7 @@
   /* ---------- 数据加工（与主站 src/lib/app-utils.js 行为一致） ---------- */
   function buildAppUrl(app) {
     if (app.url) return app.url
+    if (app.remote) return ''
     const port = app.port
     if (!port) return ''
     const scheme = app.https ? 'https' : 'http'

@@ -103,6 +103,7 @@
 
     function buildAppUrl(app) {
       if (app.url) return app.url
+      if (app.remote) return ''
       const port = app.port
       if (!port) return ''
       return `${app.https ? 'https' : 'http'}://${window.location.hostname || 'localhost'}:${port}`

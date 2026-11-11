@@ -118,6 +118,49 @@
       "description": "记账 Web 应用（含 Capacitor 打包的安卓 APK）。"
     },
     {
+      "id": "shunfeng-ledger",
+      "directory": "/root/applications/shunfeng-ledger",
+      "expectedPort": null,
+      "kinds": [
+        "app"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/shunfeng-ledger",
+      "tags": [
+        "Android",
+        "离线应用",
+        "记账"
+      ],
+      "icon": "🚗",
+      "languages": [
+        "Kotlin",
+        "JavaScript"
+      ],
+      "frontend": [
+        "HTML5"
+      ],
+      "name": "顺风·账本",
+      "description": "面向顺风车司机的离线记账 Android 应用，拍照识别订单、一键入账并统计经营数据；纯本地存储，不上传服务器。"
+    },
+    {
+      "id": "shunfeng-ledger-wxmp-local",
+      "directory": "/root/applications/shunfeng-ledger-wxmp",
+      "expectedPort": null,
+      "kinds": [
+        "miniapp"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/shunfeng-ledger-wxmp",
+      "tags": [
+        "微信小程序",
+        "源码"
+      ],
+      "icon": "💬",
+      "exclude": true,
+      "name": "顺风·账本（微信小程序源码）",
+      "description": "微信小程序源码仓，仅用于本地开发；应用中心只展示阿里云公网的同步服务。"
+    },
+    {
       "id": "time-logger",
       "directory": "/root/applications/time-logger",
       "expectedPort": 19001,
@@ -243,6 +286,37 @@
       "description": "多智能体网络安全监控与自动化运维平台（log_gpt_agent），部署在内网另一台服务器 10.8.11.3，提供安全事件监控、研判告警与自动化处置。",
       "gitDir": "/root/log_gpt_agent",
       "gitKey": "/root/applications/my-homepage/data/monitor/keys/lan-1103"
+    },
+    {
+      "id": "shunfeng-ledger-wxmp",
+      "healthUrl": "http://47.95.140.199:8788/api/health",
+      "kinds": [
+        "miniapp"
+      ],
+      "env": "public",
+      "github": "https://github.com/guojiaxian/shunfeng-ledger-wxmp",
+      "tags": [
+        "微信小程序",
+        "公网",
+        "记账"
+      ],
+      "icon": "💬",
+      "location": "公网",
+      "host": "47.95.140.199",
+      "languages": [
+        "Python"
+      ],
+      "frontend": [
+        "微信原生"
+      ],
+      "backend": [
+        "FastAPI",
+        "SQLite"
+      ],
+      "name": "顺风·账本（微信小程序）",
+      "description": "顺风·账本微信小程序版，云端同步服务部署在阿里云公网 8788；小程序端基于 openid 多用户隔离与 rev 乐观锁同步。",
+      "gitDir": "/root/applications/shunfeng-ledger-wxmp",
+      "gitKey": "/root/applications/my-homepage/data/monitor/keys/aliyun"
     }
   ],
   "page": {

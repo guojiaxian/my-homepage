@@ -1,6 +1,8 @@
 /** 应用访问地址：远程应用用配置的完整 url，本地应用以当前页面的主机名 + 探测端口拼接 */
 export function buildAppUrl(app, port = app.port) {
   if (app.url) return app.url
+  // 远程应用没有配置访问页面时不能用本机端口兜底（会拼出错误的 localhost 链接）
+  if (app.remote) return ''
   if (!port) return ''
   const scheme = app.https ? 'https' : 'http'
   return `${scheme}://${window.location.hostname || 'localhost'}:${port}`
@@ -105,9 +107,9 @@ export function portText(app) {
   return app.port ?? app.expectedPort ?? '—'
 }
 
-/** 是否有可点击的访问地址（未监听时不可点） */
+/** 是否有可点击的访问地址（远程无访问页面 / 未监听时不可点） */
 export function hasUrl(app) {
-  return Boolean(app.port)
+  return Boolean(buildAppUrl(app))
 }
 
 export async function copyText(text) {

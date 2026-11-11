@@ -150,6 +150,7 @@
 
   function buildAppUrl(app) {
     if (app.url) return app.url;
+    if (app.remote) return '';
     if (!app.port) return '';
     var scheme = app.https ? 'https' : 'http';
     return scheme + '://' + (window.location.hostname || 'localhost') + ':' + app.port;

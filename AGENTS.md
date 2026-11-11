@@ -416,6 +416,10 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 `Teleport` 到 body 的模态框，三区块：页面信息 / 本机应用 / 云服务器应用。**应用区块是紧凑列表**（每行：图标 + 名称 + mono id + 摘要行「应用形式 · 部署位置 · 端口/主机」，右侧 ›，加「新 / 已隐藏」标记；标题栏带计数与「＋添加」），**点击条目弹出嵌套编辑弹窗**（z-index 60 盖在面板上，含全部字段；底部「删除此条目」需 confirm，「完成 / ✕ / 点遮罩」关闭）。**新增**按钮直接创建空条目并立即打开弹窗。弹窗内修改均为**草稿**（直接改 form 里的响应式对象），仍由面板底部「保存」一次性 POST `/api/config`，保存语义不变（见 §8.1 `onSaved`，保存后立即关闭，探测在后台跑）。字段能力不变：**应用形式**（`kinds` 多选）决定是否探测（勾 Web 才探测）、**主要语言 / 前端框架 / 后端框架**（逗号分隔）、**部署位置**（`env`）、本机应用另有 **使用 HTTPS** / `exclude`；本机技术栈留空用自动识别（保存后变手动值），远程需手填；「期望端口」旁显示实际探测端口，不一致时点「采用」写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；旧 `type: "app"` 回退 `["app"]`）。注意：`mini-btn` 曾只在 AppCard 的 scoped 样式里定义（面板按钮无样式），2026-11-07 起面板自带文字按钮样式。**双向同步（2026-11-11）**：远程应用编辑弹窗底部有「同步到监控中心」勾选（`monitorSync`）；外机/公网列表行统一显示「已同步监控」徽标——检测以 `/api/monitor/sync-check` 的 `pairs[].appId` 为准，并兜底 `monitorSync` / `syncSource==='monitor'`，因此「应用为主」和「主机为主（appSync）」两个方向的配对都会带标志，title 显示「已与监控中心主机双向同步」；设置面板关闭同步检查弹窗后会重新拉取配对。**本机应用同标志**：加载时并行 GET `/api/monitor/config`，`local` 主机 `effectiveDirs[].path` 精确包含 `apps[].directory`（且未勾选 exclude）即显示「已同步监控」，title 为「应用目录已被监控中心跟踪：<目录>」；2026-11-11 起 9 个本机应用全部命中。本机应用弹窗显示禁用勾选「监控自动跟踪」（本机目录本来就自动并入监控，无需勾选）。机制见 §17。
 
+**主机为主应用的编辑（2026-11-11）**：`sync-check` 的 `pairs[].truth==='host'`（当前 study-log-cloud⇄aliyun、log-gpt-agent⇄lan-1103）时，方向二会用 `hosts[].name/location/env/host` 覆盖应用同名字段，直接在应用设置改名/改位置看似无效。修复：编辑器顶部显示蓝底提示「已与监控主机 X 双向同步（主机为主）」；名称仍可编辑，保存前 `syncHostNamesForRenames()` 先 GET+PUT `/api/monitor/config` 把新名称写回 `host.name`，再 POST 应用配置；`位置`、`主机 IP / 域名` 在该模式下只读。应用为主（`truth==='app'`）与未配对应用不受此限制。
+
+**顺风·账本两条目（2026-11-11）**：`shunfeng-ledger` 是离线 Android APP——`kinds:['app']`、无端口探测，主机卡显示灰色「离线应用」；`shunfeng-ledger-wxmp-local` 为本地小程序源码占位，`exclude:true`（不出现在主页，仅设置里显示已隐藏，并阻止端口自动发现）；公网条目 `shunfeng-ledger-wxmp` 为 `kinds:['miniapp']`，健康接口 `http://47.95.140.199:8788/api/health`，`gitDir=/root/applications/shunfeng-ledger-wxmp` + aliyun 密钥。**远程纯 APP/小程序没有可访问网页**：`probeRemote` 只在 kinds 含 `web` 时用健康接口同源兜底 `url`，否则置空；`buildAppUrl` 对 `remote` 且无 url 返回空，`hasUrl` 改判 `buildAppUrl`，避免拼出 `http://本机:8788` 的错误链接（glass / unslop / glass-v2 同步）。
+
 ### 8.5 独立毛玻璃页面（`glass/`，访问 `/glass/`）
 
 完全独立于 Vue 主站的静态页面，纯 HTML + CSS + JS，**不参与 Vite 构建、不依赖任何第三方库**；布局与信息层级完全沿用主站，仅把视觉换成毛玻璃。
@@ -713,6 +717,12 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 35. **用 Python 批量生成 JS 代码时，`{{`/`}}` 转义极易漏成裸双花括号**
    给 `glass-v2`/`unslop` 打补丁时用 f-string 模板生成三元 map，模板里写了 `{{`（本意是字面花括号），替换阶段却没做 `.replace('{{','{')`，直接把 `? {{` 写进了 JS —— 三个文件里两个当场 `SyntaxError: Unexpected token '{'`。教训：① 生成式改代码后**必须 `node --check` 每个产物**（本次正是靠它立刻发现）；② 更稳的做法是不用模板拼大段 JS，改用 Python 的普通字符串（不解析 `{}`）后 `str.replace` 注入，或直接用 Edit 工具逐文件改；③ 同一段逻辑在 3-4 个文件里重复时（前端多拷贝），优先想「有没有共享源」而不是「复制粘贴改四遍」。
 
+36. **主机为主（appSync）的应用在应用中心改名会被方向二立即覆盖**
+   `syncHostsToAppsOnce` 把 `hosts[].name/location/env/host` 当作唯一事实源，每次应用配置变更/定时同步都会回写 `remoteApps`。用户在现场给 log-gpt-agent 改名，2 秒后恢复成主机名——表现为「设置里重命名无效」。修复：应用编辑器识别 `sync-check.pairs[].truth==='host'`，名称仍可编辑，但保存前先 GET+PUT `/api/monitor/config` 更新 `host.name`，再提交应用配置；位置/主机输入只读并显示主机为主提示（2026-11-11）。教训：任何「UI 可编辑但会被后台同步覆盖」的字段，要么禁用并说明，要么在保存链路里同时更新事实源；只改副本必然看起来像 bug。
+
+37. **远程纯 APP / 小程序不能按 healthUrl 的端口拼本机访问链接**
+   `probeRemote` 原逻辑 `url: meta.url || base`，`buildAppUrl` 在无 url 时又用 `window.location.hostname + app.port` 兜底——新加的阿里云小程序（health 8788、无网页）在应用中心显示成 `http://10.8.11.4:8788`，点击必然打不开。修复：probe 仅当 `kinds` 含 `web` 时才用健康接口同源兜底，否则 `url=''`；`buildAppUrl` 对 `remote` 且无 url 返回空；`hasUrl` 改为 `Boolean(buildAppUrl(app))`；glass / unslop / glass-v2 三份拷贝同步加 remote 守卫（2026-11-11）。教训：端口只是健康探测地址，不等于用户可访问页面；新增「非 Web」远程条目时必须同时验证访问链接与空 URL 路径。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
@@ -960,7 +970,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 
 ### 17.3 UI
 
-- 应用中心设置面板：远程应用编辑弹窗底部「同步到监控中心」勾选（title 说明机制与删除语义）；外机/公网列表行统一显示「已同步监控」徽标（`isMonitorSynced` 以 sync-check `pairs[].appId` 为主，兜底 `monitorSync` / `syncSource==='monitor'`，覆盖 appSync 方向）；本机应用列表同样显示该徽标（`isLocalMonitored`：`local` 主机 `effectiveDirs[].path` 精确包含 `apps[].directory` 且 `exclude` 非 true，title 为「应用目录已被监控中心跟踪」）；本机应用弹窗显示禁用勾选「监控自动跟踪」。
+- 应用中心设置面板：远程应用编辑弹窗底部「同步到监控中心」勾选（title 说明机制与删除语义）；外机/公网列表行统一显示「已同步监控」徽标（`isMonitorSynced` 以 sync-check `pairs[].appId` 为主，兜底 `monitorSync` / `syncSource==='monitor'`，覆盖 appSync 方向）；本机应用列表同样显示该徽标（`isLocalMonitored`：`local` 主机 `effectiveDirs[].path` 精确包含 `apps[].directory` 且 `exclude` 非 true，title 为「应用目录已被监控中心跟踪」）；本机应用弹窗显示禁用勾选「监控自动跟踪」。**主机为主改名**：`truth==='host'` 的应用保存时先 PUT 监控配置更新 `host.name`，位置/主机只读并显示蓝底提示（见 §8.4）。
 - 监控设置：`MonitorHostEdit` SSH 主机「采集方式」下方「同步到应用中心」勾选（草稿/直连两模式均可）；主机行摘要加「来自应用中心 / 同步到应用中心」徽标。
 - glass-v2 未同步此功能（其设置弹窗本就未对齐主站，见 §8.8）。
 - **同步检查面板（2026-11-11）**：设置面板标题栏「同步检查」→ `src/components/SyncCheckPanel.vue`（z-index 66）——实时 GET `/api/monitor/sync-check`（monitor-server 只读计算三段：**已同步配对** pairs（含待对齐 diffs，如「主机名 A→B」，重同步/下次配置变更后对齐）、**同步异常** unpaired（勾选了但找不到同 id/同地址对端）、**可同步候选** candidates（同地址且两侧都没勾））；「强制重同步」POST `/api/monitor/sync-run`（方向一立即重跑 + `utimes` 唤醒方向二，两端点均需会话/CSRF）；候选行「应用为主 / 主机为主」一键配对（前端分别 POST `/api/config` 勾 monitorSync、GET+PUT `/api/monitor/config` 勾 appSync，等价于 UI 手工勾选）。
@@ -987,11 +997,11 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 ### 18.1 测试覆盖（全部通过）
 
 - **服务与基础设施**：五个 systemd 单元 active + enabled；nginx 两处 server 块 location 齐全；8300/8301 仅回环。
-- **探测链路**：完整探测 12 应用（fetch 9 仓并发 6 ≈5.3s，3 台外机 git 检查 ≈8s），`public/` 与 `www/` 产物 md5 一致；线上机语义（aliyun production）正常。
+- **探测链路**：完整探测 14 应用（10 本机 + 4 远程；fetch 10 仓并发 6 ≈5.3s，4 台外机 git 检查 ≈8s），`public/` 与 `www/` 产物 md5 一致；线上机语义（aliyun production）正常。
 - **设置 API**：三个入口（直连/两个 Host）返回一致；非法 healthUrl / 重复 id 均 400；往返保存无损；`.bak` 自动备份。
 - **监控 API**：summary（4 主机在线）、sync-check（3 配对）、config（effectiveDirs）、history 1h/24h/7d + 非法 range 400、procs、dirs/history、alerts、audit、401 门禁、CSRF 403、agent push/install.sh token 门禁。
 - **终端 WS**：local + netwatch（agent 模式主机）echo 回显 PASS。
-- **前端**：`npm run build` 通过；主站表格 12 行、监控 4 主机卡、详情 6 canvas、设置面板、同步检查面板；/glass/（12 行）、/unslop/、/glass-v2/、/monitor/ stub 重定向——五端点 0 控制台/页面错误（Playwright 会话注入法，脚本 `.verify/sweep-systemtest.cjs`）。
+- **前端**：`npm run build` 通过；主站表格 14 行、监控 4 主机卡、详情 6 canvas、设置面板、同步检查面板；/glass/（14 行）、/unslop/、/glass-v2/、/monitor/ stub 重定向——五端点 0 控制台/页面错误（Playwright 会话注入法，脚本 `.verify/sweep-systemtest.cjs`）。
 
 ### 18.2 修复的 bug（均已重启生效 + 回归验证）
 
@@ -1083,7 +1093,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 
 ```bash
 # 1) 完整探测（真实外机，含 fetch）
-node scripts/probe-apps.mjs            # 远程 git 检查 3 台外机，实测约 8s
+node scripts/probe-apps.mjs            # 远程 git 检查 4 台外机，实测约 8s
 # 2) 快速探测（免 fetch）
 node scripts/probe-apps.mjs --no-fetch # 实测 3 台约 160ms
 # 3) 断言 apps.json
