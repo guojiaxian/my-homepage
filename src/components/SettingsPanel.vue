@@ -317,7 +317,8 @@ async function save() {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="settings-overlay" @click.self="emit('close')">
+    <!-- 点遮罩/空白处不关闭：防止误触丢失草稿，只能通过 ✕ / 取消 按钮退出 -->
+    <div v-if="open" class="settings-overlay">
       <div class="settings-panel" role="dialog" aria-label="设置">
         <header class="settings-head">
           <h2>设置</h2>
@@ -449,7 +450,7 @@ async function save() {
     </div>
 
     <!-- 单个应用的编辑弹窗（嵌套在设置面板之上）：清单字段只读，展示信息可编辑 -->
-    <div v-if="open && editingApp" class="editor-overlay" @click.self="closeEditor">
+    <div v-if="open && editingApp" class="editor-overlay">
       <div class="editor-panel" role="dialog" :aria-label="`编辑 ${displayName(editingApp)}`">
         <header class="settings-head">
           <h2 class="editor-title">

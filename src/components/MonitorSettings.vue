@@ -116,7 +116,8 @@ function evCls(ev) {
 
 <template>
   <Teleport to="body">
-    <div v-if="open" class="settings-overlay" @click.self="emit('close')">
+    <!-- 点遮罩/空白处不关闭：防止误触丢失草稿，只能通过 ✕ / 取消 按钮退出 -->
+    <div v-if="open" class="settings-overlay">
       <div class="settings-panel mon">
         <header class="settings-head">
           <h2>监控设置</h2>

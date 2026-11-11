@@ -1057,7 +1057,7 @@
     $('#gv-m-open-settings').addEventListener('click', openSettings)
     $('#gv-set-close').addEventListener('click', () => { $('#gv-settings').hidden = true })
     $('#gv-set-cancel').addEventListener('click', () => { $('#gv-settings').hidden = true })
-    $('#gv-settings').addEventListener('click', (e) => { if (e.target === $('#gv-settings')) $('#gv-settings').hidden = true })
+    // 点遮罩/空白处不关闭：防止误触丢失草稿，只能通过 ✕ / 取消 按钮退出
 
     async function openSettings() {
       $('#gv-settings').hidden = false

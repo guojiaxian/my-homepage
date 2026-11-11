@@ -139,7 +139,8 @@ async function toggleDirHidden(d) {
 
 <template>
   <Teleport to="body">
-    <div v-if="open && host" class="mhe-mask" @click.self="emit('close')">
+    <!-- 点遮罩/空白处不关闭：防止误触丢失草稿，只能通过 ✕ / 取消/完成 按钮退出 -->
+    <div v-if="open && host" class="mhe-mask">
       <div class="mhe">
         <div class="mhe-head">
           <h2>{{ host.type === 'local' ? '本机' : 'SSH 远程' }} · {{ host.name || host.id }}</h2>
