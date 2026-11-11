@@ -306,7 +306,13 @@ async function saveDirectEdit() {
 }
 
 /* ---------- 卡片渲染辅助 ---------- */
-function isPublic(h) { return /公网|public/i.test(h.group || '') }
+/* 归属三类：与应用中心同色（本机蓝 lan / 外机绿 ext / 公网橙 net） */
+function hostScope(h) {
+  if (h.type === 'local') return 'lan'
+  return /公网|public/i.test(h.group || '') ? 'net' : 'ext'
+}
+const HOST_SCOPE_LABEL = { lan: '本机', ext: '外机', net: '公网' }
+function hostScopeLabel(h) { return HOST_SCOPE_LABEL[hostScope(h)] }
 function dotCls(h) {
   if (h.online) return 'ok'
   return h.credReady ? 'err' : 'off'
@@ -393,10 +399,9 @@ function hostSubtitle(h) {
       <!-- 主机区 -->
       <div class="mon-toolbar">
         <h2>主机</h2>
-        <span class="sub">内网蓝 / 公网橙 · 点击卡片展开详情</span>
+        <span class="sub">本机蓝 / 外机绿 / 公网橙 · 点击卡片展开详情</span>
         <span class="grow" />
         <span class="sub num" v-if="summary">更新于 {{ new Date(summary.serverTime).toLocaleTimeString('zh-CN', { hour12: false }) }}</span>
-        <button class="ghost-btn" @click="batchPickerOpen = true">批量终端</button>
       </div>
 
       <div v-if="!hosts.length" class="mon-empty">还没有纳管主机，点击顶栏 ⚙ 添加。</div>
@@ -406,13 +411,13 @@ function hostSubtitle(h) {
           v-for="h in hosts"
           :key="h.id"
           class="host-card"
-          :class="{ selected: selectedId === h.id, offline: !h.online }"
+          :class="[hostScope(h), { selected: selectedId === h.id, offline: !h.online }]"
           @click="toggleDetail(h)"
         >
           <div class="hc-top">
             <span class="status-dot" :class="dotCls(h)" :title="h.online ? '在线' : h.error || '待配置'" />
             <span class="hc-name">{{ h.name }}</span>
-            <span class="env-chip" :class="{ public: isPublic(h) }">{{ h.group }}</span>
+            <span class="env-chip" :class="hostScope(h)">{{ hostScopeLabel(h) }}</span>
             <span class="grow" />
             <span class="hc-addr">{{ h.address }}</span>
           </div>
@@ -524,7 +529,8 @@ function hostSubtitle(h) {
             v-for="h in hosts.filter((x) => x.credReady)"
             :key="h.id"
             class="host-chip"
-            :title="`${h.name}（${h.address}）— 新增一个终端窗格`"
+            :class="hostScope(h)"
+            :title="`${hostScopeLabel(h)} · ${h.name}（${h.address}）— 新增一个终端窗格`"
             @click="addPane(h)"
           >{{ h.name }}</button>
           <span v-if="paneTip" class="chips-tip">{{ paneTip }}</span>
@@ -620,6 +626,11 @@ export default { name: 'MonitorView' }
 .host-card.selected { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent), var(--shadow-hover); }
 .host-card.offline { cursor: default; }
 .host-card.offline:hover { transform: none; }
+/* 归属色边：与应用中心一致（本机蓝 / 外机绿 / 公网橙）；放在 hover/selected 之后确保左色边不被覆盖 */
+.host-card { border-left-width: 3px; }
+.host-card.lan { border-left-color: var(--accent); }
+.host-card.ext { border-left-color: var(--green); }
+.host-card.net { border-left-color: var(--amber); }
 
 .hc-top { display: flex; align-items: center; gap: 8px; }
 .status-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
@@ -627,8 +638,10 @@ export default { name: 'MonitorView' }
 .status-dot.off { background: var(--gray); }
 .status-dot.err { background: var(--red); animation: monPulse 2s ease-in-out infinite; }
 .hc-name { font-weight: 600; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.env-chip { font-size: 11px; border-radius: 999px; padding: 1px 7px; background: var(--accent-soft); color: var(--accent); flex: none; }
-.env-chip.public { background: var(--amber-soft); color: var(--amber); }
+.env-chip { font-size: 11px; border-radius: 999px; padding: 1px 7px; flex: none; }
+.env-chip.lan { background: var(--accent-soft); color: var(--accent); }
+.env-chip.ext { background: var(--green-soft); color: var(--green); }
+.env-chip.net { background: var(--amber-soft); color: var(--amber); }
 .hc-addr { color: var(--text-2); font-size: 11px; font-family: var(--mono); flex: none; }
 .hc-os { color: var(--text-2); font-size: 12px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-height: 19px; }
 
@@ -715,6 +728,10 @@ export default { name: 'MonitorView' }
   transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
 }
 .mon-term-drawer :deep(.host-chip:hover) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); transform: translateY(-1px); }
+/* 主机芯片同样按归属着色；放在基础 hover 之后，ext/net 悬停不会被重置成蓝色 */
+.mon-term-drawer :deep(.host-chip.lan) { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: var(--accent-soft); }
+.mon-term-drawer :deep(.host-chip.ext) { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, var(--border)); background: var(--green-soft); }
+.mon-term-drawer :deep(.host-chip.net) { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, var(--border)); background: var(--amber-soft); }
 .mon-term-drawer :deep(.chips-tip) { font-size: 11.5px; color: var(--red); }
 .mon-term-drawer :deep(.panes-grid) {
   flex: 1; min-height: 0; display: grid; gap: 8px; padding: 8px 8px 8px; background: #0d1117;
