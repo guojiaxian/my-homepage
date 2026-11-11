@@ -252,8 +252,7 @@
       "name": "NetWatch 网络监控",
       "description": "单位多出口宽带网络监控系统（部署于内网另一台服务器 10.8.14.200）：面向 12 条联通宽带 × 12 个楼层子网的分流场景，监测出口线路连通性 / 网速并告警，同时覆盖外网视角的官网可达性监控。",
       "gitDir": "/root/network-monitor",
-      "gitKey": "/root/applications/my-homepage/data/monitor/keys/netwatch",
-      "monitorSync": true
+      "gitKey": "/root/applications/my-homepage/data/monitor/keys/netwatch"
     },
     {
       "id": "log-gpt-agent",
@@ -323,5 +322,5 @@
     "heroTitle": "应用中心",
     "heroSubtitle": "部署在这台服务器上的个人项目，端口与运行状态每 3 分钟自动探测，源码同步每 5 分钟。"
   },
-  "$comment": "应用元数据（手工维护）。probe-apps.mjs 会探测每个应用的实际监听端口、运行状态与 git 同步状态，并与本文件合并生成前端使用的 apps.json。新增应用：先在 /root/applications 建目录并启动服务，再在此追加一条记录（id 必须与目录名一致）；漏配的应用若在监听也会被自动发现，标记为「待补充」。可选：顶层加 order 字段（id 数组）定义全局默认显示顺序，未列出的排后面。另顶层可加 remoteApps 数组：部署在本机之外主机上的应用（局域网外机 env=lan / 公网云服务器 env=public），通过 healthUrl 健康接口探查在线状态与版本号（不做 git 检查）。条目用 \"kinds\": [\"web\",\"app\",\"miniapp\",\"tv\",\"cli\"] 定义应用形式（可多选）；不含 web 时视为离线应用（纯 APP / 小程序 / 电视 / CLI），主页显示灰色「离线应用」，不做端口探测；含 web 则照常探测。另可加 \"env\": \"lan\"/\"public\" 定义部署位置（内网/公网，本机缺省 lan、远程缺省 public）；本机应用可加 \"https\": true 让访问链接使用 https://。技术栈用 \"languages\"/\"frontend\"/\"backend\" 数组描述；本机应用留空会自动识别，远程应用需手动填写。"
+  "$comment": "应用展示注解（手工/设置面板维护）。应用清单的唯一来源是 probe-apps.mjs 的统一目录自动发现（探测根目录在 monitor.config.json 的 hosts[].appRoot，每台服务器各自设置）：扫描目录下每个子目录 = 一个应用，目录自身含 .git/package.json 等标记时视为单一应用；新应用自动同时出现在应用中心与监控中心并纳入监控。本文件只提供展示注解：本机应用按 directory、远程应用按 directory/gitDir+host 匹配合并（name/description/icon/github/tags/kinds/https/url/expectedPort/languages/frontend/backend）；\"hidden\": true 表示在前端隐藏（后端照常探测与监控）。可选：顶层 order 数组定义全局默认显示顺序。本机应用可加 https:true；技术栈留空时本机自动识别、远程需手填；healthUrl 已不再参与探测，仅为兼容保留。"
 }

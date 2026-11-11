@@ -284,7 +284,7 @@
         return res.json();
       })
       .then(function (data) {
-        state.apps = Array.isArray(data.apps) ? data.apps : [];
+        state.apps = (Array.isArray(data.apps) ? data.apps : []).filter(function (a) { return !a.hidden; });
         state.probedAt = data.probedAt || '';
         if (data.page) {
           state.page = {

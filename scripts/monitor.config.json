@@ -1,5 +1,5 @@
 {
-  "$comment": "监控网关配置。hosts 为纳管主机（type: local 本机 / ssh 远程）；trackedDirs 为手工追加的跟踪目录（主页 apps[].directory 会自动并入，来源标记 homepage，无需在此重复）；thresholds 为告警阈值（sustainMin 持续分钟才触发）。改此文件 ≤2s 热加载；也可在 /monitor/ 界面配置。",
+  "$comment": "监控网关配置。hosts 为纳管主机（type: local 本机 / ssh 远程）；hosts[].appRoot 为该机应用探测根目录（管理员设置，每台可不同）：probe-apps.mjs 扫描该目录自动发现应用（每个子目录 = 一个应用；目录本身含 .git/package.json 等标记时视为单一应用），应用中心与监控中心共用这一份探测结果；trackedDirs 为手工追加的跟踪目录（探测发现的应用目录自动并入，来源标记 probe）；thresholds 为告警阈值（sustainMin 持续分钟才触发）。改此文件 ≤2s 热加载；也可在 /monitor/ 界面配置。",
   "port": 8301,
   "auth": {
     "sessionTtlHours": 8760,
@@ -33,6 +33,7 @@
       "group": "内网",
       "mode": "ssh",
       "address": "10.8.11.4",
+      "appRoot": "/root/applications",
       "terminal": {
         "host": "127.0.0.1",
         "port": 22,
@@ -53,6 +54,7 @@
       "username": "root",
       "authType": "key",
       "keyPath": "/root/applications/my-homepage/data/monitor/keys/netwatch",
+      "appRoot": "/root/network-monitor",
       "trackedDirs": [
         {
           "path": "/root/network-monitor",
@@ -72,7 +74,7 @@
       "username": "root",
       "authType": "key",
       "keyPath": "/root/applications/my-homepage/data/monitor/keys/lan-1103",
-      "appSync": true,
+      "appRoot": "/root/log_gpt_agent",
       "trackedDirs": [
         {
           "path": "/root/log_gpt_agent",
@@ -92,7 +94,7 @@
       "username": "root",
       "authType": "key",
       "keyPath": "/root/applications/my-homepage/data/monitor/keys/aliyun",
-      "appSync": true,
+      "appRoot": "/root/applications",
       "trackedDirs": [
         {
           "path": "/root/applications/studylog",

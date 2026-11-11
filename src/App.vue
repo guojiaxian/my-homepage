@@ -103,7 +103,8 @@ async function fetchApps(silent = false) {
     const res = await fetch(`./apps.json?t=${Date.now()}`, { cache: 'no-store' })
     if (!res.ok) throw new Error(`HTTP ${res.status}`)
     const data = await res.json()
-    apps.value = data.apps ?? []
+    // hidden = 管理员在设置里选择的前端隐藏（后端仍持续探测与监控），展示层统一过滤
+    apps.value = (data.apps ?? []).filter((a) => !a.hidden)
     probedAt.value = data.probedAt ?? ''
     if (data.page) page.value = { ...page.value, ...data.page }
     loadError.value = ''

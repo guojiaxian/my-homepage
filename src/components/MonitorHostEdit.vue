@@ -51,28 +51,6 @@ const groupOptions = computed(() => {
   return g && !base.includes(g) ? [...base, g] : base
 })
 
-/* 已同步状态：sync-check 的配对结果优先；接口不可用时退回同步标记 */
-const syncPair = ref(null)
-const syncCandidate = ref(null)
-async function loadSyncPair() {
-  syncPair.value = null
-  syncCandidate.value = null
-  try {
-    const d = await monApi('/api/monitor/sync-check')
-    const id = props.host?.id
-    syncPair.value = (d.pairs || []).find((p) => p.hostId === id) || null
-    syncCandidate.value = (d.candidates || []).find((c) => c.hostId === id) || null
-  } catch { /* 接口不可用时仅按标记判断 */ }
-}
-const syncInfo = computed(() => {
-  const h = props.host
-  if (!h) return null
-  if (syncPair.value) return { desc: `与「${syncPair.value.appName || syncPair.value.appId}」配对，主机信息变更自动跟随` }
-  if (h.syncSource === 'apps') return { desc: '由应用中心创建，名称 / 分组 / 地址自动跟随' }
-  if (h.appSync) return { desc: '主机信息变更会自动同步到应用中心' }
-  return null
-})
-
 /* 兜底：本机主机必须有 terminal 子对象（表单直接绑定其字段） */
 watch(
   () => props.open,
@@ -81,7 +59,6 @@ watch(
       props.host.terminal = { host: '127.0.0.1', port: 22, username: 'root', authType: 'key', keyPath: '' }
     }
     if (v && props.host?.type === 'ssh' && !props.host.mode) props.host.mode = 'ssh'
-    if (v) loadSyncPair()
   },
   { immediate: true },
 )
@@ -127,13 +104,36 @@ function addDir() {
 }
 function delDir(i) { props.host.trackedDirs.splice(i, 1) }
 
-/* 自动并入的只读目录（本机=主页登记；全部主机=全局自定义），与自有目录分开展示 */
+/* 自动并入的只读目录（统一探测发现 / 全局自定义 / 容器自动发现），与自有目录分开展示 */
 const inheritedDirs = computed(() => {
   const own = new Set((props.host.trackedDirs || []).map((d) => d.path))
   return (props.host.effectiveDirs || []).filter((d) => d.source !== 'host' && !own.has(d.path))
 })
 function onDelete() {
   if (confirm(`删除主机 ${props.host.id}？（保存后生效）`)) emit('del')
+}
+
+/* 「前端隐藏」开关（与设置面板同一标记）：按目录写应用注解，后端探测与监控照常 */
+const hideBusy = ref('')
+async function toggleDirHidden(d) {
+  if (hideBusy.value) return
+  hideBusy.value = d.path
+  try {
+    await monApi('/api/appmeta', {
+      method: 'POST',
+      body: {
+        directory: d.path,
+        ...(props.host.type === 'ssh' && props.host.address ? { host: props.host.address } : {}),
+        hidden: !d.hidden,
+      },
+    })
+    d.hidden = !d.hidden
+    emit('saved')
+  } catch (e) {
+    alert('操作失败：' + e.message)
+  } finally {
+    hideBusy.value = ''
+  }
 }
 </script>
 
@@ -168,6 +168,9 @@ function onDelete() {
               </select>
             </label>
             <template v-if="host.type === 'ssh'">
+              <label class="fitem span2"><span>应用探测目录（该目录下每个子目录自动发现为一个应用；目录自身含 .git / package.json 等标记时视为单一应用）</span>
+                <input v-model="host.appRoot" class="mono" placeholder="/root/applications" />
+              </label>
               <label class="fitem"><span>地址</span><input v-model="host.address" class="mono" placeholder="IP 或域名" /></label>
               <label class="fitem"><span>SSH 端口</span><input v-model.number="host.port" type="number" min="1" max="65535" /></label>
               <label class="fitem"><span>用户名</span><input v-model="host.username" placeholder="root" /></label>
@@ -184,6 +187,9 @@ function onDelete() {
               </label>
             </template>
             <template v-else>
+              <label class="fitem span2"><span>应用探测目录（该目录下每个子目录自动发现为一个应用；目录自身含 .git / package.json 等标记时视为单一应用）</span>
+                <input v-model="host.appRoot" class="mono" placeholder="/root/applications" />
+              </label>
               <label class="fitem"><span>展示地址</span><input v-model="host.address" class="mono" placeholder="10.8.11.4" /></label>
               <label class="fitem"><span>终端主机</span><input v-model="host.terminal.host" class="mono" placeholder="127.0.0.1" /></label>
               <label class="fitem"><span>终端端口</span><input v-model.number="host.terminal.port" type="number" min="1" max="65535" /></label>
@@ -193,28 +199,6 @@ function onDelete() {
               </label>
               <label v-if="host.terminal.authType === 'key'" class="fitem span2"><span>私钥路径</span><input v-model="host.terminal.keyPath" class="mono" placeholder="/root/.ssh/id_rsa" /></label>
               <div v-else class="fitem span2"><span>密码凭据</span><div class="cred-box">密码由「自动部署」或 CLI 加密保存，此处不显示明文。</div></div>
-            </template>
-          </div>
-
-          <div v-if="host.type === 'ssh'" class="he-dirs">
-            <template v-if="syncInfo">
-              <div class="sync-status">
-                <span class="sync-dot">✓</span>
-                <b>已同步应用中心</b>
-                <span class="sub">{{ syncInfo.desc }}</span>
-              </div>
-            </template>
-            <template v-else>
-              <label class="sync-chk">
-                <input v-model="host.appSync" type="checkbox" />
-                <span>同步到应用中心</span>
-              </label>
-              <p class="sub" style="margin:4px 0 0">
-                勾选后在应用中心自动创建/更新同名远程应用（健康接口默认 http://地址/，分组按公网/内网映射，主机信息变更自动跟随）；取消勾选不会删除已创建的条目，需在应用设置中手动删除。
-              </p>
-              <p v-if="syncCandidate" class="sync-cand">
-                应用中心已有同地址应用「{{ syncCandidate.appName || syncCandidate.appId }}」，勾选并保存即可建立同步。
-              </p>
             </template>
           </div>
 
@@ -242,18 +226,26 @@ function onDelete() {
 
           <div class="he-dirs">
             <div class="sub" style="margin-bottom:4px">
-              该主机跟踪目录（目录级资源统计{{ host.type === 'local' ? '；主页登记的应用目录已自动并入' : '；全局目录已自动并入' }}）
+              该主机跟踪目录（目录级资源统计；探测发现的应用目录已自动并入，隐藏只影响前端展示、监控照常）
             </div>
             <div v-for="d in inheritedDirs" :key="'in-' + d.path" class="dir-row inherited">
               <span class="d-path" :title="d.path">{{ d.source === 'container' ? d.name : d.path }}</span>
-              <span class="d-src" :class="d.source">{{ d.source === 'homepage' ? '主页登记' : d.source === 'container' ? '自动发现' : '全局' }}</span>
+              <span class="d-src" :class="d.source">{{ d.source === 'probe' ? '探测发现' : d.source === 'homepage' ? '主页登记' : d.source === 'container' ? '自动发现' : '全局' }}</span>
+              <span v-if="d.hidden" class="d-src hidden-tag" title="已在前端隐藏；后端探测与监控照常">已隐藏</span>
+              <button
+                v-if="d._probe"
+                class="mini-btn"
+                :disabled="hideBusy === d.path"
+                :title="d.hidden ? '取消隐藏：恢复在前端展示' : '在前端隐藏该应用（后端照常探测与监控）'"
+                @click="toggleDirHidden(d)"
+              >{{ hideBusy === d.path ? '…' : d.hidden ? '取消隐藏' : '隐藏' }}</button>
             </div>
             <div v-for="(d, di) in host.trackedDirs" :key="d.path" class="dir-row">
               <span class="d-path">{{ d.path }}</span>
               <span class="d-src">主机目录</span>
               <button class="mini-btn danger" @click="delDir(di)">移除</button>
             </div>
-            <p v-if="!inheritedDirs.length && !(host.trackedDirs || []).length" class="sub">暂无跟踪目录</p>
+            <p v-if="!inheritedDirs.length && !(host.trackedDirs || []).length" class="sub">暂无跟踪目录（设置上方「应用探测目录」后自动发现）</p>
             <button class="mini-btn" @click="addDir">＋添加该主机目录</button>
           </div>
 
@@ -323,21 +315,7 @@ export default { name: 'MonitorHostEdit' }
 .fitem.span2 { grid-column: 1 / -1; }
 .cred-box { font-size: 12.5px; color: var(--text-2); line-height: 1.55; background: var(--bg-hover); border: 1px dashed var(--border); border-radius: 8px; padding: 7px 10px; }
 .he-dirs { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
-.sync-chk { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; cursor: pointer; }
-.sync-chk input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
-.sync-status {
-  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
-  padding: 8px 11px; border: 1px solid color-mix(in srgb, var(--green) 35%, var(--border));
-  background: var(--green-soft); border-radius: 8px;
-}
-.sync-dot {
-  width: 18px; height: 18px; border-radius: 50%; flex: none;
-  display: inline-flex; align-items: center; justify-content: center;
-  background: var(--green); color: #fff; font-size: 11px; font-weight: 700;
-}
-.sync-status b { font-size: 13px; color: var(--green); }
-.sync-status .sub { font-size: 12px; }
-.sync-cand { margin: 6px 0 0; font-size: 12px; color: var(--accent); }
+.hidden-tag { background: var(--amber-soft) !important; color: var(--amber) !important; }
 .prov-steps { margin: 8px 0 4px; padding-left: 20px; color: var(--text-2); font-size: 12px; }
 .prov-steps li { margin: 2px 0; }
 .dir-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--bg); }

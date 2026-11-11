@@ -1,7 +1,7 @@
 # AGENTS.md · my-homepage 项目交接记忆
 
 > 面向接手本项目的 AI Agent / 开发者：读完这一份即可上手，无需再翻聊天记录。
-> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；**外机/线上机 git 同步检查（含四处前端拷贝规则、重试与已知边界）见 §20 与 §7.3.1**，**应用中心 ⇄ 监控中心当前同步策略的权威摘要见 §17.0**（双向同步/同步检查/按地址配对细节见 §17.1–17.5），**监控设置弹窗 UI 统一设计体系见 §8.7**，系统测试/优化见 §18，终端全量测试与交互加固见 §19，2026-11-10 的 UI/图表/目录设置记忆见 §16。
+> 最后更新：2026-11-12 · 文档随代码演进，改功能时请同步更新本文；**★ 2026-11-12 起应用探测已重构为「统一目录自动发现」（每台服务器一个探测根目录，单一探测结果同时驱动应用中心与监控中心，双中心独立探测与双向同步已删除）——权威描述见 §21，探测实现见 §7.0**；监控设置弹窗 UI 统一设计体系见 §8.7，系统测试/优化见 §18，终端全量测试与交互加固见 §19，2026-11-10 的 UI/图表/目录设置记忆见 §16。§17（双向同步）与 §20（外机 git 检查独立通道）描述的机制已被 §21 取代，仅留档。
 
 ---
 
@@ -36,12 +36,13 @@
 | 设置 API | `127.0.0.1:8300`（仅回环监听，nginx 反代 `/api/`） |
 | 监控网关 | `127.0.0.1:8301`（仅回环，nginx 反代 `/api/monitor/` 与 `/api/terminal` WS）；看板在**主页内**（顶栏「应用中心 / 监控中心」标题切换，`#monitor` hash 可直达），`/monitor/` 仅剩重定向 stub + 终端弹窗页 |
 | 监控登录密码 | 首启随机生成于 `data/monitor/INITIAL_PASSWORD.txt`（0600），登录后请在设置中修改 |
-| 监控采集模式 | `hosts[].mode`：`ssh`（中心拉取，默认/公网机）或 `agent`（目标机推送，内网机）；netwatch=agent 实测中 |
-| 被监控主机 | 4 台：本机（local）+ netwatch(10.8.14.200, agent) + aliyun(47.95.140.199, ssh) + lan-1103(10.8.11.3, ssh)；均 ONLINE（2026-11-10） |
+| 监控采集模式 | `hosts[].mode`：`ssh`（中心拉取，默认/公网机）或 `agent`（目标机推送，内网机）；netwatch/lan-1103=agent，aliyun=ssh |
+| 被监控主机 | 4 台：本机（local）+ netwatch(10.8.14.200, agent) + aliyun(47.95.140.199, ssh) + lan-1103(10.8.11.3, agent)；均 ONLINE（2026-11-12） |
 | 探测定时器 | `my-homepage-probe-quick.timer` 每 3 分钟（`--no-fetch`）；`my-homepage-probe.timer` 每 5 分钟（完整，含 fetch） |
-| 外机 git 检查 | `remoteApps[].gitDir` 配置后每轮经 SSH 检查外机目录；公网机按**线上机**口径（仅允许 pull，dirty/ahead=违规红）；瞬态失败 4s/10s 退避重试，见 §7.3.1 |
+| 统一应用探测（§21） | 应用清单唯一来源 = `probe-apps.mjs` 按 `monitor.config.json` 的 `hosts[].appRoot` 目录自动发现（本机 readdir / 远程一次 SSH），结果同时驱动应用中心与监控中心；`apps.config.json` 仅存展示注解（含 `hidden` 前端隐藏标记）；应用⇄监控双向同步已删除 |
+| 外机 git 检查 | 统一探测内置：远程发现脚本在同一条 SSH 里逐应用目录跑 fetch+status+ahead/behind；公网机按**线上机**口径（仅允许 pull，dirty/ahead=违规红）；瞬态失败 4s/10s 退避重试 |
 | 前端轮询 | 主页每 60 秒拉一次 `apps.json`；监控看板每 5 秒拉 summary |
-| 已登记应用 | 12 个（9 个本机 + 2 个外机 + 1 个公网；含 2 个离线应用） |
+| 已发现应用 | 18 个（13 本机 + 2 外机 + 3 公网；含 3 个离线应用与 3 个待补充新发现；2026-11-12 探测快照） |
 | 后端依赖 | 主站仍零依赖；监控网关新增 `ssh2`/`ws`（终端与远程采集），前端 vendor 库 echarts/xterm 随仓库提交 |
 
 **运行中的 systemd 单元（均已 enable）**
@@ -202,7 +203,9 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 ## 6. `scripts/apps.config.json` 规格
 
-四个顶层键：`apps`（本机应用）、`remoteApps`（远程应用）、`page`（页面文案）、`order`（可选全局顺序），外加 `$comment`（说明文字，保存时原样保留）。
+> ★ **2026-11-12 起 `apps[]`/`remoteApps[]` 不再是应用清单，仅为展示注解**（清单唯一来源见 §7.0/§21）。设置面板按盘点渲染，保存时序列化回注解；白名单已移除 `monitorSync/syncSource/gitSsh/gitKey`，`hidden` 取代 `exclude`（仅展示层含义）。
+
+四个顶层键：`apps`（本机应用注解）、`remoteApps`（远程应用注解）、`page`（页面文案）、`order`（可选全局顺序），外加 `$comment`（说明文字，保存时原样保留）。
 
 ### 6.1 `apps[]` — 本机应用条目
 
@@ -287,7 +290,18 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 ## 7. 探测机制详解（`scripts/probe-apps.mjs`）
 
-零依赖 Node 脚本，单次典型耗时：`--no-fetch` 约 **0.3 秒**；完整 fetch 约 **6 秒**（10 个仓库、并发 6，实测 5.7 秒；网络差时更久，单仓 fetch 上限 20 秒）。
+> ★ **2026-11-12 重构为统一目录自动发现**（权威描述见 §21）：应用清单不再来自本节的「手工登记 + 健康接口探查」，而是按每台主机的 `appRoot` 目录扫描自动生成。本节 7.1–7.4 中关于「已登记应用/远程健康探查」的描述仅适用于注解合并与 git 检查部分，历史细节留档。
+
+零依赖 Node 脚本。典型耗时：快速探测（`--no-fetch`）约 **1 秒**（远程快查 0.5s + 本机核对）；完整探测约 **16 秒**（本机 12 仓 fetch 并发 6 ≈5.5s + 3 台远程 SSH 发现 ≈10s，均并发执行）。
+
+### 7.0 统一目录自动发现（2026-11-12，当前唯一清单来源）
+
+- **主机注册表**：`monitor.config.json` 的 `hosts[]`，每台可选 `appRoot`（应用探测根目录，管理员设置，每台不同）。`type=local` 直读文件系统；`type=ssh` 每台**一次 SSH** 执行只读发现脚本（目录清单 + `ss -tlnp` + 全量 `/proc/*/cwd` readlink + 逐目录 git fetch/status/ahead-behind，全部 `@tag@` 行标记，Node 侧解析；缺 `@end@` = 被中断 → 4s/10s 退避重试）。未设置 `appRoot` 的主机不参与应用发现；SSH 主机必须密钥认证（BatchMode，密码认证主机会明确报错）。
+- **发现规则**：`appRoot` 自身含 `.git`/`package.json`/`requirements.txt`/`pyproject.toml`/`go.mod`/`build.gradle*`/`app.json`/`project.config.json` 任一标记 → 视为**单一应用**（netwatch `/root/network-monitor`、lan-1103 `/root/log_gpt_agent` 即此形态）；否则每个一级子目录（跳过点目录）= 一个应用（本机与阿里云的 `/root/applications` 即此形态）。
+- **端口/运行状态**：监听端口任一属主进程 cwd 落在应用目录内即归属（本机 ss+proc；远程由发现脚本带回）；多进程监听（nginx）全部 pid 参与匹配。本机保留 `expectedPort` 优先锚定（对外入口常无进程 cwd，如 nginx 托管的本站 :80，防附属进程 8301 抢主端口）；远程把注解 `url` 的端口视作期望端口锚定（否则 1103 会显示后端 127.0.0.1:5000 而非 nginx :80）。远程运行判定 = 目录内有存活进程或归属端口；仅 loopback 监听标「仅本机」。
+- **注解合并**：`apps.config.json` 的 `apps[]`/`remoteApps[]` 按 **directory**（本机）/ **directory 或 gitDir+host**（远程）匹配，提供 name/description/icon/github/tags/kinds/https/url/expectedPort/技术栈；未注解的发现目录 `pending:true` + 「待补充」。`kinds` 不含 web → 离线应用（不探测端口）。注解 `hidden:true`（或旧 `exclude`）= 前端隐藏，后端照常探测、目录照常跟踪；四个前端（SPA + glass/unslop/glass-v2）统一按 `apps.json` 的 `hidden` 字段过滤。
+- **id 规则**：注解 id 优先（保持 study-log-cloud 等既有 id 与 localStorage 顺序）；未注解用目录名；跨主机同名自动加 `hostId-` 前缀（如 `aliyun-shunfeng-ledger`）。
+- **输出**：`apps.json` 条目新增 `hostId/hostName/hostGroup/hidden`，远程条目 `directory` = 发现的真实目录（不再需要配置 gitDir 才有）。`env` 由主机 group（公网/内网）决定，`remote:true` = 非本机主机。
 
 ### 7.1 端口探测（本机应用）
 
@@ -1160,3 +1174,48 @@ for a in json.load(sys.stdin)['apps']:
 ```
 
 实测基线（2026-11-11）：netwatch `/root/network-monitor`（main）未提交 47；lan-1103 `/root/log_gpt_agent`（VueRebuild）未提交 3；aliyun `/root/applications/studylog`（main）`synced + production:true`。
+
+---
+
+## 21. 2026-11-12 增量：统一目录自动发现（应用探测重构）
+
+用户需求（原话要点）：① 管理员可按服务器指定探测目录，自动发现目录下所有应用（一个文件夹一个应用）；② 应用中心与监控中心**均且只能**采用这一个探测结果，删除两者现有的独立探测方式，避免重复与冲突；③ 新应用默认同时出现在两个中心并纳入跟踪监控；④ 管理员可在任一中心设置页隐藏前端展示、后端照常探测；⑤ 适用于本机/外机/公网全部服务器；⑥ 完成后立刻对 4 台服务器各探测一次（本机 `/root/applications`、1103 `/root/log_gpt_agent`（单应用）、netwatch `/root/network-monitor`（单应用）、阿里云 `/root/applications`（多应用））。
+
+### 21.1 新架构（单一事实源）
+
+```
+monitor.config.json hosts[].appRoot（每台一个探测目录，管理员设置）
+        │  probe-apps.mjs 统一探测器（systemd 定时器 5min 完整 / 3min 快速不变）
+        │  本机 readdir+ss+/proc · 远程每台一次 SSH（发现+端口+cwd+逐目录 git）
+        ▼
+   apps.json（唯一清单：hostId/hostName/hostGroup/hidden/directory/port/status/git…）
+        ├──► 应用中心（App.vue / SettingsPanel / glass·unslop·glass-v2 四拷贝，hidden 统一过滤）
+        └──► 监控中心（monitor-server fs.watch public/apps.json → probeDirsByHost
+                       → effectiveTrackedDirsFor 自动并入各主机跟踪目录，source:'probe'）
+```
+
+- **删除的独立探测/同步机制**：应用中心手工清单+healthUrl 健康探查（probeRemote 整个删除）；监控中心 homepageDirs 合并；方向一 `syncAppsToHosts`（monitor-server）与方向二 `syncHostsToApps`（settings-server）、`makeSyncRetryer`、`/api/monitor/sync-check`、`/api/monitor/sync-run`、`SyncCheckPanel.vue`、`monitorSync`/`appSync`/`syncSource` 字段与全部相关 UI（同步检查按钮/已同步监控徽标/主机为主改名回写/玻璃端点 appSync 勾选）。
+- **保留**：监控中心自身的指标采集（5s/20s/agent 三模式）与终端——那是「监控」不是「应用探测」；git 同步检测并入统一探测；`order` 全局排序、离线应用（kinds 无 web）、「待补充」标记、三色归属（本机蓝/外机绿/公网橙，归属改由 hostId+group 决定）。
+
+### 21.2 隐藏开关（一个标记，两个入口）
+
+- 数据：`apps.config.json` 注解 `hidden: true`（旧 `exclude` 兼容读取，语义改为纯展示）→ 探测写入 `apps.json` → 四个前端过滤；监控端 hidden 应用的目录仍被跟踪与采集（"后端仍持续探测"）。
+- 入口 ① 应用中心设置：每个盘点行的「在前端隐藏（后端继续探测）」勾选（随面板保存生效）。
+- 入口 ② 监控设置 → 主机编辑弹窗：探测发现目录行的「隐藏 / 取消隐藏」按钮 → `POST /api/appmeta {directory, host?, hidden}`（settings-server 按目录定位/创建注解并自动触发 `probe --no-fetch`，≈3s 生效）；该行同时显示「已隐藏」tag。
+- 新面板语义：设置面板**盘点驱动**（apps.json 全量行 + 注解合并），无「＋添加」；id/目录/归属主机只读；「删除此条目」改为「恢复默认信息」（清空注解展示字段）；主机卡按 hostId 自动归入 本机/外机/公网 三个区块。
+
+### 21.3 实测（2026-11-12，4 台全部探测成功）
+
+- 18 应用：13 本机（含新发现 `cli_app`、`study-log-wxmp`，均「待补充」）+ netwatch 1（`network-monitor` :80，git 未推送×1）+ 1103 1（`log-gpt-agent` :80，未提交×3）+ 阿里云 3（`study-log-cloud` :3000 线上已同步、`shunfeng-ledger-wxmp` 离线应用、**新发现 `aliyun-shunfeng-ledger` :8787 线上已改×2 待补充**——id 碰撞自动加主机前缀）。
+- 端口归属实测修正：`ss -tlnp` awk 必须输出**完整本地地址 + 全部 pid 列表**（首次实现只输出端口号+首个 pid，导致对外端口误标「仅本机」、nginx 多进程端口归属失败）；远程注解 `url` 端口作期望端口锚定（1103 的 nginx :80 无进程 cwd，否则显示 127.0.0.1:5000）。
+- 监控跟踪目录实测：local 13 个探测目录（9 个有进程命中 + 1 容器 = 卡片 10）、netwatch 1、1103 1、阿里云 3；四台 ONLINE。
+- 隐藏开关端到端：`/api/appmeta` 隐藏/恢复 `cli_app`，apps.json `hidden` 字段 4s 内更新（注解写入→自动 probe）。
+- headless E2E（`.verify/e2e-unified-probe.mjs`，会话注入法）：12 断言全过——主页 18 行、归属标签 13/2/3、设置面板盘点 18 行 + 隐藏开关 + 只读标注 + 恢复默认、监控 4 主机卡、glass-v2 18 行、零控制台错误。
+- 旧文档章节（§6 规格细节、§7.1–7.4、§8.4、§17、§20）与新实现不一致处以上文/本节为准，后续按需重写。
+
+### 21.4 已知边界（诚实声明）
+
+- SSH 主机必须密钥认证才能被统一探测（BatchMode）；密码认证主机明确报错提示改密钥。
+- 「每个子目录 = 一个应用」是字面语义：`/root/applications` 下放非应用目录（如 cli_app）也会成为「未运行」的应用条目——用隐藏开关或注解 kinds 处理。
+- 远程 git 检查不再支持 `gitSsh`/`gitKey` 注解（统一复用监控主机自身的 address/port/username/keyPath）。
+- 阿里云 `shunfeng-ledger` 仓库「线上已改×2」为探测发现的真实状态，未清理（遵循 §20.3 不动远端脏状态的纪律，待用户决定）。

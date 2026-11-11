@@ -5,26 +5,27 @@
  * 仅监听 127.0.0.1，由 nginx 将 /api/ 反代到本服务（局域网经 80 端口可达）。
  *
  * 路由：
- *   GET  /api/config  读取 scripts/apps.config.json（apps + remoteApps + page）
- *   POST /api/config  校验并原子写入配置（原文件备份为 .bak），随后后台运行一次
- *                     探测脚本（--no-fetch）使改动尽快反映到前端；响应立即返回
- *   GET  /api/healthz 存活检查
+ *   GET  /api/config   读取 scripts/apps.config.json（手工注解 + 页面文案；应用清单由统一探测生成）
+ *   POST /api/config   校验并原子写入注解配置（原文件备份为 .bak），随后后台运行一次统一探测
+ *                      脚本（--no-fetch）使改动尽快反映到前端；响应立即返回
+ *   POST /api/appmeta  设置面板/监控设置共用的单应用「前端隐藏」开关（按目录定位注解，无则创建）
+ *   POST /api/probe    「立刻同步」：后台执行完整统一探测（含 git fetch），立即返回 {ok, startedAt}
+ *   GET  /api/healthz  存活检查
+ *
+ * 应用清单的唯一来源是 probe-apps.mjs 的目录自动发现（monitor.config.json hosts[].appRoot），
+ * 本文件维护的 apps[]/remoteApps[] 只是注解（名称/简介/形式/技术栈/访问地址/隐藏等），
+ * 不再存在应用中心 ⇄ 监控中心的独立探测或双向同步。
  *
  * 写入仅限配置文件本身，不执行任何 shell、不触碰 /root/applications。
- *
- * 方向二同步（监控中心 → 应用中心）：监听 scripts/monitor.config.json，
- * 对勾选 appSync 的主机自动在 remoteApps[] 创建/更新同 id 的远程应用；
- * 中断（读写竞态/并发冲突）时按退避间隔自动重试。
  */
 import { createServer } from 'node:http'
-import { readFileSync, writeFileSync, renameSync, copyFileSync, existsSync, watch } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, copyFileSync, existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const CONFIG_FILE = path.join(__dirname, 'apps.config.json')
-const MONITOR_CONFIG_FILE = path.join(__dirname, 'monitor.config.json')
 const PROBE_SCRIPT = path.join(__dirname, 'probe-apps.mjs')
 const PORT = Number(process.env.SETTINGS_PORT || 8300)
 const BODY_LIMIT = 1024 * 1024 // 1MB
@@ -46,7 +47,7 @@ const normKinds = (v, fallback) => {
   return uniq.length ? uniq : fallback
 }
 
-/** 校验并规范化前端提交的配置，只保留已知字段 */
+/** 校验并规范化前端提交的注解配置，只保留已知字段 */
 function sanitizeConfig(body) {
   if (!body || typeof body !== 'object' || Array.isArray(body)) {
     throw new Error('请求体必须是 JSON 对象')
@@ -72,7 +73,8 @@ function sanitizeConfig(body) {
     if (tagArr(a?.languages).length) out.languages = tagArr(a.languages)
     if (tagArr(a?.frontend).length) out.frontend = tagArr(a.frontend)
     if (tagArr(a?.backend).length) out.backend = tagArr(a.backend)
-    if (a?.exclude) out.exclude = true
+    // 前端隐藏：仅影响展示，后端探测与监控照常进行（hidden 为新键，exclude 为旧键兼容）
+    if (a?.hidden || a?.exclude) out.hidden = true
     if (str(a?.name)) out.name = str(a?.name)
     if (str(a?.description)) out.description = str(a?.description)
     return out
@@ -83,41 +85,39 @@ function sanitizeConfig(body) {
     if (!id) throw new Error('存在缺少 id 的远程应用条目')
     if (seen.has(id)) throw new Error(`应用 id 重复：${id}`)
     seen.add(id)
+    // healthUrl 不再参与探测（清单来自目录发现），作为可选字段保留兼容
     const healthUrl = str(a?.healthUrl)
-    let u
-    try {
-      u = new URL(healthUrl)
-    } catch {
-      throw new Error(`远程应用 ${id} 的 healthUrl 不是合法 URL`)
-    }
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-      throw new Error(`远程应用 ${id} 的 healthUrl 必须是 http/https`)
+    if (healthUrl) {
+      let u
+      try {
+        u = new URL(healthUrl)
+      } catch {
+        throw new Error(`远程应用 ${id} 的 healthUrl 不是合法 URL`)
+      }
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+        throw new Error(`远程应用 ${id} 的 healthUrl 必须是 http/https`)
+      }
     }
     const out = {
       id,
-      healthUrl,
       kinds: normKinds(a?.kinds, ['web']),
       env: a?.env === 'lan' ? 'lan' : 'public',
       github: str(a?.github),
       tags: tagArr(a?.tags),
       icon: str(a?.icon) || '☁️',
-      location: str(a?.location) || '远程',
-      host: str(a?.host) || u.hostname,
+      host: str(a?.host),
     }
+    if (healthUrl) out.healthUrl = healthUrl
     if (tagArr(a?.languages).length) out.languages = tagArr(a.languages)
     if (tagArr(a?.frontend).length) out.frontend = tagArr(a.frontend)
     if (tagArr(a?.backend).length) out.backend = tagArr(a.backend)
     if (str(a?.url)) out.url = str(a?.url)
+    if (str(a?.directory)) out.directory = str(a.directory) // 外机应用目录（注解匹配键，探测自动发现）
+    if (str(a?.gitDir)) out.gitDir = str(a.gitDir) // 旧字段兼容保留
+    if (str(a?.location)) out.location = str(a.location)
+    if (a?.hidden || a?.exclude) out.hidden = true
     if (str(a?.name)) out.name = str(a?.name)
     if (str(a?.description)) out.description = str(a?.description)
-    // 外机项目目录 git 检查（可选）：配置 gitDir 才对该机做远程 git 同步检测
-    if (str(a?.gitDir)) out.gitDir = str(a.gitDir)
-    if (str(a?.gitSsh)) out.gitSsh = str(a.gitSsh)
-    if (str(a?.gitKey)) out.gitKey = str(a.gitKey)
-    // 双向同步标记：monitorSync = 同步到监控中心（方向一，monitor-server 消费）；
-    // syncSource = 条目来源（monitor = 方向二由监控主机创建），两者都随保存保留
-    if (a?.monitorSync) out.monitorSync = true
-    if (a?.syncSource === 'monitor') out.syncSource = a.syncSource
     return out
   })
 
@@ -155,10 +155,10 @@ function writeConfig(next) {
 }
 
 /**
- * 后台运行探测：接口立即返回。
- * - 保存配置：用 --no-fetch（本地核对约 0.3 秒），保证保存后页面快速生效；
+ * 后台运行统一探测：接口立即返回。
+ * - 保存注解：用 --no-fetch（约 0.3 秒 + 远程快查），保证保存后页面快速生效；
  *   远端 fetch 校准仍由 5 分钟定时探测负责。
- * - 手动「立刻同步」：完整探测（含 git fetch），并发执行，通常约 6 秒。
+ * - 手动「立刻同步」：完整探测（含 git fetch），并发执行。
  */
 function runProbe({ noFetch = false } = {}) {
   const args = [PROBE_SCRIPT]
@@ -171,124 +171,42 @@ function runProbe({ noFetch = false } = {}) {
   child.unref()
 }
 
-/* ============================ 方向二：监控中心 → 应用中心 同步 ============================
-   monitor.config.json 的 hosts[] 条目带 "appSync": true 时，自动在 remoteApps[] 创建/更新
-   同 id 的远程应用（健康接口默认 http://<地址>/，env 按主机组公网/内网映射）。
-   规则：
-   · 勾选 appSync 的主机是共享字段（name/location/env/host）的唯一事实源，
-     但应用若同时勾选了 monitorSync（应用侧为主），则跳过回写，只补建缺失条目；
-   · 只创建与更新，从不删除：要移除请先在监控设置取消勾选，再在应用设置里删条目；
-   · 应用地址变化时才重生成默认健康/访问地址，未变化时保留用户自定义的健康接口；
-   · 无 diff 不写盘（防止与方向一互相触发形成回环）；
-   · 单次同步因读写竞态/并发冲突中断时，由重试器按退避间隔自动重试。 */
-function syncHostsToAppsOnce() {
-  const monRaw = JSON.parse(readFileSync(MONITOR_CONFIG_FILE, 'utf8'))
-  const appsRaw = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
-  const list = Array.isArray(appsRaw.remoteApps) ? appsRaw.remoteApps : []
-  let changed = false
-  for (const h of (Array.isArray(monRaw.hosts) ? monRaw.hosts : [])) {
-    if (!h || h.appSync !== true || h.type !== 'ssh') continue
-    const id = String(h.id || '')
-    const address = String(h.address || '')
-    if (!id || !address) continue
-    const env = /公网|public/i.test(String(h.group || '')) ? 'public' : 'lan'
-    /* 配对：优先同 id；id 未见则按地址配对已有远程应用（真实场景应用 id 常与监控主机 id 不同）。
-       monitorSync 应用由方向一回写（跳过防回环）；syncSource==='monitor' 的应用只认 id（不被其他主机地址抢占）。 */
-    let idx = list.findIndex((a) => a && a.id === id)
-    let viaAddress = false
-    if (idx < 0) {
-      const j = list.findIndex((a) => a && a.syncSource !== 'monitor' && a.monitorSync !== true && String(a.host || '') === address && address)
-      if (j >= 0) { idx = j; viaAddress = true }
-    }
-    if (idx < 0) {
-      list.push({
-        id,
-        name: String(h.name || id),
-        description: '由监控中心同步创建的主机条目：健康探测默认走站点根路径，可在应用设置中修改健康接口。',
-        healthUrl: `http://${address}/`,
-        url: `http://${address}/`,
-        location: String(h.group || (env === 'public' ? '公网' : '内网')),
-        host: address,
-        kinds: ['web'],
-        env,
-        icon: env === 'public' ? '☁️' : '🖥️',
-        syncSource: 'monitor',
-      })
-      changed = true
-      console.log('[settings] 已从监控中心同步创建远程应用:', id, '@', address)
-    } else if (list[idx].monitorSync !== true) {
-      const a = list[idx]
-      const prevHost = String(a.host || '')
-      const nextName = String(h.name || id)
-      const nextLocation = String(h.group || '')
-      if (a.name !== nextName || a.location !== nextLocation || a.env !== env || prevHost !== address) {
-        a.name = nextName
-        a.location = nextLocation
-        a.env = env
-        a.host = address
-        if (prevHost !== address) {
-          a.healthUrl = `http://${address}/`
-          a.url = `http://${address}/`
-        }
-        changed = true
-        console.log(viaAddress
-          ? `[settings] 已按监控主机信息更新远程应用（按地址配对，主机 ${id} → 应用 ${a.id}）`
-          : '[settings] 已按监控主机信息更新远程应用:', a.id)
-      }
+/** 单应用「前端隐藏」开关（应用中心设置与监控设置主机弹窗共用）：
+ *  按目录定位注解条目（无则创建最小注解），仅写 hidden 标记，后端探测与监控不受影响。 */
+function setAppHidden(body) {
+  const directory = str(body?.directory)
+  if (!directory || !directory.startsWith('/')) throw new Error('缺少有效的应用目录（directory）')
+  const hidden = Boolean(body?.hidden)
+  const raw = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
+  const dir = directory.replace(/\/+$/, '')
+  const hostAddr = str(body?.host)
+  const base = path.basename(dir)
+  let list = Array.isArray(raw.apps) ? raw.apps : []
+  let entry = list.find((a) => a && str(a.directory).replace(/\/+$/, '') === dir)
+  if (!entry && hostAddr) {
+    list = Array.isArray(raw.remoteApps) ? raw.remoteApps : (raw.remoteApps = [])
+    entry = list.find((a) => a && (str(a.directory).replace(/\/+$/, '') === dir || str(a.gitDir).replace(/\/+$/, '') === dir)
+      && (str(a.host) === hostAddr || !str(a.host)))
+  }
+  if (!entry) {
+    // 新发现的应用还没有任何注解：创建最小注解（探测会继续为未注解字段使用默认值）
+    if (!Array.isArray(raw.apps)) raw.apps = []
+    if (hostAddr) {
+      if (!Array.isArray(raw.remoteApps)) raw.remoteApps = []
+      entry = { id: base, name: base, host: hostAddr, directory: dir, kinds: ['web'] }
+      raw.remoteApps.push(entry)
+    } else {
+      entry = { id: base, name: base, directory: dir, kinds: ['web'] }
+      raw.apps.push(entry)
     }
   }
-  if (changed) {
-    // 展开原对象仅替换 remoteApps：保持 $comment 等顶层键的原有顺序，避免纯键序变化弄脏 diff
-    writeConfig({ ...appsRaw, remoteApps: list })
-    runProbe({ noFetch: true }) // 应用条目变化尽快反映到 apps.json（前端数据源）
-  }
-  return changed
-}
-
-/* 同步重试器：in-flight 期间的重复触发合并为一次（并发限制）；单次中断按
-   10s/30s/60s/120s/120s 退避自动重试（最多 5 次）；新事件触发会重置退避立即执行。 */
-function makeSyncRetryer(tag, fn) {
-  const DELAYS = [10_000, 30_000, 60_000, 120_000, 120_000]
-  let timer = null
-  let attempt = 0
-  let running = false
-  let pendingAgain = false
-  const run = () => {
-    if (running) { pendingAgain = true; return }
-    running = true
-    try {
-      fn()
-      attempt = 0
-    } catch (err) {
-      if (attempt < DELAYS.length) {
-        const delay = DELAYS[attempt++]
-        console.error(`[settings][${tag}] 同步中断，${Math.round(delay / 1000)}s 后自动重试（${attempt}/${DELAYS.length}）：`, err.message)
-        if (timer) clearTimeout(timer)
-        timer = setTimeout(() => { run() }, delay)
-      } else {
-        console.error(`[settings][${tag}] 同步连续 ${DELAYS.length} 次失败，本轮放弃（下次配置变更或重启后再试）：`, err.message)
-        attempt = 0
-      }
-    } finally {
-      running = false
-      if (pendingAgain) { pendingAgain = false; run() }
-    }
-  }
-  return () => { attempt = 0; if (timer) clearTimeout(timer); run() }
-}
-const syncHostsToApps = makeSyncRetryer('monitor→apps', syncHostsToAppsOnce)
-
-/* 监听监控配置：勾选 appSync 的主机变化时同步到应用中心（600ms 防抖，与热加载节奏一致） */
-try {
-  const monName = path.basename(MONITOR_CONFIG_FILE)
-  let monWatchTimer = null
-  watch(__dirname, (ev, fn) => {
-    if (fn !== monName) return
-    if (monWatchTimer) clearTimeout(monWatchTimer)
-    monWatchTimer = setTimeout(() => { syncHostsToApps() }, 600)
-  })
-} catch (err) {
-  console.error('[settings] fs.watch 不可用（方向二同步退化为仅启动时执行一次）：', err.message)
+  if (hidden) entry.hidden = true
+  else delete entry.hidden
+  // 旧的 exclude 键语义已并入 hidden，顺手清掉避免歧义
+  delete entry.exclude
+  writeConfig(raw)
+  runProbe({ noFetch: true }) // 尽快把 hidden 反映进 apps.json（前端展示过滤依据）
+  return { id: entry.id, hidden }
 }
 
 function send(res, code, body) {
@@ -339,16 +257,25 @@ const server = createServer(async (req, res) => {
         /* 原文件缺失/损坏时不阻塞保存 */
       }
       writeConfig(next)
-      // 探测转后台执行：保存立即返回，前端轮询 apps.json 感知更新
+      // 统一探测转后台执行：保存立即返回，前端轮询 apps.json 感知更新
       runProbe({ noFetch: true })
-      syncHostsToApps() // 自愈：整表保存若覆盖掉 appSync 同步条目，立即补齐（无 diff 不写盘）
       // serverTime：前端保存后轮询 probedAt 用服务端时钟比较，避免浏览器时钟偏差导致白等
       send(res, 200, { ok: true, probeStarted: true, serverTime: Date.now() })
       return
     }
+    if (req.method === 'POST' && url === '/api/appmeta') {
+      if (req.headers['x-requested-with'] !== 'XMLHttpRequest') {
+        send(res, 403, { ok: false, error: 'missing X-Requested-With' })
+        return
+      }
+      const body = JSON.parse(await readBody(req))
+      const r = setAppHidden(body)
+      send(res, 200, { ok: true, ...r })
+      return
+    }
     if (req.method === 'POST' && url === '/api/probe') {
-      // 「立刻同步」：完整探测（含 git fetch）。startedAt 用服务端时钟，
-      // 前端据此判断 apps.json 的 probedAt 是否已经更新。
+      // 「立刻同步」：完整统一探测（含 git fetch 与全部远程主机发现）。
+      // startedAt 用服务端时钟，前端据此判断 apps.json 的 probedAt 是否已经更新。
       runProbe()
       send(res, 200, { ok: true, startedAt: Date.now() })
       return
@@ -358,8 +285,6 @@ const server = createServer(async (req, res) => {
     send(res, 400, { ok: false, error: err.message })
   }
 })
-
-syncHostsToApps() // 启动时做一次方向二同步（自愈：补齐曾被整表保存覆盖掉的同步条目）
 
 server.listen(PORT, '127.0.0.1', () => {
   console.log(`[settings] listening on http://127.0.0.1:${PORT}  config=${CONFIG_FILE}`)

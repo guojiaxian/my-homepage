@@ -263,7 +263,7 @@
         const res = await fetch(`/apps.json?t=${Date.now()}`, { cache: 'no-store' })
         if (!res.ok) throw new Error(`HTTP ${res.status}`)
         const data = await res.json()
-        state.apps = data.apps ?? []
+        state.apps = (data.apps ?? []).filter((a) => !a.hidden)
         state.probedAt = data.probedAt ?? ''
         if (data.page) state.page = { ...state.page, ...data.page }
         state.loadError = ''
@@ -514,7 +514,7 @@
             const data = await res.json()
             if (data.probedAt && data.probedAt > startedAt) {
               clearInterval(timer)
-              state.apps = data.apps ?? []
+              state.apps = (data.apps ?? []).filter((a) => !a.hidden)
               state.probedAt = data.probedAt ?? ''
               renderPageText()
               render()

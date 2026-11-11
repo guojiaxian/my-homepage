@@ -1,17 +1,19 @@
 #!/usr/bin/env node
 /**
- * 端口探测器：生成前端使用的 apps.json
+ * 统一应用探测器 —— 应用中心与监控中心共用的唯一探测结果。
  *
- * 原理：
- *   1. 解析 `ss -tlnp`，得到所有 TCP LISTEN 端口及其进程 PID；
- *   2. 读取 /proc/<pid>/cwd（cmdline 兜底），进程工作目录落在 /root/applications/<目录>
- *      内即认为该端口归属对应应用；
- *   3. 未通过进程匹配到端口的应用，退回用 net.connect 探测 expectedPort 连通性；
- *   4. 监听进程位于 /root/applications/* 但未登记在 apps.config.json 的，
- *      自动生成「待补充」条目（新应用放入目录即可被自动发现）；
- *   5. 与手工维护的元数据合并，写入 public/apps.json 与线上 webroot。
+ * 探测方式（目录自动发现，管理员在 monitor.config.json 的 hosts[].appRoot 为每台服务器指定探测根目录）：
+ *   1. 读取 hosts 注册表：type=local 本机（直读文件系统）、type=ssh 远程/公网（每台一次 SSH 执行只读脚本）；
+ *   2. 扫描 appRoot：目录自身含 .git / package.json 等应用标记 → 视为单一应用；
+ *      否则每个一级子目录 = 一个应用；
+ *   3. 归属端口/运行状态：本机解析 ss -tlnp + /proc/<pid>/cwd；远程在 SSH 脚本里跑 ss + readlink cwd，
+ *      监听端口的属主进程 cwd（或任意进程 cwd）落在应用目录内即归属；
+ *   4. git 同步检测：本机逐仓 fetch+status（--no-fetch 跳过）；远程与发现脚本同一条 SSH 跑完；
+ *   5. 与 apps.config.json 的手工注解（名称/简介/图标/形式/技术栈/访问地址/隐藏等）按目录合并——
+ *      注解只是元数据，应用清单完全由目录发现决定；新发现的目录自动出现在应用中心与监控中心
+ *      （监控中心按 hostId 跟踪其目录，无需任何手工登记或双中心同步）。
  *
- * 用法：node scripts/probe-apps.mjs
+ * 用法：node scripts/probe-apps.mjs [--no-fetch]
  * 退出码：0 正常；1 探测失败（如 ss 不可用、配置非法）
  */
 import { execFile, execFileSync } from 'node:child_process'
@@ -37,25 +39,30 @@ const execFileAsync = promisify(execFile)
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = path.resolve(__dirname, '..')
-const APPS_ROOT = '/root/applications'
-const CONFIG_FILE = path.join(__dirname, 'apps.config.json')
+const CONFIG_FILE = path.join(__dirname, 'apps.config.json') // 手工注解 + 页面文案（不再是清单来源）
+const MONITOR_CONFIG_FILE = path.join(__dirname, 'monitor.config.json') // 主机注册表（含各机 appRoot）
 // 生成结果同时写入仓库（下次构建的输入）与线上 webroot（免重建即时生效）
 const OUTPUT_FILES = [
   path.join(REPO_ROOT, 'public/apps.json'),
   '/root/applications/my-homepage/www/apps.json',
 ]
 const TCP_TIMEOUT_MS = 1500
-const REMOTE_TIMEOUT_MS = 6000
 const FETCH_CONCURRENCY = Math.max(1, Number(process.env.PROBE_FETCH_CONCURRENCY) || 6)
-// 外机项目目录 git 检查：每台外机一次 SSH，并发默认 2（PROBE_REMOTE_GIT_CONCURRENCY 覆盖）；
-// 连接失败 / 超时 / 输出中断等瞬态错误按退避自动重试，仍失败标记 error 等下一轮完整探测再试
-const REMOTE_GIT_CONCURRENCY = Math.max(1, Number(process.env.PROBE_REMOTE_GIT_CONCURRENCY) || 2)
-const REMOTE_GIT_TIMEOUT_FETCH_MS = 60_000
-const REMOTE_GIT_TIMEOUT_STATUS_MS = 25_000
-const REMOTE_GIT_RETRY_DELAYS = [4_000, 10_000]
+// 远程主机发现：每台一次 SSH（发现 + 端口归属 + 逐目录 git 一次跑完），并发默认 3；
+// 连接失败 / 超时 / 输出中断按退避自动重试，仍失败该主机本轮输出空并记录错误
+const REMOTE_HOST_CONCURRENCY = Math.max(1, Number(process.env.PROBE_REMOTE_GIT_CONCURRENCY) || 3)
+const REMOTE_DISCOVER_TIMEOUT_FETCH_MS = 90_000
+const REMOTE_DISCOVER_TIMEOUT_STATUS_MS = 30_000
+const REMOTE_RETRY_DELAYS = [4_000, 10_000]
 // 定时器可能同时触发"完整探测"和"快速探测"，用临时锁避免两个进程同时写 apps.json
 const LOCK_FILE = path.join(os.tmpdir(), 'my-homepage-probe.lock')
 const LOCK_STALE_MS = 5 * 60_000
+
+// 应用标记文件：appRoot 自身带这些标记时视为单一应用（而不是应用容器目录）
+const APP_MARKER_FILES = [
+  '.git', 'package.json', 'requirements.txt', 'pyproject.toml', 'go.mod',
+  'build.gradle', 'build.gradle.kts', 'app.json', 'project.config.json',
+]
 
 // 应用形式：web / APP / 小程序 / 电视 / CLI，可多选
 const APP_KINDS = new Set(['web', 'app', 'miniapp', 'tv', 'cli'])
@@ -72,6 +79,8 @@ const pickList = (configured, detected) => {
   const list = normList(configured)
   return list.length ? list : detected
 }
+const normDir = (p) => String(p || '').replace(/\/+$/, '')
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /* ---------------- 技术栈自动识别（仅本机目录） ---------------- */
 
@@ -235,92 +244,107 @@ function detectStack(dir) {
   }
 }
 
-/* ---------------- 远程应用健康探查（云服务器等外部主机） ---------------- */
+/* ---------------- 目录发现（本机） ---------------- */
 
-/**
- * 请求 healthUrl 并解析健康信息。在线判定：HTTP 2xx 且（若有 status 字段）值为 ok。
- * 返回 apps.json 的条目，remoteInfo 携带版本号、延迟、运行时长等明细。
- */
-async function probeRemote(meta, now) {
-  let base = meta.healthUrl
-  let host = ''
-  let port = null
-  try {
-    const u = new URL(meta.healthUrl)
-    host = u.hostname
-    port = Number(u.port) || (u.protocol === 'https:' ? 443 : 80)
-    base = `${u.protocol}//${u.host}`
-  } catch {
-    /* healthUrl 非法时按原样使用 */
-  }
+function isAppMarkerDir(dir) {
+  return APP_MARKER_FILES.some((m) => existsSync(path.join(dir, m)))
+}
 
-  const info = {
-    online: false,
-    httpStatus: null,
-    responseMs: null,
-    version: null,
-    dbReady: null,
-    rssMb: null,
-    uptimeSec: null,
-    error: '',
-    checkedAt: now,
+/** appRoot 自身是应用 → [appRoot]；否则每个一级子目录（跳过点目录）= 一个应用 */
+function discoverLocalDirs(appRoot) {
+  if (isAppMarkerDir(appRoot)) return [appRoot]
+  const out = []
+  for (const entry of readdirSync(appRoot, { withFileTypes: true })) {
+    if (!entry.isDirectory() || entry.name.startsWith('.')) continue
+    out.push(path.join(appRoot, entry.name))
   }
-  const started = Date.now()
+  return out.sort()
+}
+
+/* ---------------- 本机端口归属（ss + /proc） ---------------- */
+
+function parseSsListen() {
+  let out
   try {
-    const res = await fetch(meta.healthUrl, {
-      headers: { accept: 'application/json' },
-      signal: AbortSignal.timeout(REMOTE_TIMEOUT_MS),
-    })
-    info.responseMs = Date.now() - started
-    info.httpStatus = res.status
-    let body = null
-    try {
-      body = await res.json()
-    } catch {
-      /* 非 JSON 响应按无 body 处理 */
-    }
-    info.version = body?.version ?? body?.data?.version ?? null
-    info.dbReady = body?.dbReady ?? null
-    info.rssMb = body?.rssMb ?? null
-    info.uptimeSec = body?.uptimeSec ?? null
-    info.online = res.ok && (!body?.status || body.status === 'ok')
-    if (!res.ok) info.error = `HTTP ${res.status}`
-    else if (body?.status && body.status !== 'ok') info.error = `status=${body.status}`
+    out = execFileSync('ss', ['-tlnp'], { encoding: 'utf8' })
   } catch (err) {
-    info.responseMs = Date.now() - started
-    info.error = err?.name === 'TimeoutError' ? `超时（>${REMOTE_TIMEOUT_MS / 1000}s）` : String(err?.cause?.message ?? err.message ?? err).slice(0, 120)
+    throw new Error(`无法执行 ss -tlnp：${err.message}`)
   }
 
-  const kinds = normKinds(meta.kinds, ['web'])
-  return {
-    id: meta.id,
-    name: meta.name || meta.id,
-    description: meta.description || '',
-    directory: meta.gitDir || null, // 外机项目目录（配置 gitDir 才有），前端「服务器 / 目录」列展示与复制
-    port,
-    expectedPort: null,
-    extraPorts: [],
-    external: true,
-    status: info.online ? 'running' : 'down',
-    kinds,
-    env: meta.env === 'lan' ? 'lan' : 'public',
-    languages: normList(meta.languages),
-    frontend: normList(meta.frontend),
-    backend: normList(meta.backend),
-    github: meta.github || '',
-    tags: meta.tags || [],
-    icon: meta.icon || '☁️',
-    pending: false,
-    remote: true,
-    // 纯 APP / 小程序远程条目没有可访问网页：不要用健康接口端口拼出一个错误的本地链接
-    url: meta.url || (kinds.includes('web') ? base : ''),
-    location: meta.location || '远程',
-    host: meta.host || host,
-    remoteInfo: info,
+  // 形如：LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=1596614,fd=21))
+  const listeners = []
+  for (const line of out.split('\n')) {
+    if (!line.startsWith('LISTEN')) continue
+    const cols = line.trim().split(/\s+/)
+    const local = cols[3]
+    if (!local) continue
+    const portStr = local.slice(local.lastIndexOf(':') + 1)
+    const port = Number(portStr)
+    if (!Number.isInteger(port) || port <= 0) continue
+
+    const addr = local.slice(0, local.lastIndexOf(':'))
+    // 0.0.0.0 / [::] / * 均为对外监听；127.0.0.1、::1 为仅本机
+    const external = addr === '0.0.0.0' || addr === '[::]' || addr === '*' || addr === '::'
+
+    const pids = [...line.matchAll(/pid=(\d+)/g)].map((m) => Number(m[1]))
+    listeners.push({ port, external, pids })
+  }
+  return listeners
+}
+
+function procCwd(pid) {
+  try {
+    // 必须用 readlink：/proc/<pid>/cwd 是 magic symlink，readFileSync 会跟随它读目录内容而失败
+    return readlinkSync(`/proc/${pid}/cwd`)
+  } catch {
+    return null
   }
 }
 
-/* ---------------- git 源码同步检测 ---------------- */
+function procCmdline(pid) {
+  try {
+    return readFileSync(`/proc/${pid}/cmdline`, { encoding: 'utf8' }).replace(/\0/g, ' ')
+  } catch {
+    return ''
+  }
+}
+
+function cwdUnderDir(cwd, dir) {
+  return cwd === dir || (cwd && cwd.startsWith(dir + '/'))
+}
+
+/** 监听端口的属主进程工作目录：优先第一个可读 cwd，退回 cmdline 中提到的应用目录 */
+function listenerOwnerCwd(listener, appDirs) {
+  for (const pid of listener.pids) {
+    const cwd = procCwd(pid)
+    if (cwd) return cwd
+  }
+  for (const pid of listener.pids) {
+    const cmd = procCmdline(pid)
+    if (!cmd) continue
+    const hit = appDirs.find((d) => cmd.includes(d + '/') || cmd.includes(d + ' '))
+    if (hit) return hit
+  }
+  return null
+}
+
+/* ---------------- 端口连通性兜底（nginx 托管 / docker 等无进程归属场景） ---------------- */
+
+function tcpProbe(port, host = '127.0.0.1') {
+  return new Promise((resolve) => {
+    const socket = net.connect({ port, host })
+    const done = (ok) => {
+      socket.destroy()
+      resolve(ok)
+    }
+    socket.setTimeout(TCP_TIMEOUT_MS)
+    socket.once('connect', () => done(true))
+    socket.once('timeout', () => done(false))
+    socket.once('error', () => done(false))
+  })
+}
+
+/* ---------------- git 源码同步检测（本机） ---------------- */
 
 const GIT_TIMEOUT_MS = 10_000
 const FETCH_TIMEOUT_MS = 20_000
@@ -483,49 +507,120 @@ function gitSyncInfo(dir, remoteOk, now) {
   return info
 }
 
-/* ---------------- 外机项目目录 git 检测 ----------------
-   remoteApps[] 可选配置（settings 面板白名单同步放行）：
-     gitDir  外机上项目目录绝对路径——配置了才对该机做远程 git 检查
-     gitSsh  SSH 目标（user@host；缺省 root@<host>，本机 sshd 以 root 运行）
-     gitKey  私钥路径（缺省用系统默认身份；推荐复用监控网关的专用密钥）
-   每台外机一次 SSH 执行远端只读脚本（fetch + status + ahead/behind 一次跑完，
-   远端 git 用远端自己的凭据与网络）；--no-fetch 快速探测时跳过 fetch 只查工作区。 */
+/* ---------------- 远程主机发现（每台一次 SSH：目录 + 端口归属 + 逐目录 git） ---------------- */
 
 const shQuote = (s) => `'${String(s).replace(/'/g, `'\\''`)}'`
 
-function buildRemoteGitScript(dir, doFetch) {
+/** 远程发现脚本（POSIX sh，只读；除远端机 .git 内的 FETCH_HEAD/refs 外不触碰任何文件）。
+ *  输出全部用 @tag@ 行标记，Node 侧解析；输出缺 @end@ = 被中断 → 视为瞬态失败交由重试。 */
+function buildRemoteDiscoverScript(appRoot, doFetch) {
   return [
-    'DIR=' + shQuote(dir),
+    'ROOT=' + shQuote(appRoot),
     'FETCH=' + (doFetch ? 1 : 0),
-    'cd "$DIR" 2>/dev/null || { echo "@err@ 目录不存在或不可进入"; exit 0; }',
-    'git rev-parse --is-inside-work-tree >/dev/null 2>&1 || { echo "@err@ 不是 git 仓库"; exit 0; }',
-    'b=$(git branch --show-current 2>/dev/null)',
-    'echo "@branch@ $b"',
-    'echo "@repo@ $(git config --get remote.origin.url 2>/dev/null)"',
-    'rn=$(git config --get "branch.$b.remote" 2>/dev/null)',
-    '[ -z "$rn" ] && rn=origin',
-    'if [ "$FETCH" = 0 ]; then',
-    '  echo "@fetch@ skip"',
-    'elif [ "$rn" = "." ] || [ -z "$(git config --get remote.$rn.url 2>/dev/null)" ]; then',
-    '  echo "@fetch@ none"',
+    '[ -d "$ROOT" ] || { echo "@err@ 探测目录不存在"; echo "@end@"; exit 0; }',
+    'echo "@root@ $ROOT"',
+    'self=0',
+    'for m in ' + APP_MARKER_FILES.map((m) => shQuote(m)).join(' ') + '; do',
+    '  [ -e "$ROOT/$m" ] && self=1',
+    'done',
+    'echo "@self@ $self"',
+    'APPS=""',
+    'if [ "$self" = 1 ]; then',
+    '  APPS="$ROOT"',
     'else',
-    '  git --no-optional-locks -c gc.auto=0 fetch --quiet --no-tags --no-recurse-submodules "$rn" >/dev/null 2>&1',
-    '  echo "@fetch@ $?"',
+    '  for d in "$ROOT"/*/; do',
+    '    [ -d "$d" ] || continue',
+    '    APPS="$APPS${d%/}\n"',
+    '  done',
     'fi',
-    "git status --porcelain=v1 2>/dev/null | sed 's/^/@st@ /'",
-    "git rev-list --left-right --count '@{upstream}...HEAD' 2>/dev/null | sed 's/^/@count@ /'",
+    'echo "@ports@"',
+    'ss -tlnp 2>/dev/null | awk \'/^LISTEN/ { pid=""; s=$0; while (match(s,/pid=[0-9]+/)) { pid = pid (pid==""?"":",") substr(s,RSTART+4,RLENGTH-4); s=substr(s,RSTART+RLENGTH) } print "@port@ " $4 " " pid }\'',
+    'for d in /proc/[0-9]*/cwd; do',
+    '  pid=${d#/proc/}; pid=${pid%/cwd}',
+    '  c=$(readlink "$d" 2>/dev/null) || continue',
+    '  [ -n "$c" ] && echo "@cwd@ $pid $c"',
+    'done',
+    'printf \'%s\\n\' "$APPS" | while IFS= read -r a; do',
+    '  [ -n "$a" ] || continue',
+    '  echo "@appbegin@ $a"',
+    '  if git -C "$a" rev-parse --is-inside-work-tree >/dev/null 2>&1; then',
+    '    b=$(git -C "$a" branch --show-current 2>/dev/null)',
+    '    echo "@gitbranch@ $b"',
+    '    echo "@gitrepo@ $(git -C "$a" config --get remote.origin.url 2>/dev/null)"',
+    '    rn=$(git -C "$a" config --get "branch.$b.remote" 2>/dev/null)',
+    '    [ -z "$rn" ] && rn=origin',
+    '    if [ "$FETCH" = 0 ]; then',
+    '      echo "@gitfetch@ skip"',
+    '    elif [ "$rn" = "." ] || [ -z "$(git -C "$a" config --get remote.$rn.url 2>/dev/null)" ]; then',
+    '      echo "@gitfetch@ none"',
+    '    else',
+    '      git -C "$a" --no-optional-locks -c gc.auto=0 fetch --quiet --no-tags --no-recurse-submodules "$rn" >/dev/null 2>&1',
+    '      echo "@gitfetch@ $?"',
+    '    fi',
+    '    git -C "$a" status --porcelain=v1 2>/dev/null | sed \'s/^/@gitst@ /\'',
+    '    git -C "$a" rev-list --left-right --count \'@{upstream}...HEAD\' 2>/dev/null | sed \'s/^/@gitcount@ /\'',
+    '  else',
+    '    echo "@gitnorepo@"',
+    '  fi',
+    '  echo "@append@"',
+    'done',
     'echo "@end@"',
   ].join('\n')
 }
 
-/** 解析远端脚本输出为与 gitSyncInfo 同构的 git 信息；输出被截断（中断/超时）返回 null 交由重试 */
-function parseRemoteGitOutput(out, now) {
+/** 解析远程发现输出：{ dirs, ports, cwds, gitByDir }；输出被截断返回 null 交由重试 */
+function parseRemoteDiscoverOutput(out) {
   const lines = out.split('\n')
   if (!lines.includes('@end@')) return null
+  const res = { root: '', self: 0, dirs: [], ports: [], cwds: new Map(), gitByDir: new Map(), err: '' }
+  let cur = null
+  for (const line of lines) {
+    if (line.startsWith('@err@ ')) { res.err = line.slice(6).trim(); continue }
+    if (line.startsWith('@root@ ')) { res.root = line.slice(7).trim(); continue }
+    if (line.startsWith('@self@ ')) { res.self = Number(line.slice(7).trim()) || 0; continue }
+    if (line.startsWith('@port@ ')) {
+      // 行格式：@port@ <本地地址:端口> <pid,pid,...>（ss -tlnp 的 LISTEN 行；多进程监听全部列出）
+      const rest = line.slice(7).trim()
+      const sp = rest.indexOf(' ')
+      if (sp > 0) {
+        const local = rest.slice(0, sp)
+        const port = Number(local.slice(local.lastIndexOf(':') + 1))
+        const pids = rest.slice(sp + 1).split(',').map(Number).filter((n) => Number.isInteger(n) && n > 0)
+        if (Number.isInteger(port) && port > 0) res.ports.push({ port, pids, local })
+      }
+      continue
+    }
+    if (line.startsWith('@cwd@ ')) {
+      const rest = line.slice(6)
+      const sp = rest.indexOf(' ')
+      if (sp > 0) res.cwds.set(Number(rest.slice(0, sp)), rest.slice(sp + 1).trim())
+      continue
+    }
+    if (line.startsWith('@appbegin@ ')) {
+      cur = { path: line.slice(11).trim(), branch: '', repo: '', fetch: 'skip', st: [], count: '', noRepo: false }
+      res.dirs.push(cur)
+      continue
+    }
+    if (!cur) continue
+    if (line.startsWith('@gitbranch@ ')) cur.branch = line.slice(12).trim()
+    else if (line.startsWith('@gitrepo@ ')) cur.repo = line.slice(10).trim()
+    else if (line.startsWith('@gitfetch@ ')) cur.fetch = line.slice(11).trim()
+    else if (line.startsWith('@gitst@ ')) cur.st.push(line.slice(8))
+    else if (line.startsWith('@gitcount@ ')) cur.count = line.slice(11).trim()
+    else if (line.startsWith('@gitnorepo@')) cur.noRepo = true
+    else if (line.startsWith('@append@')) cur = null
+  }
+  return res
+}
+
+function gitInfoFromDiscover(d, now, production) {
+  if (d.noRepo) {
+    return { status: 'no-repo', repo: '', branch: '', uncommitted: 0, untracked: 0, ahead: 0, behind: 0, remoteOk: null, checkedAt: now, message: '', ...(production ? { production: true } : {}) }
+  }
   const info = {
     status: 'error',
-    repo: '',
-    branch: '',
+    repo: d.repo ? normalizeRepo(d.repo) : '',
+    branch: d.branch || '',
     uncommitted: 0,
     untracked: 0,
     ahead: 0,
@@ -534,56 +629,25 @@ function parseRemoteGitOutput(out, now) {
     checkedAt: now,
     message: '',
   }
-  let hasCount = false
-  for (const line of lines) {
-    if (line.startsWith('@err@ ')) {
-      info.status = 'no-repo'
-      info.message = line.slice(6).trim()
-      return info
-    }
-    if (line.startsWith('@branch@ ')) info.branch = line.slice(9).trim()
-    else if (line.startsWith('@repo@ ')) info.repo = normalizeRepo(line.slice(7).trim())
-    else if (line.startsWith('@fetch@ ')) {
-      const v = line.slice(8).trim()
-      // none = 仓库未配置远端（与本机 fetchRepo 语义对齐：无需 fetch，视为成功）；skip = 快速探测未 fetch
-      info.remoteOk = v === 'skip' ? null : v === '0' || v === 'none'
-    } else if (line.startsWith('@st@ ')) {
-      const s = line.slice(5)
-      if (s.startsWith('?? ')) info.untracked++
-      else info.uncommitted++
-    } else if (line.startsWith('@count@ ')) {
-      const [behind, ahead] = line.slice(8).trim().split(/\s+/)
-      info.behind = Number(behind) || 0
-      info.ahead = Number(ahead) || 0
-      hasCount = true
-    }
+  // fetch 值：0 成功 / none 未配置远端（视为成功）/ skip 快速探测免 fetch（remoteOk=null）
+  info.remoteOk = d.fetch === 'skip' ? null : d.fetch === '0' || d.fetch === 'none'
+  for (const s of d.st) {
+    if (s.startsWith('?? ')) info.untracked++
+    else info.uncommitted++
+  }
+  if (d.count) {
+    const [behind, ahead] = d.count.split(/\s+/)
+    info.behind = Number(behind) || 0
+    info.ahead = Number(ahead) || 0
   }
   if (info.uncommitted > 0) info.status = 'dirty'
   else if (info.ahead > 0) info.status = 'ahead'
   else if (info.behind > 0) info.status = 'behind'
   else if (info.untracked > 0) info.status = 'untracked'
-  else if (!hasCount) info.status = 'no-upstream'
+  else if (!d.count) info.status = 'no-upstream'
   else info.status = 'synced'
+  if (production) info.production = true
   return info
-}
-
-async function runRemoteGitOnce(meta, dir, doFetch, now) {
-  const target = String(meta.gitSsh || '').trim() || `root@${meta.host || ''}`
-  const args = [
-    '-o', 'BatchMode=yes',
-    '-o', 'ConnectTimeout=8',
-    '-o', 'StrictHostKeyChecking=accept-new',
-    '-o', 'ControlMaster=auto',
-    '-o', 'ControlPersist=120',
-    '-o', 'ControlPath=/tmp/my-homepage-ssh-%C',
-  ]
-  if (meta.gitKey) args.push('-i', meta.gitKey, '-o', 'IdentitiesOnly=yes')
-  args.push('--', target, buildRemoteGitScript(dir, doFetch))
-  const { stdout } = await execFileAsync('ssh', args, {
-    timeout: doFetch ? REMOTE_GIT_TIMEOUT_FETCH_MS : REMOTE_GIT_TIMEOUT_STATUS_MS,
-    encoding: 'utf8',
-  })
-  return parseRemoteGitOutput(stdout, now)
 }
 
 /** 探测日志里的 git 状态标签（本机 / 外机 / 线上机通用） */
@@ -600,138 +664,99 @@ function gitLogTag(g) {
   return `  [git ${g.status === 'synced' ? (prod ? '线上已同步' : '已同步') : g.status === 'no-repo' ? '无仓库' : g.status === 'no-upstream' ? '未关联远端' : '检查失败'}]`
 }
 
-/** 外机 git 检查失败的简短原因（避免把整条 ssh 命令行打进日志/提示） */
-function remoteGitErr(err, doFetch) {
-  if (err?.killed) return `超时（>${Math.round((doFetch ? REMOTE_GIT_TIMEOUT_FETCH_MS : REMOTE_GIT_TIMEOUT_STATUS_MS) / 1000)}s）`
+/** 远程发现失败的简短原因（避免把整条 ssh 命令行打进日志/提示） */
+function remoteDiscoverErr(err, doFetch) {
+  if (err?.killed) return `超时（>${Math.round((doFetch ? REMOTE_DISCOVER_TIMEOUT_FETCH_MS : REMOTE_DISCOVER_TIMEOUT_STATUS_MS) / 1000)}s）`
   const lines = String(err?.stderr || '').split('\n').map((s) => s.trim()).filter(Boolean)
   const line = lines.find((l) => !/^warning:/i.test(l)) || lines[0]
   return (line || `SSH 连接失败（exit ${err?.code ?? '?'}）`).slice(0, 120)
 }
 
-/** 带退避重试的外机 git 检查：连接失败/超时/输出中断自动重试，最终失败返回 status='error' */
-async function remoteGitSyncInfo(meta, dir, doFetch, now) {
-  const attempts = REMOTE_GIT_RETRY_DELAYS.length + 1
+/** 组装单台远程主机的 ssh 命令参数（复用监控主机自己的连接配置；密钥认证） */
+function remoteSshArgs(host) {
+  const args = [
+    '-o', 'BatchMode=yes',
+    '-o', 'ConnectTimeout=8',
+    '-o', 'StrictHostKeyChecking=accept-new',
+    '-o', 'ControlMaster=auto',
+    '-o', 'ControlPersist=120',
+    '-o', 'ControlPath=/tmp/my-homepage-ssh-%C',
+    '-p', String(host.port || 22),
+  ]
+  if (host.authType === 'key' && host.keyPath && existsSync(host.keyPath)) {
+    args.push('-i', host.keyPath, '-o', 'IdentitiesOnly=yes')
+  }
+  args.push('--', `${host.username || 'root'}@${host.address}`)
+  return args
+}
+
+/** 带退避重试的远程主机发现：连接失败/超时/输出中断自动重试，仍失败返回 { error } */
+async function discoverRemoteHost(host, doFetch, now) {
+  if (host.authType === 'password') {
+    return { error: '该主机使用密码认证，自动探测需要密钥（BatchMode）；请在监控设置改为密钥认证' }
+  }
+  const attempts = REMOTE_RETRY_DELAYS.length + 1
   let lastErr = ''
   for (let attempt = 0; attempt < attempts; attempt++) {
     if (attempt > 0) {
-      const delay = REMOTE_GIT_RETRY_DELAYS[Math.min(attempt - 1, REMOTE_GIT_RETRY_DELAYS.length - 1)]
-      console.log(`[probe] 远程 git ${meta.id} 检查失败：${lastErr}，${Math.round(delay / 1000)}s 后自动重试（${attempt + 1}/${attempts}）`)
+      const delay = REMOTE_RETRY_DELAYS[Math.min(attempt - 1, REMOTE_RETRY_DELAYS.length - 1)]
+      console.log(`[probe] 远程发现 ${host.id} 失败：${lastErr}，${Math.round(delay / 1000)}s 后自动重试（${attempt + 1}/${attempts}）`)
       await sleep(delay)
     }
     try {
-      const info = await runRemoteGitOnce(meta, dir, doFetch, now)
-      if (info) {
-        // 公网服务器 = 线上机：仅允许 pull，前端按线上语义展示（线上已改/线上提交 = 违规）
-        if (meta.env === 'public') info.production = true
-        if (attempt > 0) console.log(`[probe] 远程 git ${meta.id} 重试成功`)
-        return info
+      const args = remoteSshArgs(host)
+      args.push(buildRemoteDiscoverScript(host.appRoot, doFetch))
+      const { stdout } = await execFileAsync('ssh', args, {
+        timeout: doFetch ? REMOTE_DISCOVER_TIMEOUT_FETCH_MS : REMOTE_DISCOVER_TIMEOUT_STATUS_MS,
+        encoding: 'utf8',
+      })
+      const parsed = parseRemoteDiscoverOutput(stdout)
+      if (parsed) {
+        if (attempt > 0) console.log(`[probe] 远程发现 ${host.id} 重试成功`)
+        return parsed
       }
       lastErr = '输出不完整（连接中断或超时）'
     } catch (err) {
-      lastErr = remoteGitErr(err, doFetch)
+      lastErr = remoteDiscoverErr(err, doFetch)
     }
   }
-  console.log(`[probe] 远程 git ${meta.id} 重试 ${attempts} 次均失败，标记 error（下一轮完整探测自动再试）`)
-  const errInfo = {
-    status: 'error',
-    repo: '',
-    branch: '',
-    uncommitted: 0,
-    untracked: 0,
-    ahead: 0,
-    behind: 0,
-    remoteOk: null,
-    checkedAt: now,
-    message: lastErr,
-  }
-  if (meta.env === 'public') errInfo.production = true
-  return errInfo
+  console.log(`[probe] 远程发现 ${host.id} 重试 ${attempts} 次均失败，本轮跳过该主机（下一轮探测自动再试）`)
+  return { error: lastErr }
 }
 
-/* ---------------- ss 解析 ---------------- */
+/* ---------------- 手工注解（apps.config.json：元数据与隐藏标记，不再是清单来源） ---------------- */
 
-function parseSsListen() {
-  let out
-  try {
-    out = execFileSync('ss', ['-tlnp'], { encoding: 'utf8' })
-  } catch (err) {
-    throw new Error(`无法执行 ss -tlnp：${err.message}`)
+function buildAnnotationIndex(appsCfg) {
+  const localByDir = new Map()
+  for (const a of appsCfg.apps ?? []) {
+    if (a?.directory) localByDir.set(normDir(a.directory), a)
   }
-
-  // 形如：LISTEN 0 511 0.0.0.0:3000 0.0.0.0:* users:(("node",pid=1596614,fd=21))
-  const listeners = []
-  for (const line of out.split('\n')) {
-    if (!line.startsWith('LISTEN')) continue
-    const cols = line.trim().split(/\s+/)
-    const local = cols[3]
-    if (!local) continue
-    const portStr = local.slice(local.lastIndexOf(':') + 1)
-    const port = Number(portStr)
-    if (!Number.isInteger(port) || port <= 0) continue
-
-    const addr = local.slice(0, local.lastIndexOf(':'))
-    // 0.0.0.0 / [::] / * 均为对外监听；127.0.0.1、::1 为仅本机
-    const external = addr === '0.0.0.0' || addr === '[::]' || addr === '*' || addr === '::'
-
-    const pids = [...line.matchAll(/pid=(\d+)/g)].map((m) => Number(m[1]))
-    listeners.push({ port, external, pids })
-  }
-  return listeners
-}
-
-/* ---------------- 进程归属 ---------------- */
-
-function procCwd(pid) {
-  try {
-    // 必须用 readlink：/proc/<pid>/cwd 是 magic symlink，readFileSync 会跟随它读目录内容而失败
-    return readlinkSync(`/proc/${pid}/cwd`)
-  } catch {
-    return null
-  }
-}
-
-function procCmdline(pid) {
-  try {
-    return readFileSync(`/proc/${pid}/cmdline`, { encoding: 'utf8' }).replace(/\0/g, ' ')
-  } catch {
-    return ''
-  }
-}
-
-/** 进程是否属于 /root/applications 下的某个应用目录，返回目录名或 null */
-function procAppDir(pid) {
-  const cwd = procCwd(pid)
-  const candidates = [cwd]
-  const cmdline = procCmdline(pid)
-  if (cmdline) candidates.push(cmdline)
-  for (const cand of candidates) {
-    if (!cand || !cand.startsWith(APPS_ROOT + '/')) continue
-    const rest = cand.slice(APPS_ROOT.length + 1)
-    const seg = rest.split('/')[0]
-    if (seg) return seg
-  }
-  return null
-}
-
-/* ---------------- 端口连通性兜底 ---------------- */
-
-function tcpProbe(port, host = '127.0.0.1') {
-  return new Promise((resolve) => {
-    const socket = net.connect({ port, host })
-    const done = (ok) => {
-      socket.destroy()
-      resolve(ok)
+  const remoteList = []
+  for (const a of appsCfg.remoteApps ?? []) {
+    let hostAddr = String(a?.host || '')
+    if (!hostAddr && a?.healthUrl) {
+      try { hostAddr = new URL(a.healthUrl).hostname } catch { /* 忽略 */ }
     }
-    socket.setTimeout(TCP_TIMEOUT_MS)
-    socket.once('connect', () => done(true))
-    socket.once('timeout', () => done(false))
-    socket.once('error', () => done(false))
-  })
+    remoteList.push({ meta: a, hostAddr: hostAddr || null })
+  }
+  return { localByDir, remoteList }
+}
+
+/** 为发现的应用目录匹配注解：本机按目录精确匹配；远程按 主机地址 + (gitDir/目录) 匹配 */
+function matchAnnotation(index, dirPath, hostAddr) {
+  const dir = normDir(dirPath)
+  if (!hostAddr) return index.localByDir.get(dir) ?? null
+  const base = path.basename(dir)
+  let hit = index.remoteList.find(
+    (r) => r.hostAddr === hostAddr && (normDir(r.meta?.gitDir) === dir || normDir(r.meta?.directory) === dir),
+  )
+  if (!hit) {
+    hit = index.remoteList.find((r) => r.hostAddr === hostAddr && r.meta?.id === base)
+  }
+  return hit?.meta ?? null
 }
 
 /* ---------------- 互斥锁：避免完整探测与快速探测同时写 apps.json ---------------- */
-
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
 function pidAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false
@@ -819,286 +844,277 @@ async function main() {
 }
 
 async function runProbe(NO_FETCH) {
-  const config = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
-  const metaById = new Map()
-  for (const app of config.apps ?? []) {
-    if (!app.id || !app.directory) {
-      throw new Error(`apps.config.json 存在缺少 id/directory 的条目：${JSON.stringify(app)}`)
-    }
-    metaById.set(app.id, app)
-  }
-  // 标记 exclude 的应用不探测、不展示（如暂无可用 Web 服务的项目）
-  const excludedDirs = new Set(
-    (config.apps ?? []).filter((a) => a.exclude).map((a) => path.basename(a.directory)),
-  )
+  const appsCfg = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
+  const monCfg = JSON.parse(readFileSync(MONITOR_CONFIG_FILE, 'utf8'))
+  const hosts = (monCfg.hosts ?? []).filter((h) => h && h.id)
+  const localHost = hosts.find((h) => h.type === 'local')
+  const remoteHosts = hosts.filter((h) => h.type === 'ssh' && h.address)
+  const index = buildAnnotationIndex(appsCfg)
+  const now = new Date().toISOString()
 
-  const listeners = parseSsListen()
-  // 端口 → 是否对外监听（含无进程归属的端口，如 nginx 直接托管的本站 80）
-  const listenerExternal = new Map()
-  for (const l of listeners) {
-    listenerExternal.set(l.port, (listenerExternal.get(l.port) ?? false) || l.external)
-  }
-
-  // 端口归属：port → { appDir, external }（同端口可能多 PID，取其一即可）
-  const portOwner = new Map() // port -> { appDir, external }
-  for (const l of listeners) {
-    let owner = portOwner.get(l.port)
-    for (const pid of l.pids) {
-      const dir = procAppDir(pid)
-      if (dir) {
-        owner = { appDir: dir, external: owner?.external || l.external }
-        break
-      }
-    }
-    if (owner && !l.external) {
-      // 全部命中进程但只有 loopback 监听时，保持 external=false
-      const anyExternal = listeners.some(
-        (x) => x.port === l.port && x.external,
-      )
-      if (!anyExternal) owner.external = false
-    }
-    if (owner && !portOwner.has(l.port)) portOwner.set(l.port, owner)
-  }
-
-  // 按应用聚合监听端口（保留每个端口自己的对外属性）
-  const foundByApp = new Map() // appId -> { ports: [{ port, external }] }
-  for (const [port, owner] of portOwner) {
-    const rec = foundByApp.get(owner.appDir) ?? { ports: [] }
-    rec.ports.push({ port, external: owner.external })
-    foundByApp.set(owner.appDir, rec)
-  }
-
-  /**
-   * 主端口选择：配置的 expectedPort 优先锚定（目录下可能有非 Web 的附属监听，
-   * 如仅本机的 sshmockd）；否则优先最小的对外端口；全为仅本机时取最小值。
-   */
-  function pickPrimary(ports, expectedPort) {
-    const sorted = [...ports].sort((a, b) => a.port - b.port)
+  /** 主端口选择：expectedPort 锚定 → 最小对外端口 → 最小端口；附加端口只保留对外监听 */
+  function pickPort(candidates, expectedPort) {
+    if (!candidates.length) return { port: null, external: false, extraPorts: [] }
+    const sorted = [...candidates].sort((a, b) => a.port - b.port)
     const expected = Number(expectedPort)
     const anchor = Number.isInteger(expected) ? sorted.find((p) => p.port === expected) : null
     const primary = anchor ?? sorted.find((p) => p.external) ?? sorted[0]
     return {
-      primary,
-      // 附加端口只保留对外监听的：仅本机的附属监听（如本站网关 8301）外部无法访问，展示只会造成困惑
+      port: primary.port,
+      external: primary.external,
       extraPorts: sorted.filter((p) => p !== primary && p.external).map((p) => p.port),
     }
   }
 
-  const now = new Date().toISOString()
-  const results = []
-  const discovered = new Set()
-
-  // 1) 已登记的应用
-  for (const meta of config.apps ?? []) {
-    if (meta.exclude) continue
-
-    const configuredKinds = normKinds(meta.kinds, meta.type === 'app' ? ['app'] : ['web'])
-    let detected = { forms: [], languages: [], frontend: [], backend: [] }
-    try {
-      detected = detectStack(meta.directory)
-    } catch {
-      /* 识别失败时保持空结果，不影响探测 */
-    }
-    const kinds = [...new Set([...configuredKinds, ...detected.forms.filter((f) => f !== 'web')])]
-    const languages = pickList(meta.languages, detected.languages)
-    const frontend = pickList(meta.frontend, detected.frontend)
-    const backend = pickList(meta.backend, detected.backend)
-    const env = meta.env === 'public' ? 'public' : 'lan'
-
-    // 离线应用（纯 APP / 小程序，分类不含 web）：不做端口探测，
-    // 状态显示灰色「离线应用」，不产生访问链接；分类含 web 则照常探测
-    if (!kinds.includes('web')) {
-      results.push({
-        id: meta.id,
-        name: meta.name || meta.id,
-        description: meta.description || '',
-        directory: meta.directory,
-        port: null,
-        expectedPort: meta.expectedPort ?? null,
-        extraPorts: [],
-        external: false,
-        status: 'down',
-        kinds,
-        env,
-        https: Boolean(meta.https),
-        languages,
-        frontend,
-        backend,
-        github: meta.github || '',
-        tags: meta.tags || [],
-        icon: meta.icon || '📱',
-        pending: false,
-        appOnly: true,
-      })
-      continue
-    }
-
-    const dirName = path.basename(meta.directory)
-    const found = foundByApp.get(dirName)
-
-    let port = null
-    let external = false
-    let status = 'down'
-    let extraPorts = []
-
-    if (found) {
-      status = 'running'
-      // 配置了 expectedPort 且该端口确实在监听、又不归属其他应用时，优先用它：
-      // 项目目录里可能挂着附属进程（如本站的监控网关 8301），cwd 会被误命中，
-      // 而真正对外服务的 nginx 80 / docker 端口往往没有可归属的进程。
-      const expected = Number(meta.expectedPort)
-      const expectedOwner = Number.isInteger(expected) ? portOwner.get(expected) : undefined
-      const preferExpected =
-        Number.isInteger(expected) &&
-        listenerExternal.has(expected) &&
-        (!expectedOwner || expectedOwner.appDir === dirName) &&
-        !found.ports.some((p) => p.port === expected)
-      if (preferExpected) {
-        port = expected
-        external = listenerExternal.get(expected) ?? false
-        extraPorts = found.ports.filter((p) => p.external).map((p) => p.port) // 仅本机的附属监听不进附加端口
-      } else {
-        const { primary, extraPorts: rest } = pickPrimary(found.ports, meta.expectedPort)
-        port = primary.port
-        external = primary.external
-        extraPorts = rest
-      }
-    } else {
-      // 兜底：进程匹配不到（如 nginx 托管的本站、docker 部署、无权限读 /proc），
-      // 直接探 expectedPort；是否对外监听从 ss 端口表取，避免误标「仅本机」
-      const expected = Number(meta.expectedPort)
-      if (Number.isInteger(expected) && (await tcpProbe(expected))) {
-        status = 'running'
-        port = expected
-        external = listenerExternal.get(expected) ?? false
-      }
-    }
-
-    results.push({
-      id: meta.id,
-      name: meta.name || meta.id,
-      description: meta.description || '',
-      directory: meta.directory,
-      port,
-      expectedPort: meta.expectedPort ?? null,
-      extraPorts,
-      external,
-      status,
+  /** 由目录路径 + 注解 + 归属结果组装一个 apps.json 条目 */
+  function buildEntry({ dirPath, host, meta, port, external, extraPorts, running, gitInfo, detected }) {
+    const isRemote = host.type !== 'local'
+    const hostAddr = isRemote ? host.address : ''
+    const group = String(host.group || '内网')
+    const env = isRemote ? (/公网|public/i.test(group) ? 'public' : 'lan') : 'lan'
+    const configuredKinds = normKinds(meta?.kinds, ['web'])
+    const kinds = [...new Set([...configuredKinds, ...(detected?.forms ?? []).filter((f) => f !== 'web')])]
+    const hidden = Boolean(meta?.hidden || meta?.exclude)
+    const appOnly = !kinds.includes('web')
+    // 纯 APP / 小程序远程条目没有可访问网页：不要用端口拼出一个错误的本地链接
+    const url = String(meta?.url || '').trim() || ''
+    const dirName = path.basename(dirPath)
+    return {
+      id: meta?.id || dirName, // 全局唯一性在调用方统一处理
+      hostId: host.id,
+      hostName: host.name || host.id,
+      hostGroup: group,
+      name: String(meta?.name || '') || dirName,
+      description: String(meta?.description || '') || '',
+      directory: dirPath,
+      port: appOnly ? null : port,
+      expectedPort: meta?.expectedPort ?? null,
+      extraPorts: appOnly ? [] : extraPorts,
+      external: Boolean(external),
+      status: running ? 'running' : 'down',
       kinds,
       env,
-      https: Boolean(meta.https),
-      languages,
-      frontend,
-      backend,
-      github: meta.github || '',
-      tags: meta.tags || [],
-      icon: meta.icon || '📦',
-      pending: false,
-    })
+      https: Boolean(meta?.https),
+      languages: pickList(meta?.languages, detected?.languages ?? []),
+      frontend: pickList(meta?.frontend, detected?.frontend ?? []),
+      backend: pickList(meta?.backend, detected?.backend ?? []),
+      github: String(meta?.github || '') || '',
+      tags: Array.isArray(meta?.tags) ? meta.tags : normList(meta?.tags),
+      icon: String(meta?.icon || '') || (env === 'public' ? '☁️' : isRemote ? '🖥️' : '📦'),
+      hidden,
+      pending: !meta,
+      remote: isRemote,
+      ...(hostAddr ? { host: hostAddr } : {}),
+      ...(isRemote ? { location: String(meta?.location || '').trim() || group } : {}),
+      ...(appOnly ? { appOnly: true } : {}),
+      ...(url ? { url } : {}),
+      ...(gitInfo ? { git: gitInfo } : { git: null }),
+    }
   }
 
-  // 2) 自动发现未登记的应用
-  const registeredDirs = new Set((config.apps ?? []).map((a) => path.basename(a.directory)))
-  for (const [dirName, found] of foundByApp) {
-    if (registeredDirs.has(dirName) || excludedDirs.has(dirName) || discovered.has(dirName)) continue
-    discovered.add(dirName)
-    const { primary, extraPorts: rest } = pickPrimary(found.ports, null)
-    let detected = { forms: [], languages: [], frontend: [], backend: [] }
+  const results = []
+
+  /* ---- 1) 本机主机：目录发现 + ss/proc 归属 + 技术栈识别 + 逐仓 git ---- */
+  if (localHost) {
+    const appRoot = normDir(localHost.appRoot) || '/root/applications'
+    let dirs = []
     try {
-      detected = detectStack(`${APPS_ROOT}/${dirName}`)
-    } catch {
-      /* 识别失败时保持空结果 */
+      dirs = discoverLocalDirs(appRoot)
+    } catch (err) {
+      console.error(`[probe] 本机探测目录不可读（${appRoot}）：${err.message}`)
     }
-    results.push({
-      id: dirName,
-      name: dirName,
-      description: '（自动发现）该应用尚未在 scripts/apps.config.json 中登记，请补充名称、简介与 GitHub 地址。',
-      directory: `${APPS_ROOT}/${dirName}`,
-      port: primary.port,
-      expectedPort: null,
-      extraPorts: rest,
-      external: primary.external,
-      status: 'running',
-      kinds: ['web', ...detected.forms.filter((f) => f !== 'web')],
-      env: 'lan',
-      https: false,
-      languages: detected.languages,
-      frontend: detected.frontend,
-      backend: detected.backend,
-      github: '',
-      tags: [],
-      icon: '🆕',
-      pending: true,
-    })
+    const listeners = parseSsListen()
+    const listenerExternal = new Map(listeners.map((l) => [l.port, l.external]))
+    // 端口 → 属主 cwd（第一个可读 cwd / cmdline 兜底）；仅当 cwd 落在某个发现的应用目录内才算真实归属
+    const ownerCwd = new Map()
+    for (const l of listeners) ownerCwd.set(l.port, listenerOwnerCwd(l, dirs))
+    const attributed = new Map() // port -> dirPath（仅 cwd 命中应用目录的端口）
+    for (const [port, cwd] of ownerCwd) {
+      if (!cwd) continue
+      const dir = dirs.find((d) => cwdUnderDir(cwd, d))
+      if (dir) attributed.set(port, dir)
+    }
+
+    for (const dir of dirs) {
+      const meta = index.localByDir.get(dir) ?? null
+      const detected = (() => { try { return detectStack(dir) } catch { return null } })()
+      const configuredKinds = normKinds(meta?.kinds, null)
+      const kinds = [...new Set([...(configuredKinds ?? []), ...(detected?.forms ?? []).filter((f) => f !== 'web')])]
+      const appOnly = configuredKinds ? !kinds.includes('web') : false // 未注解目录默认按 Web 探测
+
+      const candidates = []
+      for (const [port, d] of attributed) {
+        if (d === dir) candidates.push({ port, external: listenerExternal.get(port) ?? false })
+      }
+      const expected = Number(meta?.expectedPort)
+      // expectedPort 已被其他应用目录的进程归属时不认领，避免错误抢端口
+      const expectedOwnedByOther = Number.isInteger(expected)
+        && attributed.has(expected) && attributed.get(expected) !== dir
+      let port = null, external = false, extraPorts = [], running = false
+      if (appOnly) {
+        // 离线应用（纯 APP / 小程序 / 电视 / CLI）：不做端口探测
+      } else if (Number.isInteger(expected) && !expectedOwnedByOther && listenerExternal.has(expected)
+        && !candidates.some((c) => c.port === expected)) {
+        // expectedPort 优先锚定：目录内可能挂着附属进程（如本站的监控网关 8301，cwd 会被误命中），
+        // 而真正对外服务的入口（nginx :80）往往没有可归属的进程 —— 只要 expectedPort 正在监听
+        // 且不归属其他应用，就优先作为主端口（与本目录已归属端口一并计入附加端口）
+        port = expected
+        external = listenerExternal.get(expected) ?? false
+        extraPorts = candidates.filter((c) => c.external).map((c) => c.port)
+        running = true
+      } else if (candidates.length) {
+        const picked = pickPort(candidates, meta?.expectedPort)
+        port = picked.port; external = picked.external; extraPorts = picked.extraPorts
+        running = true
+      } else {
+        // 兜底：进程匹配不到（nginx 托管、docker 等）→ 探 expectedPort TCP 连通性
+        if (Number.isInteger(expected) && !expectedOwnedByOther
+          && (listenerExternal.has(expected) || (await tcpProbe(expected)))) {
+          port = expected
+          external = listenerExternal.get(expected) ?? false
+          running = true
+        }
+      }
+
+      results.push(buildEntry({
+        dirPath: dir, host: localHost, meta, port, external, extraPorts, running,
+        gitInfo: null, detected: appOnly ? detected : detected, // 形式识别始终运行（含离线应用）
+        // git 在后文统一填充（依赖 remoteOkMap）
+      }))
+      results[results.length - 1]._localDir = dir
+      results[results.length - 1]._localAppOnly = appOnly
+    }
   }
 
-  // 2.4) 远程应用（云服务器等）：HTTP 健康接口探查
-  for (const meta of config.remoteApps ?? []) {
-    if (!meta.id || !meta.healthUrl) {
-      throw new Error(`remoteApps 存在缺少 id/healthUrl 的条目：${JSON.stringify(meta)}`)
-    }
-    results.push(await probeRemote(meta, now))
+  /* ---- 2) 远程主机（外机 / 公网）：每台一次 SSH 发现 ---- */
+  const remoteDiscoveries = new Map() // host.id -> parsed | { error }
+  if (remoteHosts.length) {
+    const started = Date.now()
+    const jobs = remoteHosts.filter((h) => normDir(h.appRoot))
+    const outcomes = await mapLimit(jobs, REMOTE_HOST_CONCURRENCY, (h) => discoverRemoteHost(h, !NO_FETCH, now))
+    jobs.forEach((h, i) => remoteDiscoveries.set(h.id, outcomes[i]))
+    const skipped = remoteHosts.length - jobs.length
+    console.log(
+      `[probe] 远程发现 ${jobs.length} 台（并发 ${Math.min(REMOTE_HOST_CONCURRENCY, jobs.length)}）${skipped ? `，跳过 ${skipped} 台（未设置 appRoot）` : ''}，用时 ${Date.now() - started}ms`,
+    )
   }
 
-  // 2.5) 全局默认顺序：配置 order 数组（id 列表）时按其排列，未列出的应用按原相对顺序排在后面
-  if (Array.isArray(config.order) && config.order.length) {
-    const rank = new Map(config.order.map((id, i) => [id, i]))
+  for (const host of remoteHosts) {
+    const disc = remoteDiscoveries.get(host.id)
+    if (!disc) continue
+    if (disc.error) {
+      console.log(`  - ✖ ${host.id}（${host.address}）发现失败：${disc.error}`)
+      continue
+    }
+    const production = /公网|public/i.test(String(host.group || ''))
+    const cwds = disc.cwds
+    // 端口 → 归属目录（任一属主进程 cwd 命中）
+    const attributed = new Map() // port -> dirPath
+    const portExternal = new Map()
+    for (const p of disc.ports) {
+      const addr = p.local.slice(0, p.local.lastIndexOf(':'))
+      portExternal.set(p.port, addr === '0.0.0.0' || addr === '[::]' || addr === '*' || addr === '::')
+      if (attributed.has(p.port)) continue
+      const hit = disc.dirs.find((d) => p.pids.some((pid) => {
+        const cwd = cwds.get(pid)
+        return cwd && cwdUnderDir(cwd, d.path)
+      }))
+      if (hit) attributed.set(p.port, hit.path)
+    }
+    for (const d of disc.dirs) {
+      const meta = matchAnnotation(index, d.path, host.address)
+      const candidates = []
+      for (const [port, dirPath] of attributed) {
+        if (dirPath === d.path) candidates.push({ port, external: portExternal.get(port) ?? false })
+      }
+      // 远程应用把注解访问地址的端口视作期望端口锚定：对外入口常由 nginx 等托管（无进程 cwd 归属），
+      // 仅按 cwd 归属会选到仅本机的后端端口（如 Flask 127.0.0.1:5000 而非 nginx :80）
+      let expected = Number(meta?.expectedPort)
+      if (!Number.isInteger(expected) && meta?.url) {
+        try {
+          const u = new URL(String(meta.url))
+          expected = Number(u.port) || (u.protocol === 'https:' ? 443 : 80)
+        } catch { /* 忽略 */ }
+      }
+      const expectedOwnedByOther = Number.isInteger(expected)
+        && attributed.has(expected) && attributed.get(expected) !== d.path
+      const running = [...cwds.values()].some((cwd) => cwdUnderDir(cwd, d.path)) || candidates.length > 0
+      let picked
+      if (Number.isInteger(expected) && !expectedOwnedByOther
+        && disc.ports.some((p) => p.port === expected)
+        && !candidates.some((c) => c.port === expected)) {
+        picked = {
+          port: expected,
+          external: portExternal.get(expected) ?? true,
+          extraPorts: candidates.filter((c) => c.external).map((c) => c.port),
+        }
+      } else {
+        picked = pickPort(candidates, expected)
+        // 没有归属端口也没有可锚定的期望端口时保持空（避免 ":—" 由前端兜底）
+      }
+      const detected = null // 远程目录不做技术栈识别（无本地文件系统），以注解为准
+      results.push(buildEntry({
+        dirPath: d.path, host, meta,
+        port: picked.port, external: picked.external, extraPorts: picked.extraPorts,
+        running, gitInfo: gitInfoFromDiscover(d, now, production), detected,
+      }))
+    }
+  }
+
+  /* ---- 3) id 全局唯一化（跨主机目录同名时加主机前缀） ---- */
+  const seenIds = new Map()
+  for (const r of results) {
+    if (seenIds.has(r.id)) {
+      const n = seenIds.get(r.id) + 1
+      seenIds.set(r.id, n)
+      r.id = `${r.hostId}-${r.id}`
+    } else {
+      seenIds.set(r.id, 1)
+    }
+  }
+
+  /* ---- 4) 本机 git 同步检测：并发 fetch 校准（--no-fetch 跳过网络），再逐仓核对 ---- */
+  const localDirs = [...new Set(results.filter((r) => r._localDir).map((r) => r._localDir))]
+    .filter((d) => existsSync(path.join(d, '.git')))
+  const remoteOkMap = new Map()
+  if (localDirs.length) {
+    if (NO_FETCH) {
+      for (const d of localDirs) remoteOkMap.set(d, null) // 未知，沿用上次远端快照
+    } else {
+      const started = Date.now()
+      const outcomes = await mapLimit(localDirs, FETCH_CONCURRENCY, fetchRepo)
+      localDirs.forEach((d, i) => remoteOkMap.set(d, outcomes[i]))
+      const failed = outcomes.filter((ok) => !ok).length
+      console.log(
+        `[probe] fetch ${localDirs.length} 个仓库，并发 ${Math.min(FETCH_CONCURRENCY, localDirs.length)}，用时 ${Date.now() - started}ms${failed ? `，失败 ${failed}` : ''}`,
+      )
+    }
+    for (const r of results) {
+      if (!r._localDir) continue
+      // 离线应用同样参与 git 同步检查（有仓库时），只是不做端口探测
+      r.git = gitSyncInfo(r._localDir, remoteOkMap.get(r._localDir) ?? null, now)
+    }
+  }
+
+  /* ---- 5) 全局默认顺序 + github 兜底 ---- */
+  if (Array.isArray(appsCfg.order) && appsCfg.order.length) {
+    const rank = new Map(appsCfg.order.map((id, i) => [id, i]))
     results.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity))
   }
-
-  // 3) git 源码同步检测：先并发 fetch 校准远端快照（--no-fetch 跳过网络），再逐仓核对
-  //    并发数可用 PROBE_FETCH_CONCURRENCY 覆盖（默认 6）；只 fetch 当前分支所属远端，不拉 tags
-  const gitDirs = [...new Set(results.map((r) => r.directory).filter(Boolean))].filter((d) =>
-    existsSync(path.join(d, '.git')),
-  )
-  const remoteOkMap = new Map()
-  if (NO_FETCH) {
-    for (const d of gitDirs) remoteOkMap.set(d, null) // 未知，沿用上次远端快照
-  } else {
-    const started = Date.now()
-    const outcomes = await mapLimit(gitDirs, FETCH_CONCURRENCY, fetchRepo)
-    gitDirs.forEach((d, i) => remoteOkMap.set(d, outcomes[i]))
-    const failed = outcomes.filter((ok) => !ok).length
-    console.log(
-      `[probe] fetch ${gitDirs.length} 个仓库，并发 ${Math.min(FETCH_CONCURRENCY, gitDirs.length)}，用时 ${Date.now() - started}ms${failed ? `，失败 ${failed}` : ''}`,
-    )
-  }
-  // 3.5) 外机项目目录 git 检查：每台一次 SSH 跑完 fetch+status+ahead/behind
-  //      并发默认 2；瞬态失败按退避自动重试，仍失败标记 error，下一轮完整探测自动再试
-  const remoteGitMap = new Map()
-  const remoteGitJobs = (config.remoteApps ?? []).filter((m) => m.id && m.gitDir)
-  if (remoteGitJobs.length) {
-    const started = Date.now()
-    const outcomes = await mapLimit(
-      remoteGitJobs,
-      REMOTE_GIT_CONCURRENCY,
-      (m) => remoteGitSyncInfo(m, m.gitDir, !NO_FETCH, now),
-    )
-    remoteGitJobs.forEach((m, i) => remoteGitMap.set(m.id, outcomes[i]))
-    console.log(
-      `[probe] 远程 git 检查 ${remoteGitJobs.length} 台外机，并发 ${Math.min(REMOTE_GIT_CONCURRENCY, remoteGitJobs.length)}${NO_FETCH ? '（免 fetch）' : ''}，用时 ${Date.now() - started}ms`,
-    )
-  }
   for (const r of results) {
-    // 远程应用没有本地目录：配置了 gitDir 的走外机检查结果，否则不做 git 检查。
-    // map 只在 r.remote 时查（id 全局唯一由 sanitize 保证，自动发现的本地条目防御性排除）
-    r.git = r.remote
-      ? (remoteGitMap.get(r.id) ?? null)
-      : r.directory
-        ? gitSyncInfo(r.directory, remoteOkMap.get(r.directory) ?? null, now)
-        : null
-    // 配置未填 github 时，用仓库远程地址兜底生成网页链接
     if (!r.github && r.git?.repo?.startsWith('github.com/')) {
       r.github = `https://${r.git.repo}`
     }
+    delete r._localDir
+    delete r._localAppOnly
   }
 
-  // 4) 输出（已登记在前，自动发现的在后，各自保持稳定顺序）
+  /* ---- 6) 输出 ---- */
   // probedAt 取探测完成时刻而非开始时刻：前端「最后探测」显示的是数据真正就绪的时间
   const finishedAt = new Date().toISOString()
   const output = {
     probedAt: finishedAt,
-    page: config.page ?? {},
+    page: appsCfg.page ?? {},
     apps: results,
   }
   const body = JSON.stringify(output, null, 2) + '\n'
@@ -1113,25 +1129,18 @@ async function runProbe(NO_FETCH) {
   const gitCounted = results.filter((a) => a.git).length
   const synced = results.filter((a) => a.git?.status === 'synced').length
   console.log(
-    `[probe] ${finishedAt}  应用 ${results.length} 个（运行中 ${running}），git 同步 ${synced}/${gitCounted}，写入：${written.join(', ') || '（无，目标目录均不存在）'}`,
+    `[probe] ${finishedAt}  主机 ${hosts.length} 台，应用 ${results.length} 个（运行中 ${running}），git 同步 ${synced}/${gitCounted}，写入：${written.join(', ') || '（无，目标目录均不存在）'}`,
   )
   for (const r of results) {
-    if (r.remote) {
-      const info = r.remoteInfo ?? {}
-      const ver = info.version ? ` v${info.version}` : ''
-      const ms = info.responseMs != null ? ` ${info.responseMs}ms` : ''
-      const err = info.error ? `（${info.error}）` : ''
-      console.log(`  - ${r.status === 'running' ? '●' : '○'} ${r.id}  ${r.url}  ${r.status === 'running' ? '在线' : '离线'}${ver}${ms}${err}${gitLogTag(r.git)}`)
-      continue
-    }
+    const hostTag = `[${r.hostId}]`
     if (r.appOnly) {
-      console.log(`  - ○ ${r.id}  [离线应用]`)
+      console.log(`  - ○ ${hostTag} ${r.id}  [离线应用]${r.hidden ? '  [已隐藏]' : ''}${r.pending ? '  [待补充]' : ''}`)
       continue
     }
     const ports = [r.port, ...(r.extraPorts ?? [])].filter(Boolean)
     const suffix = r.status === 'running' && !r.external ? '（仅本机）' : ''
     console.log(
-      `  - ${r.status === 'running' ? '●' : '○'} ${r.id}  ${ports.join(', ') || '未监听'}${suffix}${gitLogTag(r.git)}${r.pending ? '  [待补充]' : ''}`,
+      `  - ${r.status === 'running' ? '●' : '○'} ${hostTag} ${r.id}  ${ports.join(', ') || '未监听'}${suffix}${gitLogTag(r.git)}${r.hidden ? '  [已隐藏]' : ''}${r.pending ? '  [待补充]' : ''}`,
     )
   }
   if (written.length === 0) {
