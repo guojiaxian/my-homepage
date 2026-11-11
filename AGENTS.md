@@ -414,7 +414,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 ### 8.4 设置面板（`src/components/SettingsPanel.vue`）
 
-`Teleport` 到 body 的模态框，三区块：页面信息 / 本机应用 / 云服务器应用。**应用区块是紧凑列表**（每行：图标 + 名称 + mono id + 摘要行「应用形式 · 部署位置 · 端口/主机」，右侧 ›，加「新 / 已隐藏」标记；标题栏带计数与「＋添加」），**点击条目弹出嵌套编辑弹窗**（z-index 60 盖在面板上，含全部字段；底部「删除此条目」需 confirm，「完成 / ✕ / 点遮罩」关闭）。**新增**按钮直接创建空条目并立即打开弹窗。弹窗内修改均为**草稿**（直接改 form 里的响应式对象），仍由面板底部「保存」一次性 POST `/api/config`，保存语义不变（见 §8.1 `onSaved`，保存后立即关闭，探测在后台跑）。字段能力不变：**应用形式**（`kinds` 多选）决定是否探测（勾 Web 才探测）、**主要语言 / 前端框架 / 后端框架**（逗号分隔）、**部署位置**（`env`）、本机应用另有 **使用 HTTPS** / `exclude`；本机技术栈留空用自动识别（保存后变手动值），远程需手填；「期望端口」旁显示实际探测端口，不一致时点「采用」写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；旧 `type: "app"` 回退 `["app"]`）。注意：`mini-btn` 曾只在 AppCard 的 scoped 样式里定义（面板按钮无样式），2026-11-07 起面板自带文字按钮样式。**双向同步（2026-11-11）**：远程应用编辑弹窗底部有「同步到监控中心」勾选（`monitorSync`）；外机/公网列表行统一显示「已同步监控」徽标——检测以 `/api/monitor/sync-check` 的 `pairs[].appId` 为准，并兜底 `monitorSync` / `syncSource==='monitor'`，因此「应用为主」和「主机为主（appSync）」两个方向的配对都会带标志，title 显示「已与监控中心主机双向同步」；设置面板关闭同步检查弹窗后会重新拉取配对。本机应用弹窗显示禁用勾选「监控自动跟踪」（本机目录本来就自动并入监控，无需勾选）。机制见 §17。
+`Teleport` 到 body 的模态框，三区块：页面信息 / 本机应用 / 云服务器应用。**应用区块是紧凑列表**（每行：图标 + 名称 + mono id + 摘要行「应用形式 · 部署位置 · 端口/主机」，右侧 ›，加「新 / 已隐藏」标记；标题栏带计数与「＋添加」），**点击条目弹出嵌套编辑弹窗**（z-index 60 盖在面板上，含全部字段；底部「删除此条目」需 confirm，「完成 / ✕ / 点遮罩」关闭）。**新增**按钮直接创建空条目并立即打开弹窗。弹窗内修改均为**草稿**（直接改 form 里的响应式对象），仍由面板底部「保存」一次性 POST `/api/config`，保存语义不变（见 §8.1 `onSaved`，保存后立即关闭，探测在后台跑）。字段能力不变：**应用形式**（`kinds` 多选）决定是否探测（勾 Web 才探测）、**主要语言 / 前端框架 / 后端框架**（逗号分隔）、**部署位置**（`env`）、本机应用另有 **使用 HTTPS** / `exclude`；本机技术栈留空用自动识别（保存后变手动值），远程需手填；「期望端口」旁显示实际探测端口，不一致时点「采用」写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；旧 `type: "app"` 回退 `["app"]`）。注意：`mini-btn` 曾只在 AppCard 的 scoped 样式里定义（面板按钮无样式），2026-11-07 起面板自带文字按钮样式。**双向同步（2026-11-11）**：远程应用编辑弹窗底部有「同步到监控中心」勾选（`monitorSync`）；外机/公网列表行统一显示「已同步监控」徽标——检测以 `/api/monitor/sync-check` 的 `pairs[].appId` 为准，并兜底 `monitorSync` / `syncSource==='monitor'`，因此「应用为主」和「主机为主（appSync）」两个方向的配对都会带标志，title 显示「已与监控中心主机双向同步」；设置面板关闭同步检查弹窗后会重新拉取配对。**本机应用同标志**：加载时并行 GET `/api/monitor/config`，`local` 主机 `effectiveDirs[].path` 精确包含 `apps[].directory`（且未勾选 exclude）即显示「已同步监控」，title 为「应用目录已被监控中心跟踪：<目录>」；2026-11-11 起 9 个本机应用全部命中。本机应用弹窗显示禁用勾选「监控自动跟踪」（本机目录本来就自动并入监控，无需勾选）。机制见 §17。
 
 ### 8.5 独立毛玻璃页面（`glass/`，访问 `/glass/`）
 
@@ -960,7 +960,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 
 ### 17.3 UI
 
-- 应用中心设置面板：远程应用编辑弹窗底部「同步到监控中心」勾选（title 说明机制与删除语义）；外机/公网列表行统一显示「已同步监控」徽标（`isMonitorSynced` 以 sync-check `pairs[].appId` 为主，兜底 `monitorSync` / `syncSource==='monitor'`，覆盖 appSync 方向）；本机应用弹窗显示禁用勾选「监控自动跟踪」。
+- 应用中心设置面板：远程应用编辑弹窗底部「同步到监控中心」勾选（title 说明机制与删除语义）；外机/公网列表行统一显示「已同步监控」徽标（`isMonitorSynced` 以 sync-check `pairs[].appId` 为主，兜底 `monitorSync` / `syncSource==='monitor'`，覆盖 appSync 方向）；本机应用列表同样显示该徽标（`isLocalMonitored`：`local` 主机 `effectiveDirs[].path` 精确包含 `apps[].directory` 且 `exclude` 非 true，title 为「应用目录已被监控中心跟踪」）；本机应用弹窗显示禁用勾选「监控自动跟踪」。
 - 监控设置：`MonitorHostEdit` SSH 主机「采集方式」下方「同步到应用中心」勾选（草稿/直连两模式均可）；主机行摘要加「来自应用中心 / 同步到应用中心」徽标。
 - glass-v2 未同步此功能（其设置弹窗本就未对齐主站，见 §8.8）。
 - **同步检查面板（2026-11-11）**：设置面板标题栏「同步检查」→ `src/components/SyncCheckPanel.vue`（z-index 66）——实时 GET `/api/monitor/sync-check`（monitor-server 只读计算三段：**已同步配对** pairs（含待对齐 diffs，如「主机名 A→B」，重同步/下次配置变更后对齐）、**同步异常** unpaired（勾选了但找不到同 id/同地址对端）、**可同步候选** candidates（同地址且两侧都没勾））；「强制重同步」POST `/api/monitor/sync-run`（方向一立即重跑 + `utimes` 唤醒方向二，两端点均需会话/CSRF）；候选行「应用为主 / 主机为主」一键配对（前端分别 POST `/api/config` 勾 monitorSync、GET+PUT `/api/monitor/config` 勾 appSync，等价于 UI 手工勾选）。

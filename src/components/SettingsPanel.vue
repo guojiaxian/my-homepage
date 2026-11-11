@@ -19,18 +19,38 @@ const detectedApps = ref(new Map())
 const syncOpen = ref(false)
 /* 已配对的应用 id：包含「应用 → 监控」和「监控 → 应用」两个方向，用于统一「已同步监控」标志 */
 const syncedAppIds = ref(new Set())
+/* 本机主机实际生效的监控目录；本机应用目录被自动并入 homepageDirs 后也显示同一标志 */
+const localMonitoredDirs = ref(new Set())
+
+const normDir = (p) => String(p || '').replace(/\/+$/, '')
 
 async function loadSyncedApps() {
-  try {
-    const d = await monApi('/api/monitor/sync-check')
-    syncedAppIds.value = new Set((d.pairs || []).map((p) => p.appId).filter(Boolean))
-  } catch {
-    syncedAppIds.value = new Set()
+  const [syncRes, cfgRes] = await Promise.allSettled([
+    monApi('/api/monitor/sync-check'),
+    monApi('/api/monitor/config'),
+  ])
+  syncedAppIds.value = syncRes.status === 'fulfilled'
+    ? new Set((syncRes.value.pairs || []).map((p) => p.appId).filter(Boolean))
+    : new Set()
+  if (cfgRes.status === 'fulfilled') {
+    const local = (cfgRes.value.hosts || []).find((h) => h.type === 'local')
+    localMonitoredDirs.value = new Set(
+      (local?.effectiveDirs || []).map((d) => normDir(d.path)).filter(Boolean),
+    )
+  } else {
+    localMonitoredDirs.value = new Set()
   }
 }
 
 function isMonitorSynced(a) {
   return Boolean(a?.monitorSync || a?.syncSource === 'monitor' || syncedAppIds.value.has(a?.id))
+}
+
+/* 本机应用：目录在 local 主机 effectiveDirs 中且未勾选「主页隐藏」即视为已纳入监控 */
+function isLocalMonitored(a) {
+  if (!a || a.exclude) return false
+  const dir = normDir(a.directory)
+  return Boolean(dir) && localMonitoredDirs.value.has(dir)
 }
 
 function monitorSyncTitle(a) {
@@ -350,6 +370,7 @@ async function save() {
                 </span>
                 <span v-if="!a.id" class="tag">新</span>
                 <span v-else-if="a.exclude" class="tag warn" title="已勾选「在主页隐藏」">已隐藏</span>
+                <span v-else-if="isLocalMonitored(a)" class="tag" :title="`应用目录已被监控中心跟踪：${a.directory}`">已同步监控</span>
                 <span class="app-row-arrow">›</span>
               </button>
             </div>
