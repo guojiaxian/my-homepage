@@ -414,7 +414,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 ### 8.4 设置面板（`src/components/SettingsPanel.vue`）
 
-`Teleport` 到 body 的模态框，三区块：页面信息 / 本机应用 / 云服务器应用。**应用区块是紧凑列表**（每行：图标 + 名称 + mono id + 摘要行「应用形式 · 部署位置 · 端口/主机」，右侧 ›，加「新 / 已隐藏」标记；标题栏带计数与「＋添加」），**点击条目弹出嵌套编辑弹窗**（z-index 60 盖在面板上，含全部字段；底部「删除此条目」需 confirm，「完成 / ✕ / 点遮罩」关闭）。**新增**按钮直接创建空条目并立即打开弹窗。弹窗内修改均为**草稿**（直接改 form 里的响应式对象），仍由面板底部「保存」一次性 POST `/api/config`，保存语义不变（见 §8.1 `onSaved`，保存后立即关闭，探测在后台跑）。字段能力不变：**应用形式**（`kinds` 多选）决定是否探测（勾 Web 才探测）、**主要语言 / 前端框架 / 后端框架**（逗号分隔）、**部署位置**（`env`）、本机应用另有 **使用 HTTPS** / `exclude`；本机技术栈留空用自动识别（保存后变手动值），远程需手填；「期望端口」旁显示实际探测端口，不一致时点「采用」写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；旧 `type: "app"` 回退 `["app"]`）。注意：`mini-btn` 曾只在 AppCard 的 scoped 样式里定义（面板按钮无样式），2026-11-07 起面板自带文字按钮样式。**双向同步（2026-11-11）**：远程应用编辑弹窗底部有「同步到监控中心」勾选（`monitorSync`，外机/公网列表行加「已同步监控 / 来自监控」徽标）；本机应用弹窗显示禁用勾选「监控自动跟踪」（本机目录本来就自动并入监控，无需勾选）。机制见 §17。
+`Teleport` 到 body 的模态框，三区块：页面信息 / 本机应用 / 云服务器应用。**应用区块是紧凑列表**（每行：图标 + 名称 + mono id + 摘要行「应用形式 · 部署位置 · 端口/主机」，右侧 ›，加「新 / 已隐藏」标记；标题栏带计数与「＋添加」），**点击条目弹出嵌套编辑弹窗**（z-index 60 盖在面板上，含全部字段；底部「删除此条目」需 confirm，「完成 / ✕ / 点遮罩」关闭）。**新增**按钮直接创建空条目并立即打开弹窗。弹窗内修改均为**草稿**（直接改 form 里的响应式对象），仍由面板底部「保存」一次性 POST `/api/config`，保存语义不变（见 §8.1 `onSaved`，保存后立即关闭，探测在后台跑）。字段能力不变：**应用形式**（`kinds` 多选）决定是否探测（勾 Web 才探测）、**主要语言 / 前端框架 / 后端框架**（逗号分隔）、**部署位置**（`env`）、本机应用另有 **使用 HTTPS** / `exclude`；本机技术栈留空用自动识别（保存后变手动值），远程需手填；「期望端口」旁显示实际探测端口，不一致时点「采用」写回。缺省值在面板加载时自动补全（本机 `lan`、远程 `public`；旧 `type: "app"` 回退 `["app"]`）。注意：`mini-btn` 曾只在 AppCard 的 scoped 样式里定义（面板按钮无样式），2026-11-07 起面板自带文字按钮样式。**双向同步（2026-11-11）**：远程应用编辑弹窗底部有「同步到监控中心」勾选（`monitorSync`）；外机/公网列表行统一显示「已同步监控」徽标——检测以 `/api/monitor/sync-check` 的 `pairs[].appId` 为准，并兜底 `monitorSync` / `syncSource==='monitor'`，因此「应用为主」和「主机为主（appSync）」两个方向的配对都会带标志，title 显示「已与监控中心主机双向同步」；设置面板关闭同步检查弹窗后会重新拉取配对。本机应用弹窗显示禁用勾选「监控自动跟踪」（本机目录本来就自动并入监控，无需勾选）。机制见 §17。
 
 ### 8.5 独立毛玻璃页面（`glass/`，访问 `/glass/`）
 
@@ -960,11 +960,11 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 
 ### 17.3 UI
 
-- 应用中心设置面板：远程应用编辑弹窗底部「同步到监控中心」勾选（title 说明机制与删除语义）；外机/公网列表行加「已同步监控 / 来自监控」徽标；本机应用弹窗显示禁用勾选「监控自动跟踪」。
+- 应用中心设置面板：远程应用编辑弹窗底部「同步到监控中心」勾选（title 说明机制与删除语义）；外机/公网列表行统一显示「已同步监控」徽标（`isMonitorSynced` 以 sync-check `pairs[].appId` 为主，兜底 `monitorSync` / `syncSource==='monitor'`，覆盖 appSync 方向）；本机应用弹窗显示禁用勾选「监控自动跟踪」。
 - 监控设置：`MonitorHostEdit` SSH 主机「采集方式」下方「同步到应用中心」勾选（草稿/直连两模式均可）；主机行摘要加「来自应用中心 / 同步到应用中心」徽标。
 - glass-v2 未同步此功能（其设置弹窗本就未对齐主站，见 §8.8）。
 - **同步检查面板（2026-11-11）**：设置面板标题栏「同步检查」→ `src/components/SyncCheckPanel.vue`（z-index 66）——实时 GET `/api/monitor/sync-check`（monitor-server 只读计算三段：**已同步配对** pairs（含待对齐 diffs，如「主机名 A→B」，重同步/下次配置变更后对齐）、**同步异常** unpaired（勾选了但找不到同 id/同地址对端）、**可同步候选** candidates（同地址且两侧都没勾））；「强制重同步」POST `/api/monitor/sync-run`（方向一立即重跑 + `utimes` 唤醒方向二，两端点均需会话/CSRF）；候选行「应用为主 / 主机为主」一键配对（前端分别 POST `/api/config` 勾 monitorSync、GET+PUT `/api/monitor/config` 勾 appSync，等价于 UI 手工勾选）。
-- **已建立的真实配对（2026-11-11）**：network-monitor（应用）⇄ netwatch（主机，10.8.14.200），应用为主——主机名已由「NetWatch 服务器」回写为「NetWatch 网络监控」，凭据/agent 模式/跟踪目录未动；study-log-cloud⇄aliyun、log-gpt-agent⇄lan-1103 仍为检查面板候选，可一键配对（自行选择事实源方向）。
+- **已建立的真实配对（2026-11-11）**：network-monitor（应用）⇄ netwatch（主机，10.8.14.200），应用为主——主机名已由「NetWatch 服务器」回写为「NetWatch 网络监控」；study-log-cloud⇄aliyun、log-gpt-agent⇄lan-1103 已按主机为主（`appSync`）配对，名称/分组/地址随之回写；三对均在应用列表显示统一「已同步监控」标志。
 
 ### 17.4 涉及文件与验证
 
@@ -989,7 +989,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - **服务与基础设施**：五个 systemd 单元 active + enabled；nginx 两处 server 块 location 齐全；8300/8301 仅回环。
 - **探测链路**：完整探测 12 应用（fetch 9 仓并发 6 ≈5.3s，3 台外机 git 检查 ≈8s），`public/` 与 `www/` 产物 md5 一致；线上机语义（aliyun production）正常。
 - **设置 API**：三个入口（直连/两个 Host）返回一致；非法 healthUrl / 重复 id 均 400；往返保存无损；`.bak` 自动备份。
-- **监控 API**：summary（4 主机在线）、sync-check（1 配对 + 2 候选）、config（effectiveDirs）、history 1h/24h/7d + 非法 range 400、procs、dirs/history、alerts、audit、401 门禁、CSRF 403、agent push/install.sh token 门禁。
+- **监控 API**：summary（4 主机在线）、sync-check（3 配对）、config（effectiveDirs）、history 1h/24h/7d + 非法 range 400、procs、dirs/history、alerts、audit、401 门禁、CSRF 403、agent push/install.sh token 门禁。
 - **终端 WS**：local + netwatch（agent 模式主机）echo 回显 PASS。
 - **前端**：`npm run build` 通过；主站表格 12 行、监控 4 主机卡、详情 6 canvas、设置面板、同步检查面板；/glass/（12 行）、/unslop/、/glass-v2/、/monitor/ stub 重定向——五端点 0 控制台/页面错误（Playwright 会话注入法，脚本 `.verify/sweep-systemtest.cjs`）。
 

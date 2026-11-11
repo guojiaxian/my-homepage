@@ -1,6 +1,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import SyncCheckPanel from './SyncCheckPanel.vue'
+import { monApi } from '../lib/monitor-api.js'
 
 const props = defineProps({
   open: { type: Boolean, default: false },
@@ -16,6 +17,27 @@ const existingIds = ref(new Set())
 const detectedApps = ref(new Map())
 /* 同步检查弹窗（应用中心 ⇄ 监控中心 配对/异常/候选） */
 const syncOpen = ref(false)
+/* 已配对的应用 id：包含「应用 → 监控」和「监控 → 应用」两个方向，用于统一「已同步监控」标志 */
+const syncedAppIds = ref(new Set())
+
+async function loadSyncedApps() {
+  try {
+    const d = await monApi('/api/monitor/sync-check')
+    syncedAppIds.value = new Set((d.pairs || []).map((p) => p.appId).filter(Boolean))
+  } catch {
+    syncedAppIds.value = new Set()
+  }
+}
+
+function isMonitorSynced(a) {
+  return Boolean(a?.monitorSync || a?.syncSource === 'monitor' || syncedAppIds.value.has(a?.id))
+}
+
+function monitorSyncTitle(a) {
+  if (syncedAppIds.value.has(a?.id)) return '已与监控中心主机双向同步'
+  if (a?.monitorSync) return '已勾选「同步到监控中心」'
+  return '由监控中心同步创建（appSync）'
+}
 
 /** 当前正在编辑的条目：null 或 { list: 'apps' | 'remoteApps', index } */
 const editing = ref(null)
@@ -180,6 +202,7 @@ async function load() {
       probedApps = new Map()
     }
     detectedApps.value = probedApps
+    loadSyncedApps()
     form.value = {
       apps: (cfg.apps ?? []).map((a) => normalizeEntry(a, false, probedApps.get(a.id))),
       remoteApps: (cfg.remoteApps ?? []).map((a) => normalizeEntry(a, true, probedApps.get(a.id))),
@@ -356,8 +379,7 @@ async function save() {
                   <span class="app-row-meta">{{ rowMeta(a, true) }}</span>
                 </span>
                 <span v-if="!a.id" class="tag">新</span>
-                <span v-else-if="a.monitorSync" class="tag" title="已勾选「同步到监控中心」">已同步监控</span>
-                <span v-else-if="a.syncSource === 'monitor'" class="tag" title="由监控中心同步创建（appSync）">来自监控</span>
+                <span v-else-if="isMonitorSynced(a)" class="tag" :title="monitorSyncTitle(a)">已同步监控</span>
                 <span class="app-row-arrow">›</span>
               </button>
             </div>
@@ -387,8 +409,7 @@ async function save() {
                   <span class="app-row-meta">{{ rowMeta(a, true) }}</span>
                 </span>
                 <span v-if="!a.id" class="tag">新</span>
-                <span v-else-if="a.monitorSync" class="tag" title="已勾选「同步到监控中心」">已同步监控</span>
-                <span v-else-if="a.syncSource === 'monitor'" class="tag" title="由监控中心同步创建（appSync）">来自监控</span>
+                <span v-else-if="isMonitorSynced(a)" class="tag" :title="monitorSyncTitle(a)">已同步监控</span>
                 <span class="app-row-arrow">›</span>
               </button>
             </div>
@@ -569,7 +590,7 @@ async function save() {
     </div>
 
     <!-- 应用中心 ⇄ 监控中心 同步检查（嵌套弹窗） -->
-    <SyncCheckPanel :open="syncOpen" @close="syncOpen = false" />
+    <SyncCheckPanel :open="syncOpen" @close="syncOpen = false; loadSyncedApps()" />
   </Teleport>
 </template>
 
