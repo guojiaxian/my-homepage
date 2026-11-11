@@ -48,6 +48,15 @@ function addHost() {
   editIdx.value = cfg.hosts.length - 1 // 创建后立即打开编辑弹窗
 }
 function delHost(i) { cfg.hosts.splice(i, 1) }
+/* 主机顺序 = 主页主机卡顺序，随 hosts 数组一起 PUT 保存 */
+function moveHost(i, delta) {
+  const j = i + delta
+  if (i < 0 || j < 0 || j >= cfg.hosts.length) return
+  const [h] = cfg.hosts.splice(i, 1)
+  cfg.hosts.splice(j, 0, h)
+  if (editIdx.value === i) editIdx.value = j
+  else if (editIdx.value === j) editIdx.value = i
+}
 function hostSummary(h) {
   const kind = h.type === 'local' ? '本机' : 'SSH 远程'
   const addr = h.type === 'ssh' ? `${h.address || '未配置地址'}:${h.port || 22}` : (h.address || '127.0.0.1')
@@ -137,11 +146,15 @@ function evCls(ev) {
                   <span class="hr-sum">{{ hostSummary(h) }}</span>
                 </span>
                 <span v-if="h.type === 'local'" class="tag" title="本机主机不可删除">内置</span>
+                <span class="hr-move" @click.stop>
+                  <button class="mv-btn" :disabled="i === 0" title="上移（保存后生效）" @click.stop="moveHost(i, -1)">↑</button>
+                  <button class="mv-btn" :disabled="i === cfg.hosts.length - 1" title="下移（保存后生效）" @click.stop="moveHost(i, 1)">↓</button>
+                </span>
                 <span class="hr-arrow">›</span>
               </div>
               <p v-if="!cfg.hosts.length" class="list-hint">暂无主机，点击「＋ 添加主机」创建。</p>
             </div>
-            <p class="list-hint">点击主机条目编辑连接信息与跟踪目录；弹窗内修改为草稿，由底部「保存配置」统一提交。</p>
+            <p class="list-hint">用 ↑ / ↓ 调整主页主机卡顺序（保存后生效）；点击主机条目编辑连接信息与跟踪目录，修改为草稿，由底部「保存配置」统一提交。</p>
           </section>
 
           <!-- 全局自定义目录：仅非空时显示 -->
@@ -343,6 +356,16 @@ section h3 {
 .hr-name { font-size: 13.5px; font-weight: 600; display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; }
 .hr-name small { color: var(--text-2); font-weight: 400; font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hr-sum { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hr-move { display: inline-flex; gap: 3px; flex: none; }
+.mv-btn {
+  width: 22px; height: 22px; padding: 0;
+  border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg); color: var(--text-2);
+  font-size: 12px; line-height: 1; cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.mv-btn:hover:not(:disabled) { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.mv-btn:disabled { opacity: 0.35; cursor: default; }
 .hr-arrow { flex: none; color: var(--text-2); font-size: 16px; }
 
 /* ===== 全局自定义目录行 ===== */

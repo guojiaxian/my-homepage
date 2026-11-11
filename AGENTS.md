@@ -482,6 +482,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **双向同步勾选（2026-11-11）**：`MonitorHostEdit.vue` SSH 主机表单在「采集方式」下新增「同步到应用中心」勾选（`hosts[].appSync`，`normalizeHost` 白名单放行），勾选后由 settings-server 自动在应用中心维护同 id 远程应用；主机行摘要随之显示「来自应用中心 / 同步到应用中心」徽标（`syncSource`）。机制、回环防护与删除语义统一见 §17。
 
+**主机归属配色与排序（2026-11-11）**：主机卡与终端抽屉主机 chips 复用应用中心三色——本机蓝 `--accent` / 外机绿 `--green` / 公网橙 `--amber`，标签同步为「本机 / 外机 / 公网」（`hostScope()` 按 `type==='local'` 与 `group` 判定，class 沿用 `lan/ext/net`）；卡片左色边 3px，hover/selected 时仍保留类型色。监控设置「纳管主机」列表提供 ↑/↓ 排序（`moveHost`），顺序即 `monitor.config.json` 的 `hosts[]` 顺序，保存后主页主机卡与终端主机 chips 同步。原「批量终端」工具栏入口已移除，由多窗格终端的「多端输入」承接。
+
 **架构**：`monitor-server.mjs`（systemd 常驻，`127.0.0.1:8301`，依赖 ssh2+ws）同时承载 HTTP API 与终端 WebSocket；nginx **两处 server 块**各加三个 location：`/monitor/`（静态 stub+终端页）、`/api/monitor/`（反代）、`/api/terminal`（WS 升级，read_timeout 3600s）。备份 `*.bak-monitor-20261110`。echarts/@xterm 已移入 dependencies（SPA 打包需要），主站「前端零第三方运行时依赖」的说法仅对**首屏主包**成立。
 
 **采集与目录归属**：
