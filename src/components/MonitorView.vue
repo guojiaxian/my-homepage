@@ -32,7 +32,6 @@ const termOpen = ref(false)
 const termFull = ref(false)
 const multiInput = ref(false) // 多端输入：任一窗格键入同步到其他窗格
 const termStatus = reactive({}) // key -> '' | 'ok' | 'bad'（窗格状态点）
-const paneTip = ref('')
 let termSeq = 0
 const paneRefs = new Map() // key -> MonitorTerm 暴露的 { send, focus, refit }
 function setPaneRef(key, el) { if (el) paneRefs.set(key, el); else paneRefs.delete(key) }
@@ -157,9 +156,9 @@ function openTerm(h, forceNew = false) {
   addPane(h)
 }
 /* 抽屉顶部主机名列表：点击即新增窗格（同一主机可多开） */
+const limitTip = ref(false) // 窗格数达到 PANES_MAX 上限时的居中弹窗提示
 function addPane(h) {
-  if (termPanes.value.length >= PANES_MAX) { paneTip.value = '最多支持 6 个终端窗格'; return }
-  if (!termPanes.value.length) paneTip.value = ''
+  if (termPanes.value.length >= PANES_MAX) { limitTip.value = true; return }
   const ordinal = Math.max(0, ...termPanes.value.filter((t) => t.hostId === h.id).map((t) => t.ordinal)) + 1
   const key = `${h.id}:${++termSeq}`
   flipLayout(() => {
@@ -167,7 +166,6 @@ function addPane(h) {
   })
   markJustAdded(key, termPanes.value.length - 1)
   termOpen.value = true
-  paneTip.value = ''
 }
 function endPane(key) {
   let idx = -1
@@ -193,7 +191,6 @@ function confirmCloseAll() {
   for (const k of Object.keys(termStatus)) delete termStatus[k]
   termPanes.value = [] // 卸载全部 MonitorTerm → 各自 onBeforeUnmount 关 WS / 释放 xterm
   termOpen.value = false
-  paneTip.value = ''
 }
 function onTermStatus(key, cls) { termStatus[key] = cls || '' }
 /* 多端输入：任一窗格键入同步到其他窗格 */
@@ -212,6 +209,7 @@ function onEsc(e) {
   if (e.key !== 'Escape') return // 只拦截 Esc；其余按键（含命令字符）必须放行
   if (!termOpen.value) return
   e.preventDefault(); e.stopPropagation()
+  if (limitTip.value) { limitTip.value = false; return } // 超限提示打开时 ESC 只关提示
   if (closeConfirm.value) { closeConfirm.value = false; return } // 确认框打开时 ESC 只撤确认
   if (termFull.value) toggleTermFull(); else hideDrawer('esc')
 }
@@ -533,7 +531,7 @@ function hostSubtitle(h) {
         <button class="mini-btn" @click="toggleTermFull">{{ termFull ? '还原窗口' : '全屏' }}</button>
         <button class="mini-btn" title="关闭并清空全部终端（下次打开为全新会话）" @click="askCloseAll()">✕ 关闭</button>
         <div class="host-chips">
-          <span class="chips-hint">点击主机名新增终端窗格（同一主机可多开 · 最多 6 个）：</span>
+          <span class="chips-hint">点击主机名新增终端窗格：</span>
           <button
             v-for="h in hosts.filter((x) => x.credReady)"
             :key="h.id"
@@ -542,7 +540,6 @@ function hostSubtitle(h) {
             :title="`${hostScopeLabel(h)} · ${h.name}（${h.address}）— 新增一个终端窗格`"
             @click="addPane(h)"
           >{{ h.name }}</button>
-          <span v-if="paneTip" class="chips-tip">{{ paneTip }}</span>
         </div>
       </div>
       <div class="panes-grid" :style="paneGridStyle">
@@ -576,6 +573,16 @@ function hostSubtitle(h) {
           <div class="tc-actions">
             <button class="tc-btn" @click="closeConfirm = false">取消</button>
             <button class="tc-btn danger" @click="confirmCloseAll()">关闭并清空</button>
+          </div>
+        </div>
+      </div>
+      <!-- 窗格数超限：已达 PANES_MAX 时点击主机 chips 的居中提示（ESC / 点遮罩 / 知道了 均可关闭） -->
+      <div v-if="limitTip" class="tc-mask" @click.self="limitTip = false">
+        <div class="tc-box">
+          <p class="tc-title">终端窗格已达上限</p>
+          <p class="tc-desc">最多同时打开 {{ PANES_MAX }} 个终端窗格，超过上限，请先关闭其他的。</p>
+          <div class="tc-actions">
+            <button class="tc-btn" @click="limitTip = false">知道了</button>
           </div>
         </div>
       </div>
@@ -741,7 +748,6 @@ export default { name: 'MonitorView' }
 .mon-term-drawer :deep(.host-chip.lan) { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 40%, var(--border)); background: var(--accent-soft); }
 .mon-term-drawer :deep(.host-chip.ext) { color: var(--green); border-color: color-mix(in srgb, var(--green) 40%, var(--border)); background: var(--green-soft); }
 .mon-term-drawer :deep(.host-chip.net) { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 40%, var(--border)); background: var(--amber-soft); }
-.mon-term-drawer :deep(.chips-tip) { font-size: 11.5px; color: var(--red); }
 .mon-term-drawer :deep(.panes-grid) {
   flex: 1; min-height: 0; display: grid; gap: 8px; padding: 8px 8px 8px; background: #0d1117;
   transition: grid-template-rows 300ms cubic-bezier(0.2, 0.8, 0.2, 1), grid-template-columns 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
