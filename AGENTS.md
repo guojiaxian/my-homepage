@@ -723,6 +723,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 37. **远程纯 APP / 小程序不能按 healthUrl 的端口拼本机访问链接**
    `probeRemote` 原逻辑 `url: meta.url || base`，`buildAppUrl` 在无 url 时又用 `window.location.hostname + app.port` 兜底——新加的阿里云小程序（health 8788、无网页）在应用中心显示成 `http://10.8.11.4:8788`，点击必然打不开。修复：probe 仅当 `kinds` 含 `web` 时才用健康接口同源兜底，否则 `url=''`；`buildAppUrl` 对 `remote` 且无 url 返回空；`hasUrl` 改为 `Boolean(buildAppUrl(app))`；glass / unslop / glass-v2 三份拷贝同步加 remote 守卫（2026-11-11）。教训：端口只是健康探测地址，不等于用户可访问页面；新增「非 Web」远程条目时必须同时验证访问链接与空 URL 路径。
 
+38. **`git status` 的“已改”可能只是权限位，不代表代码改动**
+   阿里云 `shunfeng-ledger-wxmp` 在应用中心长期显示「线上已改 1」，排查发现 `git diff` 内容为空，只有 `old mode 100644 / new mode 100755`；`stat` 显示 2026-10-22 08:23 权限被 `chmod +x`，提交内容与 HEAD 完全一致。用户明确要求不动后保持现状。教训：① 远程仓库报 dirty 先跑 `git diff` / `git diff --summary` 与 `stat`，区分内容改动、权限位、未跟踪文件；② 非本任务引入的脏状态默认不清理，报告证据后由用户决定；③ 不要把「线上已改」直接当成代码回滚/提交的理由。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
@@ -785,7 +788,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 
 > 状态会随时变化，以上仅为撰写时快照。以 `curl -s http://127.0.0.1/apps.json` 为准。
 
-> 三台远程应用均已配置外机 git 检查（2026-11-11）：network-monitor `dirty×47`、log-gpt-agent `dirty×3`、study-log-cloud `synced`（线上机，`production:true`）。
+> 四台远程应用均已配置外机 git 检查（2026-11-11 快照）：network-monitor 未推送×1、log-gpt-agent 未提交×3、study-log-cloud 线上已同步、shunfeng-ledger-wxmp 线上已改×1（仅权限位，按用户要求保持不动）。
 
 **监控中心纳管主机清单（2026-11-10 上线）**：
 
@@ -1087,6 +1090,8 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - **不可达外机拖慢探测**：每台不可达约 +38s（3 次尝试含 8s 连接超时 + 4s/10s 退避）；多台同时挂且并发 2 时最长约 80s，仍在定时器容忍内。可用 `PROBE_REMOTE_GIT_CONCURRENCY` 调并发。
 - **文件名含换行符**会破坏按行解析（本机检查同样限制，git 场景极罕见）。
 - **repo 链接固定读 `origin`**：分支 upstream 不是 origin 的仓库，链接可能指向 origin（本机同款行为）。
+- **阿里云 wxmp 仓库的已知「线上已改 ×1」保持不动（2026-11-11 用户明确要求）**：`/root/applications/shunfeng-ledger-wxmp` 的 `server/check-server-config.sh` 只有 `100644 → 100755` 权限位变化（2026-10-22 08:23 用户 root shell 执行 `chmod +x`，内容与 HEAD 一致），`server/reload-server-config.sh` 为用户创建但未跟踪。不要提交、回滚或恢复权限；应用中心继续显示红色「线上已改 1」属预期。
+- **非本任务引入的远程仓库脏状态不清理**：发现 dirty/ahead 先看 `git diff` / `git diff --summary` / `stat`，向用户报告证据与影响；未经明确同意不得提交、回滚、改权限或删除未跟踪文件。
 - 可选优化（未做，收益小）：本机与外机 fetch 池并行，完整探测 14s → 约 8s。
 
 ### 20.4 验证方法（可复现）
