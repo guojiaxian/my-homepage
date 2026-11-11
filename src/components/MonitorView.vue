@@ -360,10 +360,19 @@ function hostSubtitle(h) {
   const cores = s.cpu?.cores
   const cpuText = cores ? `${cores}核${cpu ? ' ' + cpu : ''}` : cpu
   const mem = s.mem?.totalMb ? `${nominalMemGb(s.mem.totalMb)}GB` : ''
-  const diskGb = (s.disks || [])
-    .filter((d) => !/^(tmpfs|devtmpfs|overlay|squashfs|iso9660|proc|sysfs)$/i.test(d.type || ''))
-    .reduce((a, d) => a + (Number(d.totalGb) || 0), 0)
-  const disk = diskGb ? (diskGb >= 512 ? `${(diskGb / 1024).toFixed(1)}TB` : `${Math.round(diskGb)}GB`) : ''
+  /* 磁盘按整盘原始容量（/sys/block 扇区）显示，而不是文件系统可用量：
+     1TiB 虚拟盘显示 1TB，不再出现 0.9TB；旧数据无 storage 时回退到分区汇总 */
+  const rawBytes = Number(s.storage?.totalBytes) || 0
+  let disk = ''
+  if (rawBytes > 0) {
+    const gib = rawBytes / 1073741824
+    disk = gib >= 1024 ? `${+((gib / 1024).toFixed(1))}TB` : `${Math.round(gib)}GB`
+  } else {
+    const diskGb = (s.disks || [])
+      .filter((d) => !/^(tmpfs|devtmpfs|overlay|squashfs|iso9660|proc|sysfs)$/i.test(d.type || ''))
+      .reduce((a, d) => a + (Number(d.totalGb) || 0), 0)
+    disk = diskGb ? (diskGb >= 512 ? `${+((diskGb / 1024).toFixed(1))}TB` : `${Math.round(diskGb)}GB`) : ''
+  }
   let osName = osPart || ''
   if (/ky10/i.test(osName)) osName = 'Kylin V10' // 本机 os 字段是内核串，映射为发行版名
   return [cpuText, mem, disk, osName].filter(Boolean).join(' · ')

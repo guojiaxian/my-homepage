@@ -586,6 +586,13 @@ for d in /proc/[0-9]*; do
 done
 echo "===DF==="
 df -kPT 2>/dev/null
+echo "===DISKS==="
+# 物理/虚拟整盘原始容量（/sys/block 扇区 × 512）；排除分区、loop、rom、软驱、dm/md 聚合层
+for d in /sys/block/*; do
+  n=\${d##*/}
+  case "$n" in loop*|ram*|sr*|fd*|dm-*|md*|zram*) continue;; esac
+  if [ -r "$d/size" ]; then nsec=$(cat "$d/size" 2>/dev/null); echo "DISK $n $nsec"; fi
+done
 echo "===OS==="
 grep -m2 -E '^(NAME|VERSION_ID)=' /etc/os-release 2>/dev/null
 echo "===CPUINFO==="
@@ -656,7 +663,7 @@ async function sshProbe(host) {
 /* ============================ 远程输出解析 → 计数器 ============================ */
 const REAL_FS = new Set(['ext2', 'ext3', 'ext4', 'xfs', 'btrfs', 'f2fs', 'vfat', 'fuseblk', 'jfs', 'reiserfs']);
 function parseRemoteOutput(text) {
-  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], osName: '', cpuModel: '', docker: new Map() };
+  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], storage: { disks: [], totalBytes: 0 }, osName: '', cpuModel: '', docker: new Map() };
   let section = 'MAIN';
   for (const line of text.split('\n')) {
     const t = line.trim();
@@ -664,6 +671,7 @@ function parseRemoteOutput(text) {
     if (t === '===CMD===') { section = 'CMD'; continue; }
     if (t === '===PWD===') { section = 'PWD'; continue; }
     if (t === '===DF===') { section = 'DF'; continue; }
+    if (t === '===DISKS===') { section = 'DISKS'; continue; }
     if (t === '===OS===') { section = 'OS'; continue; }
     if (t === '===CPUINFO===') { section = 'CPUINFO'; continue; }
     if (t === '===DOCKER===') { section = 'DOCKER'; continue; }
@@ -704,6 +712,11 @@ function parseRemoteOutput(text) {
       if (f[0] === 'Filesystem' || f[0] === '文件系统' || f.length < 7) continue;
       if (!REAL_FS.has(f[1])) continue;
       c.df.push({ fs: f[0], type: f[1], totalKb: +f[2] || 0, usedKb: +f[3] || 0, mnt: f.slice(6).join(' ') });
+    } else if (section === 'DISKS') {
+      // 行格式：DISK <name> <512B 扇区数>（整盘原始容量，非文件系统可用量）
+      const f = t.split(/\s+/);
+      const sectors = Number(f[2]);
+      if (f[0] === 'DISK' && f[1] && sectors > 0) c.storage.disks.push({ name: f[1], bytes: sectors * 512 });
     } else if (section === 'DOCKER') {
       // 行格式：ID \t Names \t Image \t Labels（docker ps -a --format，\t 分隔）
       const parts = t.split('\t');
@@ -726,12 +739,13 @@ function parseRemoteOutput(text) {
   // 同一设备多次挂载（bind）去重：保留最上层（首次出现）挂载点
   const seenFs = new Set();
   c.df = c.df.filter(d => (seenFs.has(d.fs) ? false : (seenFs.add(d.fs), true)));
+  c.storage.totalBytes = c.storage.disks.reduce((a, d) => a + d.bytes, 0);
   return c;
 }
 
 /* ============================ 本机采集（直读 /proc，零子进程） ============================ */
 function readLocalCounters(trackedDirs) {
-  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], osName: '', cpuModel: '' };
+  const c = { cpuLines: [], load: null, up: null, mem: {}, net: {}, dio: {}, mnts: [], procs: new Map(), df: [], storage: { disks: [], totalBytes: 0 }, osName: '', cpuModel: '' };
   try {
     for (const line of fs.readFileSync('/proc/stat', 'utf8').split('\n')) {
       if (/^cpu[0-9]*\s/.test(line)) c.cpuLines.push(line.trim().split(/\s+/).slice(1).map(Number));
@@ -759,6 +773,17 @@ function readLocalCounters(trackedDirs) {
     }
     c.cpuModel = os.cpus()[0] ? os.cpus()[0].model.trim() : '';
     c.osName = `${os.type()} ${os.release()}`;
+    // 整盘原始容量（/sys/block 扇区 × 512；排除分区、loop、rom、软驱、dm/md 聚合层）
+    try {
+      for (const name of fs.readdirSync('/sys/block')) {
+        if (/^(loop|ram|sr|fd|dm-|md|zram)/.test(name)) continue;
+        try {
+          const sectors = Number(fs.readFileSync(`/sys/block/${name}/size`, 'utf8').trim());
+          if (sectors > 0) c.storage.disks.push({ name, bytes: sectors * 512 });
+        } catch { /* 忽略 */ }
+      }
+      c.storage.totalBytes = c.storage.disks.reduce((a, d) => a + d.bytes, 0);
+    } catch { /* 忽略 */ }
   } catch (e) { log('本机 /proc 读取异常:', e.message); }
 
   // 磁盘用量（statfs；跳过已有挂载点的子路径 = 同一文件系统的 bind/子目录）
@@ -974,6 +999,8 @@ function buildSnapshot(hostId, counters, prev, intervalSec, isFirst, dirsCfg) {
     cpu: { pct: cpu.pct == null ? null : +cpu.pct.toFixed(1), cores: coreN, model: counters.cpuModel || '', perCore: cpu.perCore.map(x => x == null ? null : +x.toFixed(1)), load1: counters.load?.[0] ?? null, load5: counters.load?.[1] ?? null, load15: counters.load?.[2] ?? null, loadPerCore: counters.load ? +(counters.load[0] / coreN).toFixed(2) : null },
     mem: { totalMb: Math.round(memTotal / 1024), usedMb: memTotal ? Math.round((memTotal - memAvail) / 1024) : null, pct: memPct, swapPct },
     disks: counters.df.map(d => ({ mnt: d.mnt, type: d.type, totalGb: +(d.totalKb / 1048576).toFixed(1), usedGb: +(d.usedKb / 1048576).toFixed(1), pct: d.totalKb ? +(d.usedKb / d.totalKb * 100).toFixed(1) : null })),
+    /* 整盘原始容量：主机卡「多少 T/GB」按此显示，不用文件系统可用量 */
+    storage: { totalBytes: counters.storage?.totalBytes || null, disks: counters.storage?.disks || [] },
     diskIo: { readMbs: dioR, writeMbs: dioW },
     net: { iface: primary, inMbs: netIn, outMbs: netOut, totalInMbs: netTotalIn, totalOutMbs: netTotalOut },
     procsCount: counters.procs.size,
@@ -1191,7 +1218,7 @@ async function tickRemote(host) {
     finishTick(host, snap, detail);
   } catch (e) {
     st.online = false; st.error = String(e.message || e);
-    st.lastSnap = { hostId: host.id, t: Date.now(), online: false, os: st.lastSnap?.os || '', uptimeSec: st.lastSnap?.uptimeSec || 0, cpu: null, mem: null, disks: [], diskIo: {}, net: {}, procsCount: 0, containersCount: 0, dirs: [], alerts: [], error: st.error };
+    st.lastSnap = { hostId: host.id, t: Date.now(), online: false, os: st.lastSnap?.os || '', uptimeSec: st.lastSnap?.uptimeSec || 0, cpu: null, mem: null, disks: [], storage: st.lastSnap?.storage || null, diskIo: {}, net: {}, procsCount: 0, containersCount: 0, dirs: [], alerts: [], error: st.error };
     pushHistoryOffline(host.id, Date.now());
   } finally { st.probing = false; }
 }
