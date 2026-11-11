@@ -1,7 +1,7 @@
 # AGENTS.md · my-homepage 项目交接记忆
 
 > 面向接手本项目的 AI Agent / 开发者：读完这一份即可上手，无需再翻聊天记录。
-> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；应用中心 ⇄ 监控中心双向同步见 §17，2026-11-10 的 UI/图表/目录设置记忆见 §16。
+> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；应用中心 ⇄ 监控中心双向同步见 §17，系统测试/优化见 §18，**终端全量测试与交互加固（滚轮守卫/渐进宽度/关闭确认/resize 防泄漏）见 §19**，2026-11-10 的 UI/图表/目录设置记忆见 §16。
 
 ---
 
@@ -447,7 +447,9 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **终端多会话缓存（2026-11-10）**：抽屉关闭（遮罩 / ESC / ✕）只隐藏，不关 WS；`MonitorView` 用 `termTabs[]` 缓存最多 **8 个会话**（**同一主机可多开**，点页签栏「＋ 新会话」；LRU：最近使用排末尾，超出淘汰最久未用且非当前页签），每个会话渲染一个常驻 `MonitorTerm`（`v-show` 只显示当前，页签 key 为 `hostId:seq`，状态点按 key 记录），页签条带状态点（绿 / 红 / 灰）并支持切换与 × 结束；同一主机多会话时页签追加稳定序号 `#n`（存于 `ordinal`，不随切换重排）；「结束会话」释放当前页签（组件卸载 → `onBeforeUnmount` 关 WS、释放 xterm）。切换会话不重连，历史输出与 shell 现场保留；后台会话受网关空闲超时限制（当前 8 小时），超时后页签变红、内容保留，点「重连」恢复。弹出窗口前主动释放当前页签会话，避免重复占用（每主机并发上限 10）。glass-v2 仍为单会话。
 
-**终端交互打磨（2026-11-11，用户五条反馈）**：① **渐进宽度**——抽屉按窗格数 `w1/w2/w3` 三档：1 格 `clamp(420px, 33.33vw, 720px)`、2 格 `clamp(780px, 66.66vw, 1440px)`、3 格及以上 `calc(100vw - 56px)`（左侧留遮罩空白可点击退出），`transition: width 300ms` 与窗格 FLIP 叠加；`:not(.full)` 防止覆盖全屏档。② 标题栏 `.mon-term-head` 补齐 flex-wrap + `padding: 10px 14px 0`（此前完全无样式，标题贴边被裁），`.host-chips` 改 `flex-basis:100%` 独占第二行。③ **关闭语义拆分**——✕ 按钮 → `closeTermAll()`（清空全部窗格/状态/提示，下次打开为全新单窗格）；遮罩点击 / ESC → `hideDrawer()` 保留现场。④ `MonitorTerm` 加 **ResizeObserver**（rAF 节流、`props.visible` 门控）→ 容器尺寸变化自动 `fit()` 并经 `onResize` 同步 pty 列行数，窗口缩放/抽屉变宽时内容重排跟手。⑤ `endPane` 聚焦修正为相邻幸存窗格（原实现在窗格删除后聚焦已删 key）。**滚轮 4+ 窗格「失效」未复现**：4/6 窗格窗口态+全屏态、批量 4 台实测 scrollTop 均正常变化（1083→283 等），判定为浏览器缓存旧版 JS，强刷即可。验证：`.verify/e2e-term-ux5.mjs`（17 断言）；e2e-multipane 步骤 6 改 ESC 验保留、新增步骤 10 验 ✕ 清空（22 断言）。
+**终端交互打磨（2026-11-11，用户五条反馈）**：① **渐进宽度**——抽屉按窗格数 `w1/w2/w3` 三档：1 格 `clamp(420px, 33.33vw, 720px)`、2 格 `clamp(780px, 66.66vw, 1440px)`、3 格及以上 `calc(100vw - 56px)`（左侧留遮罩空白可点击退出），`transition: width 300ms` 与窗格 FLIP 叠加；`:not(.full)` 防止覆盖全屏档。② 标题栏 `.mon-term-head` 补齐 flex-wrap + `padding: 10px 14px 0`（此前完全无样式，标题贴边被裁），`.host-chips` 改 `flex-basis:100%` 独占第二行。③ **关闭语义拆分（含确认）**——✕ 按钮 → `askCloseAll()` 弹居中确认框（`.tc-mask/.tc-box`，红色「关闭并清空」），确认后才 `confirmCloseAll()` 清空全部窗格/状态/提示（下次打开为全新单窗格）；**取消按钮 / ESC / 点确认框外遮罩**三条撤销路径均不影响现场；点抽屉外遮罩 / ESC（无确认框时）→ `hideDrawer()` 保留现场。④ `MonitorTerm` 加 **ResizeObserver**（rAF 节流、`props.visible` 门控）→ 容器尺寸变化自动 `fit()` 并经 `onResize` 同步 pty 列行数，窗口缩放/抽屉变宽时内容重排跟手。⑤ `endPane` 聚焦修正为相邻幸存窗格（原实现在窗格删除后聚焦已删 key）。**滚轮 4+ 窗格「失效」未复现**：4/6 窗格窗口态+全屏态、批量 4 台实测 scrollTop 均正常变化（1083→283 等），判定为浏览器缓存旧版 JS，强刷即可。验证：`.verify/e2e-term-ux5.mjs`（17 断言）；e2e-multipane 步骤 6 改 ESC 验保留、新增步骤 10 验三路径确认（25 断言）。
+
+> ⚠️ 本轮 ResizeObserver 高频 resize 立刻炸出踩坑 #34（SSH 远端窗格握手期 resize 帧被当输入回放刷屏）——凡是「提高某类事件频次」的改动，必须同时检查该事件在**慢路径（远程握手/重连）**下的处理。
 
 **自动纳管（2026-11-10，一键零手工）**：设置页主机弹窗「自动部署」区输入**目标机密码** → `POST /api/monitor/hosts/provision` → 中心 SSH（密码认证）一次 exec 完成：写 authorized_keys（监控专用 ed25519）+ 直灌 agent 安装器（不用 curl/HTTP，无对外依赖）→ **key 认证复验免密** → 落盘 keyPath + mode=agent → 密码 AES-GCM 加密存档备用；返回逐步日志给 UI。实测 netwatch 清零点全流程 **1.1 秒** 6 步完成，之后监控零 SSH 连接、终端照常、目标机 25 个既有服务未受任何影响。CLI 等价：`node scripts/monitor-server.mjs --agent-install-cmd <hostId>`（需先有密钥）。坑：`saveConfig()` 末尾会 `loadConfigSync()` 重建 `config.hosts`，**跨保存持有主机对象会写到游离对象上**（曾导致 keyPath/mode 丢写）→ 每次都 `upsert()` 重定位再改；免密复验连接必须 `end()`（否则 keepalive 长期挂起，实测残留 1 条 ESTABLISHED）。
 
@@ -727,6 +729,8 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 目录历史对比默认全选（2026-11-10） | 用户要求「默认全选」：seededDirs 只补新目录，15s 自刷不勾回手动取消项；另配全选/清空按钮兜底 |
 | 监控布局对照 1Panel 重排（2026-11-10） | 用户反馈「1Panel 布局好看、我们的有点奇怪」：根源是 hero 三层堆叠 / 圆环数字小 / 装饰编码重复 / 详情无分组。按「密度均匀、单一卡片体系、颜色只表达语义」收紧，白底语言与导航不变（详情见 §8.7 布局重排段） |
 | 应用中心 ⇄ 监控中心双向同步（2026-11-11） | 用户要求「添加应用可选同步到监控中心并监测，反之亦然，中断自动重试」：选 fs.watch 文件级同步（monitor-server 只写 monitor.config、settings-server 只写 apps.config，单一写者）而非前端编排——UI 之外（CLI/手工改配置）同样生效；「无 diff 不写盘」防回环，重试器退避抗读写竞态（详见 §17） |
+| 终端渐进宽度 1/3→2/3→近全屏（2026-11-11） | 用户要求「1 个占 1/3 屏、2 个占 2/3、3 个几乎占满（左侧留空白退出）」：按窗格数切 `w1/w2/w3` 三档而非让抽屉固定全宽——每格恒约 1/3 屏，增减窗格时已有终端内容不跳变；`:not(.full)` 与全屏档解耦 |
+| 终端关闭确认弹窗 + 遮罩保留（2026-11-11） | 用户要求「点击关闭加弹窗确定」：清空全部会话不可恢复，✕ 需二次确认（取消/ESC/点遮罩三路径可撤销）；而点抽屉外空白/ESC 仍是「保留现场」的轻退出——两种退出语义分离，日常切换不误清 shell |
 
 ---
 
@@ -834,7 +838,13 @@ tail -5 data/monitor/audit.jsonl
 tail -5 data/monitor/alerts.jsonl
 # 终端端到端自检（需要已登录会话；脚本自动登录）
 node .verify/term-test.mjs
-# 监控 UI 免登录验证（Playwright；见踩坑 #19 的会话注入法）
+# 终端专项 E2E（详见 §19.4；.verify 不入库，缺失时按 §19 描述重建）
+node .verify/e2e-multipane.mjs     # 多窗格布局/多端输入/ESC 保留/✕ 三路径确认
+node .verify/e2e-term-ux5.mjs      # 渐进宽度/标题栏留白/滚轮/ResizeObserver/关闭语义
+node .verify/e2e-wheel-guard.mjs   # 滚轮滚动链守卫（背后页面不跟滚）
+node .verify/e2e-batch.mjs         # 批量终端
+node .verify/verify-resize-leak.mjs # SSH 远端窗格 resize 帧不泄漏为输入
+# 监控 UI 免登录验证（Playwright；见踩坑 #23 的会话注入法）
 node .verify/shot-hostedit.cjs   # 主机设置弹窗（草稿/直连/校验错误路径）
 node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 全选/清空
 # 排障速查表见 docs/monitor-ops.md §6
@@ -978,3 +988,38 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 ### 18.4 仍搁置的（低价值/需需求驱动）
 
 - glass-v2 设置弹窗的**紧凑列表重构**（与主站 MonitorSettings/MonitorHostEdit 完全对齐）——功能层面已补齐 appSync，纯布局 parity 留待该端点有实际使用诉求时再做。
+
+---
+
+## 19. 2026-11-11 增量：终端全量测试与交互加固（本轮）
+
+### 19.1 全量测试与修复（终审轮）
+
+- **六套 E2E + 四主机终端**：MULTIPANE 25 / BATCH 13 / SPA 20 / PROVISION 8 / GV2-BATCH 6 / GV2-PROVISION 3；term-test local/netwatch/aliyun/lan-1103 全 PASS。
+- **修复 2 个真 bug**：
+  1. **glass-v2 批量终端窗格永不连接**——修 60ms 关闭竞态时误删 `for (hosts) connectPane(h)` 连接循环（已随 e4a14a0 入库两天，靠结果断言 `.xterm-rows` 暴露）；同时补 `updateMode()` 刷新「下发到全部 N 台」计数（截图验收发现恒显示 0 台）。
+  2. **SSH 远程窗格握手期 resize 帧刷屏**——`pendingInput` 缓冲未分拣控制帧，SSH 握手完成后 `{"type":"resize",…}` 被当键盘输入回放（详见踩坑 #34）。
+- **两套 E2E 脚本过时**（选择器随 da1db75 改根类名/入口而失效），已同步——见踩坑 #33。
+- **遗留优化项（已识别、暂不动）**：并发上限校验 TOCTOU（后果轻，8h 空闲兜底可回收）；makeSyncRetryer 双执行保护（独立模块，收益低）；`pendingInput` 超上限静默丢弃（可加「已丢弃 K 条」提示）；glass-v2 `openTerm` 对已断会话无自动重连；history JSONL 同步写盘（单次 <1ms，机内盘无感）。
+
+### 19.2 滚轮滚动链守卫（用户实测「终端滚轮带动背后页面滚动」）
+
+双保险：① 终端各覆盖层（SPA 抽屉+遮罩 / MonitorBatchTerm / 独立终端页 `.term-page` / glass-v2 的 `#gv-term-mask`、`#gv-term-drawer`、`#gv-bt`）挂**非被动 wheel 监听** `preventDefault()`——冒泡阶段晚于 xterm 内部监听，自身回滚不受影响；② 各 `.xterm-viewport` 加 `overscroll-behavior: contain`，滚到回滚边界不外溢。验证 `.verify/e2e-wheel-guard.mjs`（8 断言：5 处覆盖层滚轮时背后 `scrollY` 恒 0 + xterm scrollTop 正常变化）。独立终端页容器是 `class="term-page"`（无 id），勿用 getElementById。
+
+### 19.3 终端截图集（`.verify/shot-term-gallery.mjs`，9 张）
+
+抽屉单/双/四窗格（含两行布局+多端广播）、全屏、批量选择器、批量广播、批量单机、独立弹窗页、glass-v2 批量。产物在 `.verify/shots/`。**经验：截图验收比断言更易发现「视觉上不对但 DOM 正确」的问题**（本次两处：glass-v2 台数计数、远程窗格 JSON 刷屏）。
+
+### 19.4 验证脚本清单（均在 `.verify/`，不入库）
+
+| 脚本 | 覆盖 |
+|---|---|
+| `e2e-multipane.mjs` | 多窗格布局/FLIP/多端输入/ESC 保留/全屏/底部留白/✕ 三路径确认清空（25） |
+| `e2e-term-ux5.mjs` | 渐进宽度（640/1280/1864px）/标题栏留白/4 窗格+全屏滚轮/ResizeObserver 重排/关闭语义（17） |
+| `e2e-wheel-guard.mjs` | 五处覆盖层滚动链 + xterm 自身滚动（8） |
+| `e2e-batch.mjs` | 批量终端选择器/广播/单机/全屏/两行布局（13） |
+| `verify-resize-leak.mjs` | 远程窗格无 resize JSON 泄漏 + 运行期 resize + shell 可用（4） |
+| `e2e-gv2-batch.mjs` / `e2e-gv2-provision.mjs` | glass-v2 端点同路径（6 + 3） |
+| `shot-term-gallery.mjs` / `shot-confirm.mjs` | 终端九形态截图 / 确认框截图 |
+
+> 说明：`.verify/` 被 gitignore，换机器/协作者接手时这些脚本不随仓库走；需要时按本文档描述重建。
