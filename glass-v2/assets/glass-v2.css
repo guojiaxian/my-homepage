@@ -257,6 +257,13 @@ tr.gv-dragging { opacity: 0.45; }
 .gv-fact .gv-dirlink, .gv-fact .gv-portlink { white-space: nowrap; }
 .gv-portlink { font-family: var(--gv-mono); font-size: 12.5px; color: var(--gv-accent); white-space: nowrap; }
 .gv-portlink:hover { text-decoration: underline; }
+/* 远程应用：位置·主机 与真实目录（gitDir）两行展示 */
+.gv-dirstack { display: flex; flex-direction: column; gap: 2px; }
+.gv-dirstack .gv-dirlink, .gv-dirstack .gv-num { max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+
+/* 同步列内容居中（表头本就居中）；特异性需压过 .gv-app-table td 的 text-align:left */
+.gv-app-table td.gv-col-sync { text-align: center; }
+
 .gv-dirlink { font-family: var(--gv-mono); font-size: 12px; color: var(--gv-text-2); cursor: copy; white-space: nowrap; }
 .gv-dirlink:hover { color: var(--gv-text); }
 .gv-git-chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; border-radius: 999px; padding: 1px 10px; white-space: nowrap; }

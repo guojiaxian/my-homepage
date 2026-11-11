@@ -416,7 +416,10 @@
   function dirCellHtml(app) {
     if (app.remote) {
       const text = `${app.location ?? ''} · ${app.host ?? ''}`
-      return `<span class="mono dir"${attr('title', text)}>${esc(text)}</span>`
+      const dir = app.directory
+        ? `<span class="mono dir copyable" data-copy="${esc(app.directory)}"${attr('title', `${app.directory}（点击复制）`)}>${esc(app.directory)}</span>`
+        : ''
+      return `<span class="dir-stack"><span class="mono dir"${attr('title', text)}>${esc(text)}</span>${dir}</span>`
     }
     return `<span class="mono dir copyable" data-copy="${esc(app.directory ?? '')}"` +
       `${attr('title', `${app.directory ?? ''}（点击复制）`)}>${esc(app.directory ?? '')}</span>`

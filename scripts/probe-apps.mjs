@@ -295,7 +295,7 @@ async function probeRemote(meta, now) {
     id: meta.id,
     name: meta.name || meta.id,
     description: meta.description || '',
-    directory: null,
+    directory: meta.gitDir || null, // 外机项目目录（配置 gitDir 才有），前端「服务器 / 目录」列展示与复制
     port,
     expectedPort: null,
     extraPorts: [],
@@ -877,7 +877,8 @@ async function runProbe(NO_FETCH) {
     const primary = anchor ?? sorted.find((p) => p.external) ?? sorted[0]
     return {
       primary,
-      extraPorts: sorted.filter((p) => p !== primary).map((p) => p.port),
+      // 附加端口只保留对外监听的：仅本机的附属监听（如本站网关 8301）外部无法访问，展示只会造成困惑
+      extraPorts: sorted.filter((p) => p !== primary && p.external).map((p) => p.port),
     }
   }
 
@@ -953,7 +954,7 @@ async function runProbe(NO_FETCH) {
       if (preferExpected) {
         port = expected
         external = listenerExternal.get(expected) ?? false
-        extraPorts = found.ports.map((p) => p.port)
+        extraPorts = found.ports.filter((p) => p.external).map((p) => p.port) // 仅本机的附属监听不进附加端口
       } else {
         const { primary, extraPorts: rest } = pickPrimary(found.ports, meta.expectedPort)
         port = primary.port

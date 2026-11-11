@@ -341,7 +341,10 @@
     function dirCellHtml(app) {
       if (app.remote) {
         const text = `${app.location ?? ''} · ${app.host ?? ''}`
-        return `<span class="gv-num" style="font-size:12px;color:var(--gv-text-2)"${attr('title', text)}>${esc(text)}</span>`
+        const dir = app.directory
+          ? `<span class="gv-dirlink" data-copy="${esc(app.directory)}"${attr('title', `${app.directory}（点击复制）`)}>${esc(app.directory)}</span>`
+          : ''
+        return `<span class="gv-dirstack"><span class="gv-num" style="font-size:12px;color:var(--gv-text-2)"${attr('title', text)}>${esc(text)}</span>${dir}</span>`
       }
       return `<span class="gv-dirlink" data-copy="${esc(app.directory ?? '')}"${attr('title', `${app.directory ?? ''}（点击复制）`)}>${esc(app.directory ?? '')}</span>`
     }
@@ -375,7 +378,7 @@
         <td><span class="gv-desc"${attr('title', app.description)}>${esc(app.description)}</span></td>
         <td>${portCellHtml(app)}</td>
         <td>${dirCellHtml(app)}</td>
-        <td>${gitCellHtml(app)}</td>
+        <td class="gv-col-sync">${gitCellHtml(app)}</td>
         <td>${app.github ? `<a href="${esc(app.github)}" target="_blank" rel="noopener" title="查看源码">源码 ↗</a>` : `<span class="gv-hint">—</span>`}</td>
       </tr>`).join('')
 

@@ -611,6 +611,7 @@
     row.appendChild(dirTd);
 
     var syncTd = doc.createElement('td');
+    syncTd.className = 'fg-col-sync';
     var git = gitSyncView(app.git);
     if (git) {
       var chip = node('span', 'fg-syncchip ' + git.cls, git.text);
@@ -729,9 +730,16 @@
 
   function buildDir(cell, app) {
     if (app.remote) {
+      var stack = node('div', 'fg-dirstack');
       var remote = node('span', 'fg-dir', (app.location || '远程') + ' · ' + (app.host || ''));
       remote.title = (app.location || '') + ' · ' + (app.host || '');
-      cell.appendChild(remote);
+      stack.appendChild(remote);
+      if (app.directory) {
+        var rdir = node('span', 'fg-dir is-copyable', app.directory);
+        makeCopyable(rdir, app);
+        stack.appendChild(rdir);
+      }
+      cell.appendChild(stack);
       return;
     }
     var dir = node('span', 'fg-dir is-copyable', app.directory || '—');

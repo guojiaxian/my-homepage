@@ -119,6 +119,14 @@ async function copyDir(app) {
             @click="copyDir(app)"
           >{{ copiedId === app.id ? '✓ 已复制' : app.directory }}</span>
         </div>
+        <div v-if="app.remote && app.directory" class="fact">
+          <span class="fact-label">目录</span>
+          <span
+            class="mono dir copyable"
+            :title="copiedId === app.id ? '已复制' : `${app.directory}（点击复制）`"
+            @click="copyDir(app)"
+          >{{ copiedId === app.id ? '✓ 已复制' : app.directory }}</span>
+        </div>
         <div class="fact">
           <span class="fact-label">技术栈</span>
           <span class="stack-text" :title="stackTitle(app)">{{ stackText(app) || '—' }}</span>

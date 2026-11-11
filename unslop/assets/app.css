@@ -762,6 +762,22 @@ tr.dragging {
   vertical-align: bottom;
 }
 
+/* 远程应用：位置·主机 与真实目录（gitDir）两行展示 */
+.dir-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dir-stack .dir {
+  max-width: 280px;
+}
+
+/* 同步列内容居中（表头本就居中） */
+.app-table .col-sync {
+  text-align: center;
+}
+
 .copyable:hover {
   color: var(--accent);
 }

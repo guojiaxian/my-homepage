@@ -158,11 +158,15 @@ async function copyDir(app) {
             <span v-if="app.port && !app.external" class="tag neutral" title="该服务仅监听 127.0.0.1，仅本机可访问">仅本机</span>
           </td>
           <td>
-            <span
-              v-if="app.remote"
-              class="mono dir"
-              :title="`${app.location} · ${app.host}`"
-            >{{ app.location }} · {{ app.host }}</span>
+            <div v-if="app.remote" class="dir-stack">
+              <span class="mono dir" :title="`${app.location} · ${app.host}`">{{ app.location }} · {{ app.host }}</span>
+              <span
+                v-if="app.directory"
+                class="mono dir copyable"
+                :title="copiedId === app.id ? '已复制' : `${app.directory}（点击复制）`"
+                @click="copyDir(app)"
+              >{{ copiedId === app.id ? '✓ 已复制' : app.directory }}</span>
+            </div>
             <span
               v-else
               class="mono dir copyable"
@@ -396,8 +400,24 @@ tbody tr.net td:first-child {
   vertical-align: bottom;
 }
 
+/* 远程应用：位置 · 主机 与真实目录两行展示（目录来自配置的 gitDir） */
+.dir-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dir-stack .dir {
+  max-width: 280px;
+}
+
 .copyable:hover {
   color: var(--accent);
+}
+
+.col-sync {
+  text-align: center;
+  width: 110px;
 }
 
 .text-muted {

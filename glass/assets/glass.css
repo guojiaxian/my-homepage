@@ -749,6 +749,13 @@ html[data-theme="dark"] .fg-tag--neutral { background: rgba(255, 255, 255, 0.08)
   font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   font-size: 12px;
 }
+/* 远程应用：位置·主机 与真实目录（gitDir）两行展示 */
+.fg-dirstack { display: flex; flex-direction: column; gap: 2px; }
+.fg-dirstack .fg-dir { max-width: 280px; }
+
+/* 同步列内容居中 */
+.fg-col-sync { text-align: center; }
+
 .fg-dir.is-copyable { cursor: pointer; }
 .fg-dir.is-copyable:hover { color: var(--fg-blue); }
 

@@ -934,6 +934,12 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 - `scripts/monitor-server.mjs`（normalizeHost 白名单 + syncAppsToHostsOnce + makeSyncRetryer + watcher/main 挂载）、`scripts/settings-server.mjs`（MONITOR_CONFIG_FILE + sanitize 白名单 + syncHostsToAppsOnce + makeSyncRetryer + watcher + 启动/POST 挂载，顺带修正文件头过时注释）、`src/components/SettingsPanel.vue`（勾选 + 徽标 + normalizeEntry）、`src/components/MonitorHostEdit.vue`（勾选区 + `.sync-chk` 样式）、`src/components/MonitorSettings.vue`（hostSummary 徽标）。
 - 生效方式：`./deploy.sh` + `systemctl restart my-homepage-settings my-homepage-monitor`。
 - 实测通过：方向一创建（gitDir 预置目录、note、syncSource）、改名回写、方向二跳过路径（monitorSync 优先）、方向二创建（env=公网映射、probe 自动触发、apps.json 出现条目）、无回环、退避重试链条、清理无复活；Playwright 会话注入验证三处勾选渲染（`.verify/sync-1-appeditor.png`、`sync-2-hosteditor.png`）。
+### 17.5 展示修正（2026-11-11 用户反馈三则）
+
+- **同步列居中**：表格「同步」列 td 水平居中（主站 AppTable `.col-sync`、glass `.fg-col-sync`、glass-v2 `.gv-app-table td.gv-col-sync`——特异性 0-2-1 才能压过 `.gv-app-table td` 的 `text-align:left`（0-1-1），单纯 `.gv-col-sync` 会被压住；unslop `.app-table .col-sync`），表头本就居中。
+- **附加端口只保留对外监听**：probe 的 `pickPrimary` 与 `preferExpected` 分支过滤 `p.external`——仅本机的附属监听（本站监控网关 8301）不再出现在「+8301」，四个前端共用同一份 apps.json 一致生效；主端口的「仅本机」标注保留不变。
+- **远程真实目录**：远程条目输出 `directory = apps.config 的 gitDir`（未配置为 null），「服务器 / 目录」列两行展示「位置 · 主机」+ 可复制目录行（主站 AppTable `.dir-stack`；AppCard 位置行保留展示、目录独立 fact 行可复制；三份静态拷贝 unslop/glass/glass-v2 的 `dirCellHtml`/`buildDir` 同步改——表格与卡片共用同一函数，一处改两端生效）。改这类展示仍是四处都要改（见 §7.3.1 四拷贝纪律）。
+
 - 踩坑补充：#18 的 `cp -i` 别名再次咬人——恢复配置用 `cat 文件 > 目标` 重定向最稳；验证 apps.json 更新要等探测跑完（远程 git 检查失败重试会使单轮 probe 长达 ~14s），立刻 curl 会读到上一轮产物。
 
 ---
