@@ -222,7 +222,7 @@
         "Fastify"
       ],
       "url": "http://47.95.140.199:3000",
-      "name": "阿里云 · 公网版",
+      "name": "StudyLog-云端",
       "description": "部署在阿里云服务器上的公网版 StudyLog 学习成绩记录系统，面向外网提供访问，数据与内网版本相互独立。",
       "gitDir": "/root/applications/studylog",
       "gitKey": "/root/applications/my-homepage/data/monitor/keys/aliyun"
