@@ -418,7 +418,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **主机为主应用的编辑（2026-11-11）**：`sync-check` 的 `pairs[].truth==='host'`（当前 study-log-cloud⇄aliyun、log-gpt-agent⇄lan-1103）时，方向二会用 `hosts[].name/location/env/host` 覆盖应用同名字段，直接在应用设置改名/改位置看似无效。修复：编辑器顶部显示蓝底提示「已与监控主机 X 双向同步（主机为主）」；名称仍可编辑，保存前 `syncHostNamesForRenames()` 先 GET+PUT `/api/monitor/config` 把新名称写回 `host.name`，再 POST 应用配置；`位置`、`主机 IP / 域名` 在该模式下只读。应用为主（`truth==='app'`）与未配对应用不受此限制。
 
-**顺风·账本两条目（2026-11-11）**：`shunfeng-ledger` 是离线 Android APP——`kinds:['app']`、无端口探测，主机卡显示灰色「离线应用」；`shunfeng-ledger-wxmp-local` 为本地小程序源码占位，`exclude:true`（不出现在主页，仅设置里显示已隐藏，并阻止端口自动发现）；公网条目 `shunfeng-ledger-wxmp` 为 `kinds:['miniapp']`，健康接口 `http://47.95.140.199:8788/api/health`，`gitDir=/root/applications/shunfeng-ledger-wxmp` + aliyun 密钥。**远程纯 APP/小程序没有可访问网页**：`probeRemote` 只在 kinds 含 `web` 时用健康接口同源兜底 `url`，否则置空；`buildAppUrl` 对 `remote` 且无 url 返回空，`hasUrl` 改判 `buildAppUrl`，避免拼出 `http://本机:8788` 的错误链接（glass / unslop / glass-v2 同步）。
+**顺风·账本两条目（2026-11-11）**：`shunfeng-ledger` 是离线 Android APP——`kinds:['app']`、无端口探测，主机卡显示灰色「离线应用」；本机 wxmp 源码条目 `shunfeng-ledger-wxmp-local` 由用户主动取消隐藏，`exclude` 不再设置，名称「顺风·账本（微信小程序）」，作为本机小程序条目展示并自动纳入本机监控（目录 `/root/applications/shunfeng-ledger-wxmp`）；公网条目 `shunfeng-ledger-wxmp` 为 `kinds:['miniapp']`，健康接口 `http://47.95.140.199:8788/api/health`，`gitDir=/root/applications/shunfeng-ledger-wxmp` + aliyun 密钥。两者并存是用户明确选择。**远程纯 APP/小程序没有可访问网页**：`probeRemote` 只在 kinds 含 `web` 时用健康接口同源兜底 `url`，否则置空；`buildAppUrl` 对 `remote` 且无 url 返回空，`hasUrl` 改判 `buildAppUrl`，避免拼出 `http://本机:8788` 的错误链接（glass / unslop / glass-v2 同步）。
 
 ### 8.5 独立毛玻璃页面（`glass/`，访问 `/glass/`）
 
@@ -961,7 +961,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 | 生效 | `local` 主机 `effectiveDirs` 增加 `source:'homepage'` 目录；磁盘/进程/目录资源随之采集 |
 | 触发 | fs.watch `apps.config.json`（600ms 防抖）+ 配置热加载 + 网关启动；无需重启 |
 | 反向 | **不反向**：监控主机自己新增的目录/主机不会变成应用中心条目 |
-| 当前 | 本机 10 个应用目录全部并入（含离线 APP `shunfeng-ledger`）；本地小程序源码条目 `shunfeng-ledger-wxmp-local` 用 `exclude:true` 排除，不监控、不上主页 |
+| 当前 | 本机 11 个应用目录全部并入（含离线 APP `shunfeng-ledger` 与本地小程序源码 `shunfeng-ledger-wxmp-local`）；本地小程序条目由用户主动取消隐藏，正常展示并监控 |
 
 #### B. 远程应用 ↔ 监控主机（显式、双向可选）
 
@@ -992,7 +992,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 
 **状态标志**
 
-- 应用中心「已同步监控」= 本机应用目录在 `local.effectiveDirs` 中（且未 exclude），或远程应用已在 `sync-check` 的 `pairs` 中（兜底 `monitorSync` / `syncSource==='monitor'`）。当前 10 个本机 + 3 个远程配对 = 13 个标志；本地隐藏源码 wxmp 与未配对的公网 wxmp 不带标志。
+- 应用中心「已同步监控」= 本机应用目录在 `local.effectiveDirs` 中（且未 exclude），或远程应用已在 `sync-check` 的 `pairs` 中（兜底 `monitorSync` / `syncSource==='monitor'`）。当前 11 个本机 + 3 个远程配对 = 14 个标志；仅未配对的公网 wxmp 不带标志。
 - 监控主机编辑弹窗：已配对 / `syncSource==='apps'` / `appSync` 时显示只读「已同步应用中心」；仅同地址候选保留勾选框并提示可建立同步。
 
 ### 17.1 机制（文件级双向同步，各写各的文件）
@@ -1047,11 +1047,11 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 ### 18.1 测试覆盖（全部通过）
 
 - **服务与基础设施**：五个 systemd 单元 active + enabled；nginx 两处 server 块 location 齐全；8300/8301 仅回环。
-- **探测链路**：完整探测 14 应用（10 本机 + 4 远程；fetch 10 仓并发 6 ≈5.3s，4 台外机 git 检查 ≈8s），`public/` 与 `www/` 产物 md5 一致；线上机语义（aliyun production）正常。
+- **探测链路**：完整探测 15 应用（11 本机 + 4 远程；fetch 11 仓并发 6 ≈5.3s，4 台外机 git 检查 ≈8s），`public/` 与 `www/` 产物 md5 一致；线上机语义（aliyun production）正常。
 - **设置 API**：三个入口（直连/两个 Host）返回一致；非法 healthUrl / 重复 id 均 400；往返保存无损；`.bak` 自动备份。
 - **监控 API**：summary（4 主机在线）、sync-check（3 配对）、config（effectiveDirs）、history 1h/24h/7d + 非法 range 400、procs、dirs/history、alerts、audit、401 门禁、CSRF 403、agent push/install.sh token 门禁。
 - **终端 WS**：local + netwatch（agent 模式主机）echo 回显 PASS。
-- **前端**：`npm run build` 通过；主站表格 14 行、监控 4 主机卡、详情 6 canvas、设置面板、同步检查面板；/glass/（14 行）、/unslop/、/glass-v2/、/monitor/ stub 重定向——五端点 0 控制台/页面错误（Playwright 会话注入法，脚本 `.verify/sweep-systemtest.cjs`）。
+- **前端**：`npm run build` 通过；主站表格 15 行、监控 4 主机卡、详情 6 canvas、设置面板、同步检查面板；/glass/（15 行）、/unslop/、/glass-v2/、/monitor/ stub 重定向——五端点 0 控制台/页面错误（Playwright 会话注入法，脚本 `.verify/sweep-systemtest.cjs`）。
 
 ### 18.2 修复的 bug（均已重启生效 + 回归验证）
 
