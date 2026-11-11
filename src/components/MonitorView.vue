@@ -177,11 +177,21 @@ function endPane(key) {
     delete termStatus[key]
   })
   if (idx < 0) return
-  focusPane(key)
+  const survivor = termPanes.value[Math.min(idx, termPanes.value.length - 1)] // 聚焦相邻幸存窗格而非已删除的
+  if (survivor) focusPane(survivor.key)
   if (!termPanes.value.length) termOpen.value = false // 全部关闭时收起抽屉
 }
 function focusPane(key) { const r = paneRefs.get(key); r && r.focus() }
-function hideDrawer() { termOpen.value = false } // 仅隐藏：全部窗格与 shell 现场保留 // 仅隐藏：全部窗格与 shell 现场保留
+function hideDrawer() { termOpen.value = false } // 仅隐藏：全部窗格与 shell 现场保留
+/* ✕ 关闭：结束全部窗格并清空（下次打开为全新单窗格）；遮罩/ESC 退出才保留现场 */
+function closeTermAll() {
+  clearTimeout(justAddedTimer)
+  justAdded.value = ''
+  for (const k of Object.keys(termStatus)) delete termStatus[k]
+  termPanes.value = [] // 卸载全部 MonitorTerm → 各自 onBeforeUnmount 关 WS / 释放 xterm
+  termOpen.value = false
+  paneTip.value = ''
+}
 function onTermStatus(key, cls) { termStatus[key] = cls || '' }
 /* 多端输入：任一窗格键入同步到其他窗格 */
 function onPaneInput(from, d) {
@@ -494,7 +504,7 @@ function hostSubtitle(h) {
     />
     <!-- 终端抽屉：多窗格布局，关闭仅隐藏（现场保留），重开不重连 -->
     <div ref="termMaskEl" class="mon-term-mask" v-show="termOpen && !termFull" @click="hideDrawer()" />
-    <div ref="termDrawerEl" class="mon-term-drawer" v-show="termOpen" :class="{ multi: termPanes.length > 1, full: termFull }">
+    <div ref="termDrawerEl" class="mon-term-drawer" v-show="termOpen" :class="{ multi: termPanes.length > 1, full: termFull, w1: termPanes.length === 1, w2: termPanes.length === 2, w3: termPanes.length >= 3 }">
       <div class="mon-term-head">
         <span class="t-title">终端</span>
         <span class="t-multi" :class="{ on: multiInput }" title="任一窗格键入的指令将同步到其他窗格">
@@ -503,7 +513,7 @@ function hostSubtitle(h) {
         <button class="mini-btn" :class="{ on: multiInput }" @click="multiInput = !multiInput">{{ multiInput ? '关闭同步' : '开启同步' }}</button>
         <span class="grow" />
         <button class="mini-btn" @click="toggleTermFull">{{ termFull ? '还原窗口' : '全屏' }}</button>
-        <button class="mini-btn" @click="hideDrawer()">✕ 关闭</button>
+        <button class="mini-btn" title="关闭并清空全部终端（下次打开为全新会话）" @click="closeTermAll()">✕ 关闭</button>
         <div class="host-chips">
           <span class="chips-hint">点击主机名新增终端窗格（同一主机可多开 · 最多 6 个）：</span>
           <button
@@ -650,14 +660,24 @@ export default { name: 'MonitorView' }
   box-shadow: -12px 0 40px rgb(16 24 40 / 0.18);
   display: flex; flex-direction: column; overflow: hidden;
   animation: monTermIn 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+  transition: width 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
+/* 渐进宽度：1 格占 1/3 屏、2 格占 2/3 屏、3 格及以上几乎全屏（左侧留遮罩空白可点击退出） */
+.mon-term-drawer.w1:not(.full) { width: clamp(420px, 33.33vw, 720px); }
+.mon-term-drawer.w2:not(.full) { width: clamp(780px, 66.66vw, 1440px); }
+.mon-term-drawer.w3:not(.full) { width: calc(100vw - 56px); }
 .mon-term-drawer.full { inset: 0; width: 100vw; height: 100vh; border-left: 0; border-radius: 0; }
+.mon-term-head {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+  flex: none; padding: 10px 14px 0;
+}
+.t-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
 .mon-term-drawer :deep(.t-multi) { font-size: 12px; padding: 1px 10px; border-radius: 999px; color: var(--text-2); border: 1px dashed var(--border-strong); }
 .mon-term-drawer :deep(.t-multi.on) { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft); }
 .mon-term-drawer :deep(.mini-btn.on) { color: var(--accent); background: var(--accent-soft); }
 .mon-term-drawer :deep(.host-chips) {
   display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
-  flex: none; padding: 7px 14px; border-bottom: 1px solid var(--border);
+  flex: none; flex-basis: 100%; padding: 6px 0 8px; border-bottom: 1px solid var(--border);
 }
 .mon-term-drawer :deep(.chips-hint) { font-size: 11.5px; color: var(--text-2); }
 .mon-term-drawer :deep(.host-chip) {

@@ -123,11 +123,25 @@ async function refitFocus() {
 }
 watch(() => props.visible, (v) => { if (v) refitFocus() })
 watch(() => props.hostId, (v) => { if (v && props.visible && curHost !== v) connect() })
-onMounted(() => { connect() })
 
 function onResizeWin() { if (props.visible) paneRefit() }
 window.addEventListener('resize', onResizeWin)
+/* 容器尺寸变化（抽屉渐进宽度 / 增减窗格 / 窗口缩放）→ 自动 fit 并同步 pty 列行数，
+   终端内容随之重排；rAF 节流避免宽度过渡期间连续 fit 风暴 */
+let ro = null, roRaf = 0
+onMounted(() => {
+  connect()
+  if (containerRef.value) {
+    ro = new ResizeObserver(() => {
+      if (roRaf) return
+      roRaf = requestAnimationFrame(() => { roRaf = 0; if (props.visible) paneRefit() })
+    })
+    ro.observe(containerRef.value)
+  }
+})
 onBeforeUnmount(() => {
+  if (ro) { ro.disconnect(); ro = null }
+  if (roRaf) cancelAnimationFrame(roRaf)
   clearRetry()
   window.removeEventListener('resize', onResizeWin)
   if (ws) { try { ws.close() } catch { /* 已关 */ } ws = null }
