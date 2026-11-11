@@ -40,7 +40,7 @@ cat data/monitor/INITIAL_PASSWORD.txt
 | `collect.remoteIntervalSec` | 20 | 远程 SSH 采集周期 |
 | `collect.retentionDays` | 7 | 历史 JSONL 保留天数（7 天约 35MB/3 主机） |
 | `thresholds.*` | CPU 85 / 内存 90 / 磁盘 90 / 每核负载 2 | 告警阈值；`sustainMin` 持续分钟才触发 |
-| `terminal.*` | 空闲 480 分 / 上限 720 分 / 每主机并发 10 | Web 终端限制（空闲 8h、硬顶 12h）；`recordCommands` 命令审计开关；改动仅对新会话生效 |
+| `terminal.*` | 空闲 480 分 / 上限 720 分 / 每主机并发 10 / 心跳 300 秒 | Web 终端限制（空闲 8h、硬顶 12h）；`pingIntervalSec` 为 WS 心跳间隔（0=关闭）——没有它空闲会话约 1 小时被 nginx `proxy_read_timeout 3600s` 掐断（AGENTS.md 踩坑 #39）；`recordCommands` 命令审计开关；改动仅对新会话生效 |
 | `webhookUrl` | 空 | 告警触发/恢复时 POST JSON |
 | `hosts[]` | 本机 + 2 远程 | 纳管主机；`type: local` 直读 /proc，`type: ssh` 免 Agent 采集 |
 | `trackedDirs[]` | 空 | 自定义跟踪目录；**主页 `apps[].directory` 自动并入，无需重复登记** |

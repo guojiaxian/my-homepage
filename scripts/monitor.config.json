@@ -22,7 +22,8 @@
     "idleTimeoutMin": 480,
     "maxSessionMin": 720,
     "maxSessionsPerHost": 10,
-    "recordCommands": true
+    "recordCommands": true,
+    "pingIntervalSec": 300
   },
   "webhookUrl": "",
   "hosts": [

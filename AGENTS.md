@@ -515,7 +515,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **存储与告警**：内存环形 5s×1h + 1min 降采样×24h；分钟点落 `data/monitor/history/<hostId>/<日期>.jsonl`（默认保留 7 天，重启回放恢复）。告警阈值（CPU 85/内存 90/磁盘 90/每核负载 2，持续 3 分钟，超阈值+10 或 95% 升级 crit）→ `alerts.jsonl` + webhook（可配）。审计 `audit.jsonl`：登录（含失败限速 5 次/分）、会话开/关（含命令行捕获——按回车切行 best-effort，不录全键盘流）、配置/凭据变更。
 
-**终端网关**：WS `/api/terminal?host=<id>` 升级时校验 HttpOnly 会话 Cookie + Origin 同源；ssh2 shell pty 桥接，支持 resize 控制帧（`{type:'resize'}`）；空闲 8h / 单会话 12h 硬顶 / 每主机并发 10（均可配，改动仅对新会话生效）。前端抽屉（`MonitorTerm.vue`，多会话页签）+ 独立弹窗页（`monitor/terminal.html?host=`）。命令白名单对全交互 PTY 不可靠（诚实边界），更强约束在目标机侧做（sudo 白名单/rbash），见蓝图 §5.5。
+**终端网关**：WS `/api/terminal?host=<id>` 升级时校验 HttpOnly 会话 Cookie + Origin 同源；ssh2 shell pty 桥接，支持 resize 控制帧（`{type:'resize'}`）；空闲 8h / 单会话 12h 硬顶 / 每主机并发 10（均可配，改动仅对新会话生效）。**WS 心跳（2026-11-12）**：网关每 `terminal.pingIntervalSec`（默认 300，0=关）发一帧 WS ping——没有它，完全空闲的终端整条 nginx 隧道无帧流动，会被 `/api/terminal` 的 `proxy_read_timeout 3600s` 在约 1 小时掐断，8h 空闲阈值形同虚设；pong 是协议层应答、不触发 message 事件，不会把协议回包误算作用户活动刷新 idleTs（见踩坑 #39）。前端抽屉（`MonitorTerm.vue`，多会话页签）+ 独立弹窗页（`monitor/terminal.html?host=`）。命令白名单对全交互 PTY 不可靠（诚实边界），更强约束在目标机侧做（sudo 白名单/rbash），见蓝图 §5.5。
 
 **监控设置弹窗统一设计体系（2026-11-11，用户反馈「窗口非常丑，保持和应用中心一致风格」，commit da1db75）**：`MonitorSettings.vue` 全面重排、`MonitorHostEdit.vue` 同步微调，两处弹窗与应用中心 `SettingsPanel` 共用同一套类名与观感，**逻辑零改动**（草稿 → 底部「保存配置」PUT 语义不变）：
 
@@ -739,6 +739,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 
 38. **`git status` 的“已改”可能只是权限位，不代表代码改动**
    阿里云 `shunfeng-ledger-wxmp` 在应用中心长期显示「线上已改 1」，排查发现 `git diff` 内容为空，只有 `old mode 100644 / new mode 100755`；`stat` 显示 2026-10-22 08:23 权限被 `chmod +x`，提交内容与 HEAD 完全一致。用户明确要求不动后保持现状。教训：① 远程仓库报 dirty 先跑 `git diff` / `git diff --summary` 与 `stat`，区分内容改动、权限位、未跟踪文件；② 非本任务引入的脏状态默认不清理，报告证据后由用户决定；③ 不要把「线上已改」直接当成代码回滚/提交的理由。
+
+39. **反向代理的空闲超时会在服务端空闲阈值之前掐断 WS 隧道**
+   终端空闲阈值 8h（`idleTimeoutMin: 480`），但 nginx `/api/terminal` 的 `proxy_read_timeout 3600s` 按「上游 1 小时无任何字节」掐断隧道——网关原先不发任何 WS 心跳，SSH 的 keepalive 又只保活网关↔目标机段、不产生 WS 流量，于是完全空闲的终端实际约 **1 小时**就被断开（客户端 close 1006），8h 配置形同虚设。修复：网关每 `terminal.pingIntervalSec`（默认 300s）发一帧 WS ping。两个要点：① **pong 是协议层应答**，`ws` 库不为其触发 `message` 事件，天然不会刷新 `idleTs`——不要自己造 JSON 心跳消息走 message 通道，否则会话永不空闲超时；② 实测方法见 `.verify` 同级的 `/tmp` 测试法（已删）：临时 nginx location 把读超时压到 10s + 独立网关实例把空闲/硬顶压到 1/2 分钟，9 断言对照验证「有心跳越过 10s 存活→4001 空闲关闭；无心跳 10.4s 即被掐；活动刷新空闲→撞 4002 硬顶」。教训：会话类长连接的「服务端超时」只是三层限制（客户端行为 / 反代空闲超时 / 服务端阈值）中的一层，**逐层核对谁先到**，别只看自己代码里的那个定时器。
 
 ---
 
