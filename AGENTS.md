@@ -1,7 +1,7 @@
 # AGENTS.md · my-homepage 项目交接记忆
 
 > 面向接手本项目的 AI Agent / 开发者：读完这一份即可上手，无需再翻聊天记录。
-> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；应用中心 ⇄ 监控中心双向同步见 §17，系统测试/优化见 §18，**终端全量测试与交互加固（滚轮守卫/渐进宽度/关闭确认/resize 防泄漏）见 §19**，2026-11-10 的 UI/图表/目录设置记忆见 §16。
+> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；**外机/线上机 git 同步检查（含四处前端拷贝规则、重试与已知边界）见 §20 与 §7.3.1**，应用中心 ⇄ 监控中心双向同步见 §17，系统测试/优化见 §18，终端全量测试与交互加固见 §19，2026-11-10 的 UI/图表/目录设置记忆见 §16。
 
 ---
 
@@ -39,6 +39,7 @@
 | 监控采集模式 | `hosts[].mode`：`ssh`（中心拉取，默认/公网机）或 `agent`（目标机推送，内网机）；netwatch=agent 实测中 |
 | 被监控主机 | 4 台：本机（local）+ netwatch(10.8.14.200, agent) + aliyun(47.95.140.199, ssh) + lan-1103(10.8.11.3, ssh)；均 ONLINE（2026-11-10） |
 | 探测定时器 | `my-homepage-probe-quick.timer` 每 3 分钟（`--no-fetch`）；`my-homepage-probe.timer` 每 5 分钟（完整，含 fetch） |
+| 外机 git 检查 | `remoteApps[].gitDir` 配置后每轮经 SSH 检查外机目录；公网机按**线上机**口径（仅允许 pull，dirty/ahead=违规红）；瞬态失败 4s/10s 退避重试，见 §7.3.1 |
 | 前端轮询 | 主页每 60 秒拉一次 `apps.json`；监控看板每 5 秒拉 summary |
 | 已登记应用 | 12 个（9 个本机 + 2 个外机 + 1 个公网；含 2 个离线应用） |
 | 后端依赖 | 主站仍零依赖；监控网关新增 `ssh2`/`ws`（终端与远程采集），前端 vendor 库 echarts/xterm 随仓库提交 |
@@ -693,6 +694,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 34. **WS 控制帧与键盘输入共用一条通道时，「就绪前缓冲」必须先分拣控制帧**
    终端 WS 里 resize 是 JSON 文本帧（`{"type":"resize",…}`），服务端对已就绪会话会解析并 `setWindow`；但 shell 未就绪（SSH 握手数百 ms~数秒）期间到达的消息被**原样**塞进 `pendingInput`，就绪后 `write()` 回放——SSH 远程窗格一打开就把 resize JSON 当键盘输入灌进 shell（终端里刷一屏 `{"type":"resize",…}`，bash 还会报 command not found）。本机 pty 就绪快、此前 resize 频次低，一直没暴露；ResizeObserver 让 fit 高频化后截图验收当场炸出。修复：缓冲前先分拣——resize 帧不入队、只记最新尺寸，就绪后先 `setWindow` 再回放输入（2026-11-11）。教训：① 复用输入通道的控制帧，任何「缓冲→回放」路径都要过同样的分拣；② 新增高频 resize 源（RO/动画）后，**截图验收和 E2E 要覆盖远程慢握手主机**——本机窗格永远测不出这类时序 bug。
 
+35. **用 Python 批量生成 JS 代码时，`{{`/`}}` 转义极易漏成裸双花括号**
+   给 `glass-v2`/`unslop` 打补丁时用 f-string 模板生成三元 map，模板里写了 `{{`（本意是字面花括号），替换阶段却没做 `.replace('{{','{')`，直接把 `? {{` 写进了 JS —— 三个文件里两个当场 `SyntaxError: Unexpected token '{'`。教训：① 生成式改代码后**必须 `node --check` 每个产物**（本次正是靠它立刻发现）；② 更稳的做法是不用模板拼大段 JS，改用 Python 的普通字符串（不解析 `{}`）后 `str.replace` 注入，或直接用 Edit 工具逐文件改；③ 同一段逻辑在 3-4 个文件里重复时（前端多拷贝），优先想「有没有共享源」而不是「复制粘贴改四遍」。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
@@ -752,6 +756,8 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | study-log-cloud | StudyLog 公网版 | **公网**（阿里云） | http://47.95.140.199:3000 · v1.2.0 | — |
 
 > 状态会随时变化，以上仅为撰写时快照。以 `curl -s http://127.0.0.1/apps.json` 为准。
+
+> 三台远程应用均已配置外机 git 检查（2026-11-11）：network-monitor `dirty×47`、log-gpt-agent `dirty×3`、study-log-cloud `synced`（线上机，`production:true`）。
 
 **监控中心纳管主机清单（2026-11-10 上线）**：
 
@@ -991,7 +997,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 
 ---
 
-## 19. 2026-11-11 增量：终端全量测试与交互加固（本轮）
+## 19. 2026-11-11 增量：终端全量测试与交互加固
 
 ### 19.1 全量测试与修复（终审轮）
 
@@ -1023,3 +1029,53 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 | `shot-term-gallery.mjs` / `shot-confirm.mjs` | 终端九形态截图 / 确认框截图 |
 
 > 说明：`.verify/` 被 gitignore，换机器/协作者接手时这些脚本不随仓库走；需要时按本文档描述重建。
+
+---
+
+## 20. 2026-11-11 增量：外机 / 线上机 git 同步检查
+
+需求原话：「现在的 git 检查只能检查本机项目目录，我想实现检查外机的项目目录的 git 情况，显示在应用中心；如果运行期间因为并发限制中断，就过一段时间自动重试。」后续追加：「公网服务器是线上服务器，理论上只能 pull 代码，不允许直接在线上修改代码，也不允许 push，将公网服务器的服务也纳入检查。」
+
+### 20.1 能力与字段（实现细节见 §7.3.1）
+
+| 项 | 内容 |
+|---|---|
+| 配置字段 | `remoteApps[].gitDir`（外机目录，**配置了才检查**）、`gitSsh`（缺省 `root@<host>`）、`gitKey`（私钥，推荐 `data/monitor/keys/<hostId>`） |
+| 探测 | 每台外机 **1 条 SSH** 跑完 fetch + status + ahead/behind（`@branch@/@repo@/@fetch@/@st@/@count@/@end@` 分段），结果写入 `apps.json` 的 `git`，与本机同构 |
+| 并发/重试 | 并发 2（`PROBE_REMOTE_GIT_CONCURRENCY`）；瞬态失败 **4s → 10s** 退避共 3 次尝试；仍失败 `status:'error'`，**下一轮完整探测自动再试** |
+| 线上语义 | `env:'public'` → `git.production:true` → dirty/ahead 按**违规（红）**、behind 按「可拉取（橙）」、synced「线上已同步」 |
+| 面板 | 设置面板远程应用弹窗新增三字段（`gitDir/gitSsh/gitKey`），`settings-server` 白名单放行 |
+| 当前配置 | network-monitor@netwatch `/root/network-monitor`、log-gpt-agent@lan-1103 `/root/log_gpt_agent`、study-log-cloud@aliyun `/root/applications/studylog` |
+
+### 20.2 全链路审计：发现并修复的 3 个真问题
+
+1. **三份静态端点拷贝缺线上语义（真 bug）**：`glass/assets/glass.js`、`glass-v2/assets/glass-v2.js`、`unslop/assets/app.js` 各有一份 `gitSyncView` 拷贝，公网机全显示成「已同步/未提交」——线上违规被弱化成普通提醒。已三处同步（含 title 前缀「线上机（仅允许 pull…）」）。**规则：改 git 展示逻辑 = 四处同改**（`src/lib/app-utils.js` + 三个静态端点）。
+2. **无远端仓库的 `remoteOk` 语义不一致**：本机 `fetchRepo` 无 remote → `true`；远端脚本原来输出 `skip` → `null`。已区分 `@fetch@ none`（无远端，视为成功）/ `skip`（快速探测，null）。
+3. **id 碰撞防护**：若以后 `/root/applications` 自动发现同名目录，`remoteGitMap.get(r.id)` 会把外机结果错贴到本地条目。已改为仅 `r.remote` 时才查 map。
+
+### 20.3 已知边界（未改，影响小，需要时再动）
+
+- **不可达外机拖慢探测**：每台不可达约 +38s（3 次尝试含 8s 连接超时 + 4s/10s 退避）；多台同时挂且并发 2 时最长约 80s，仍在定时器容忍内。可用 `PROBE_REMOTE_GIT_CONCURRENCY` 调并发。
+- **文件名含换行符**会破坏按行解析（本机检查同样限制，git 场景极罕见）。
+- **repo 链接固定读 `origin`**：分支 upstream 不是 origin 的仓库，链接可能指向 origin（本机同款行为）。
+- 可选优化（未做，收益小）：本机与外机 fetch 池并行，完整探测 14s → 约 8s。
+
+### 20.4 验证方法（可复现）
+
+```bash
+# 1) 完整探测（真实外机，含 fetch）
+node scripts/probe-apps.mjs            # 远程 git 检查 3 台外机，实测约 8s
+# 2) 快速探测（免 fetch）
+node scripts/probe-apps.mjs --no-fetch # 实测 3 台约 160ms
+# 3) 断言 apps.json
+curl -s http://127.0.0.1/apps.json | python3 -c "
+import json,sys
+for a in json.load(sys.stdin)['apps']:
+    if a.get('remote') and a.get('git'): print(a['id'], a['git']['status'], a['git'].get('production'))"
+# 4) 重试路径：临时加一条 gitSsh 指向不可达 IP 的 remoteApps，应看到
+#    「4s 后自动重试（2/3）」→「10s 后自动重试（3/3）」→「重试 3 次均失败，标记 error」
+# 5) UI：主站 / glass / glass-v2 / unslop 各端点公网版同步 chip 应为「线上已同步」
+#    （Playwright 用 sessions.json 注入 mh_mon cookie，见踩坑 #23；glass-v2 的 chip 类是 .gv-git-chip）
+```
+
+实测基线（2026-11-11）：netwatch `/root/network-monitor`（main）未提交 47；lan-1103 `/root/log_gpt_agent`（VueRebuild）未提交 3；aliyun `/root/applications/studylog`（main）`synced + production:true`。
