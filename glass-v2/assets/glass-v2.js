@@ -1300,6 +1300,7 @@
     await new Promise((r) => setTimeout(r, 60))
     if (!bt.open) return // closeBatch 已在 60ms 内被调用
     for (const h of hosts) connectPane(h)
+    updateMode() // 连接循环push完窗格后刷新「下发到全部 N 台」计数
   }
 
   function setStatusPane(pane, txt, cls) {
