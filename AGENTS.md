@@ -1,7 +1,7 @@
 # AGENTS.md · my-homepage 项目交接记忆
 
 > 面向接手本项目的 AI Agent / 开发者：读完这一份即可上手，无需再翻聊天记录。
-> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；**外机/线上机 git 同步检查（含四处前端拷贝规则、重试与已知边界）见 §20 与 §7.3.1**，应用中心 ⇄ 监控中心双向同步见 §17，系统测试/优化见 §18，终端全量测试与交互加固见 §19，2026-11-10 的 UI/图表/目录设置记忆见 §16。
+> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；**外机/线上机 git 同步检查（含四处前端拷贝规则、重试与已知边界）见 §20 与 §7.3.1**，应用中心 ⇄ 监控中心双向同步/同步检查/按地址配对见 §17，**监控设置弹窗 UI 统一设计体系见 §8.7**，系统测试/优化见 §18，终端全量测试与交互加固见 §19，2026-11-10 的 UI/图表/目录设置记忆见 §16。
 
 ---
 
@@ -495,6 +495,16 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **终端网关**：WS `/api/terminal?host=<id>` 升级时校验 HttpOnly 会话 Cookie + Origin 同源；ssh2 shell pty 桥接，支持 resize 控制帧（`{type:'resize'}`）；空闲 8h / 单会话 12h 硬顶 / 每主机并发 10（均可配，改动仅对新会话生效）。前端抽屉（`MonitorTerm.vue`，多会话页签）+ 独立弹窗页（`monitor/terminal.html?host=`）。命令白名单对全交互 PTY 不可靠（诚实边界），更强约束在目标机侧做（sudo 白名单/rbash），见蓝图 §5.5。
 
+**监控设置弹窗统一设计体系（2026-11-11，用户反馈「窗口非常丑，保持和应用中心一致风格」，commit da1db75）**：`MonitorSettings.vue` 全面重排、`MonitorHostEdit.vue` 同步微调，两处弹窗与应用中心 `SettingsPanel` 共用同一套类名与观感，**逻辑零改动**（草稿 → 底部「保存配置」PUT 语义不变）：
+
+- **模态体系**：遮罩改 `rgb(0 0 0 / .45)` + `backdrop-filter: blur(3px)` + **居中**（原 `align-items: flex-start` 贴顶）；面板 `var(--bg)` + 14px 圆角 + `min(820px,100%)` + `max-height: 90vh`；头部关闭改 `icon-btn`（原 `mini-btn` 像输入框）。`MonitorHostEdit` 同样居中 + `max-height: 90vh` 内部滚动（原 `calc(100vh-260px)` 且贴顶）。
+- **区块标题**：去掉 `border-bottom: 1px dashed` 虚线分隔，改 13.5px 灰标题 + `.hcount` 说明 + 右侧 `mini-btn.add-btn`「＋添加主机」，对齐应用中心 h3。
+- **纳管主机列表**：对齐 `app-row`——`.hr-ico` 图标瓦片（本机 `accent-soft` 蓝 / 远程 `amber-soft` 橙）+ `hr-name`（名称 + mono id）+ `hr-sum` 摘要 + 「内置」tag + `›` 箭头，hover 蓝边浅蓝底。
+- **表单**：统一 `.fitem`（12px 标签 + 13.5px 输入 + 8px 圆角 + focus 蓝边）与明确网格——告警阈值 `grid3`、采集与历史 `grid4`、终端与通知 `grid4`（命令行审计改 `.chk` 单行不折行、webhook `span4` 全宽）；密码区改 `primary-btn` 蓝底主按钮。旧实现 `repeat(auto-fit, minmax(150px,1fr))` 导致 4 列参差、webhook 半宽孤行。
+- **审计表**：圆角容器 + sticky 表头 + 行 hover；事件名 mono 按结果着色（`.ev.bad` 红 / `.ev.good` 绿，`/fail|denied/` 与 `/_ok|provision_ok/` 判定）；备注列 320px 截断 + title 全量。
+- **底部 foot**：保存反馈从标题栏移来（`.save-tip.ok/.bad`），左草稿提示、右「取消 / 保存配置」，对齐应用中心 `settings-foot`。
+- **踩坑**：改根类名（`.mon-modal`→`.settings-panel.mon`）与入口位置后 `.verify/` 下 E2E 选择器需同轮更新（见踩坑 #33）；对照截图 `.verify/settings-before-*.png` / `settings-after-*.png`（Playwright 会话注入法）。
+
 **滚轮滚动链守卫（2026-11-11，用户实测反馈「终端里滚轮带动背后页面滚动」）**：双保险修复——① 终端各覆盖层（SPA 抽屉+遮罩 / `MonitorBatchTerm` 批量层 / 独立终端页 `.term-page` / glass-v2 的 `#gv-term-mask`、`#gv-term-drawer`、`#gv-bt`）挂非被动 `wheel` 监听直接 `preventDefault()`，冒泡阶段晚于 xterm 内部监听，自身回滚不受影响；② 各 `.xterm-viewport` 加 `overscroll-behavior: contain`，滚到回滚边界不再外溢。验证：`.verify/e2e-wheel-guard.mjs`（8 断言：背后页面 scrollY 不动 × 5 处 + xterm scrollTop 正常变化）。注意独立终端页容器是 `class="term-page"` 无 id，别用 getElementById。
 
 **鉴权**（2026-11-10 按用户要求放宽并升级为全站门禁）：独立访问密码（scrypt，只存哈希于 `data/monitor/.password-hash` 0600，配置文件不保存任何密码材料）；**无密码复杂度规则**（非空即可）。会话 **365 天滑动有效期并持久化到 `data/monitor/sessions.json`**（0600，关停 flush / 每分钟落盘 / 启动回放）——**同一浏览器登录一次后长期免密**：网关重启、改密均不掉线，只有主动 logout 或 cookie 丢失才需重登；Cookie `Max-Age` 与 TTL 同步（1 年）。改密保留既有会话。除 `login`/`healthz` 外全部 API 需会话；写操作另需 `X-Requested-With: XMLHttpRequest`（CSRF 双保险）；登录失败限速 5 次/分保留。**全站门禁**：App.vue 启动时检一次会话（401 → 登录层覆盖整个主页两视图；掉鉴权中途经 `unauth` 事件重现），glass-v2 加载即同检；网关不可达/502 时 **fail-open 放行**，不把主页锁死（stop.sh 场景）。CLI：`--set-password-stdin`、`--set-cred <hostId> --password-stdin`。
@@ -733,6 +743,8 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 目录历史对比默认全选（2026-11-10） | 用户要求「默认全选」：seededDirs 只补新目录，15s 自刷不勾回手动取消项；另配全选/清空按钮兜底 |
 | 监控布局对照 1Panel 重排（2026-11-10） | 用户反馈「1Panel 布局好看、我们的有点奇怪」：根源是 hero 三层堆叠 / 圆环数字小 / 装饰编码重复 / 详情无分组。按「密度均匀、单一卡片体系、颜色只表达语义」收紧，白底语言与导航不变（详情见 §8.7 布局重排段） |
 | 应用中心 ⇄ 监控中心双向同步（2026-11-11） | 用户要求「添加应用可选同步到监控中心并监测，反之亦然，中断自动重试」：选 fs.watch 文件级同步（monitor-server 只写 monitor.config、settings-server 只写 apps.config，单一写者）而非前端编排——UI 之外（CLI/手工改配置）同样生效；「无 diff 不写盘」防回环，重试器退避抗读写竞态（详见 §17） |
+| 同步检查面板 + 按地址配对（2026-11-11） | 既有真实不同步（应用 id 与主机 id 不同，如 network-monitor ⇄ netwatch）暴露「只按 id 配对会建重复条目」：改为同 id 优先、其次同地址，并在设置页给出可读检查视图（配对/异常/候选 + 一键配对 + 强制重同步），让「有没有不同步」可自查而非靠日志（详见 §17.3） |
+| 监控设置弹窗对齐应用中心设计体系（2026-11-11） | 用户反馈「窗口非常丑，保持和应用中心一致风格」：两处弹窗与 `SettingsPanel` 共用同一套类名（settings-overlay/panel/head/foot + fitem + mini-btn/primary-btn），视觉语言一套、后续改一处同步（详见 §8.7 该段） |
 | 终端渐进宽度 1/3→2/3→近全屏（2026-11-11） | 用户要求「1 个占 1/3 屏、2 个占 2/3、3 个几乎占满（左侧留空白退出）」：按窗格数切 `w1/w2/w3` 三档而非让抽屉固定全宽——每格恒约 1/3 屏，增减窗格时已有终端内容不跳变；`:not(.full)` 与全屏档解耦 |
 | 终端关闭确认弹窗 + 遮罩保留（2026-11-11） | 用户要求「点击关闭加弹窗确定」：清空全部会话不可恢复，✕ 需二次确认（取消/ESC/点遮罩三路径可撤销）；而点抽屉外空白/ESC 仍是「保留现场」的轻退出——两种退出语义分离，日常切换不误清 shell |
 
@@ -952,6 +964,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 
 - `scripts/monitor-server.mjs`（normalizeHost 白名单 + syncAppsToHostsOnce + makeSyncRetryer + watcher/main 挂载）、`scripts/settings-server.mjs`（MONITOR_CONFIG_FILE + sanitize 白名单 + syncHostsToAppsOnce + makeSyncRetryer + watcher + 启动/POST 挂载，顺带修正文件头过时注释）、`src/components/SettingsPanel.vue`（勾选 + 徽标 + normalizeEntry）、`src/components/MonitorHostEdit.vue`（勾选区 + `.sync-chk` 样式）、`src/components/MonitorSettings.vue`（hostSummary 徽标）。
 - 生效方式：`./deploy.sh` + `systemctl restart my-homepage-settings my-homepage-monitor`。
+- 本轮提交：`faa9916`（双向同步主体：两方向 fs.watch 同步 + 退避重试）、`4218b52`（同步检查端点/面板 + 按地址配对）、`da1db75`（监控设置弹窗 UI 对齐，详见 §8.7）、`b6419d7`（同步列居中 + 附加端口仅对外 + 远程真实目录，详见 §17.5）。
 - 实测通过：方向一创建（gitDir 预置目录、note、syncSource）、改名回写、方向二跳过路径（monitorSync 优先）、方向二创建（env=公网映射、probe 自动触发、apps.json 出现条目）、无回环、退避重试链条、清理无复活；Playwright 会话注入验证三处勾选渲染（`.verify/sync-1-appeditor.png`、`sync-2-hosteditor.png`）。
 ### 17.5 展示修正（2026-11-11 用户反馈三则）
 
