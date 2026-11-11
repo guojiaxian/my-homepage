@@ -85,13 +85,44 @@ async function renderAll() {
 function onResize() { if (charts) charts.instances.forEach((c) => c.resize()) }
 
 function pts() { return hist.value || [] }
-/* 当前值 / 区间峰值：图头直接展示，解释纵轴为何按峰值自适应 */
+/* 当前值 / 区间峰值：图头直接展示，解释纵轴为何按峰值自适应（始终取原始数据，平滑不改变峰值） */
 const cpuNow = computed(() => (hist.value.length ? hist.value[hist.value.length - 1].cpu : null))
 const cpuPeak = computed(() => hist.value.reduce((m, p) => Math.max(m, p.cpu ?? 0), 0))
+
+/* 乙1 平滑开关：对原始采样做居中滑动平均，消除瞬时抖动毛刺（2026-11-12 用户反馈波形难看）。
+   窗口按时间窗选：1h(5s 点) 用 12 点 ≈ 1 分钟；24h/7d(分钟点) 用 5 点。
+   null（离线/无数据）不参与平均，窗口内全空时保持 null——离线断线效果不变。 */
+const smooth = ref(true)
+const SMOOTH_KEYS = ['cpu', 'mem', 'netI', 'netO', 'dioR', 'dioW']
+function smoothSeries(list, win) {
+  if (win <= 1) return list
+  const half = Math.floor(win / 2)
+  return list.map((p, i) => {
+    const out = { ...p }
+    for (const k of SMOOTH_KEYS) {
+      if (p[k] == null) continue
+      let sum = 0
+      let n = 0
+      for (let j = Math.max(0, i - half); j <= Math.min(list.length - 1, i + half); j++) {
+        const v = list[j][k]
+        if (v != null && Number.isFinite(v)) { sum += v; n++ }
+      }
+      if (n) out[k] = +(sum / n).toFixed(3)
+    }
+    return out
+  })
+}
+/* 平滑后的趋势点；切 range 时窗口随粒度变化（由 watch(range) → load → renderTrends 触发） */
+function trendPts() {
+  if (!smooth.value) return hist.value || []
+  const win = range.value === '1h' ? 12 : 5
+  return smoothSeries(hist.value || [], win)
+}
 
 function renderTrends() {
   const { baseOption, lineSeries, legendStyle, cssVar } = mod()
   const t = (p) => p.t
+  const data = trendPts()
   /* 纵轴单位：轴名放顶部，避免数值标签加单位后挤压绘图区 */
   const unit = (text) => ({
     name: text,
@@ -107,7 +138,7 @@ function renderTrends() {
     grid: { ...cpuBase.grid, top: 30 },
     tooltip: { ...cpuBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v}%`) },
     series: [
-      lineSeries('CPU %', pts().map((p) => [t(p), p.cpu]), cssVar('--accent')),
+      lineSeries('CPU %', data.map((p) => [t(p), p.cpu]), cssVar('--accent')),
     ],
   }, { notMerge: true })
 
@@ -118,7 +149,7 @@ function renderTrends() {
     grid: { ...memBase.grid, top: 30 },
     tooltip: { ...memBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v}%`) },
     series: [
-      lineSeries('内存 %', pts().map((p) => [t(p), p.mem]), cssVar('--purple')),
+      lineSeries('内存 %', data.map((p) => [t(p), p.mem]), cssVar('--purple')),
     ],
   }, { notMerge: true })
 
@@ -130,8 +161,8 @@ function renderTrends() {
     tooltip: { ...netBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v} Mbps`) },
     yAxis: { ...netBase.yAxis, ...unit('Mbps') },
     series: [
-      lineSeries('下行 Mbps', pts().map((p) => [t(p), p.netI]), cssVar('--accent')),
-      lineSeries('上行 Mbps', pts().map((p) => [t(p), p.netO]), cssVar('--green')),
+      lineSeries('下行 Mbps', data.map((p) => [t(p), p.netI]), cssVar('--accent')),
+      lineSeries('上行 Mbps', data.map((p) => [t(p), p.netO]), cssVar('--green')),
     ],
   }, { notMerge: true })
 
@@ -143,8 +174,8 @@ function renderTrends() {
     tooltip: { ...dioBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v} MB/s`) },
     yAxis: { ...dioBase.yAxis, ...unit('MB/s') },
     series: [
-      lineSeries('读 MB/s', pts().map((p) => [t(p), p.dioR]), cssVar('--teal')),
-      lineSeries('写 MB/s', pts().map((p) => [t(p), p.dioW]), cssVar('--amber')),
+      lineSeries('读 MB/s', data.map((p) => [t(p), p.dioR]), cssVar('--teal')),
+      lineSeries('写 MB/s', data.map((p) => [t(p), p.dioW]), cssVar('--amber')),
     ],
   }, { notMerge: true })
 }
@@ -255,6 +286,7 @@ const sortedProcs = computed(() => {
 })
 
 watch(range, load)
+watch(smooth, () => { if (charts) renderTrends() })
 watch(() => props.host?.id, () => {
   dirFilter.value = ''
   compareSet.clear()
@@ -296,7 +328,16 @@ onBeforeUnmount(() => {
 
     <p v-if="err" class="detail-err">加载失败：{{ err }}</p>
 
-    <div class="group-cap">资源趋势 <span>曲线颜色见各图图例 · 纵轴按所选时段的峰值自适应</span></div>
+    <div class="group-cap">资源趋势 <span>曲线颜色见各图图例 · 纵轴按所选时段的峰值自适应</span>
+      <button
+        class="cap-toggle"
+        :class="{ on: smooth }"
+        :title="smooth
+          ? '已对原始采样做滑动平均（1h≈1 分钟窗口 / 24h、7d≈5 分钟），消除瞬时抖动；图头「当前/峰值」仍为原始数据。点击切回原始曲线'
+          : '当前为原始采样曲线（5s/分钟粒度瞬时值）。点击开启滑动平均，消除瞬时抖动毛刺'"
+        @click="smooth = !smooth"
+      >{{ smooth ? '平滑：开' : '平滑：关' }}</button>
+    </div>
     <div class="charts4">
       <div class="chart-box">
         <h4>CPU 使用率 <span v-if="cpuNow != null" class="hint">当前 {{ cpuNow.toFixed(1) }}% · 峰值 {{ cpuPeak.toFixed(1) }}%</span></h4>
@@ -403,6 +444,27 @@ onBeforeUnmount(() => {
 .group-cap:first-of-type { margin-top: 2px; }
 .group-cap span { font-weight: 400; font-size: 11.5px; color: var(--text-3, var(--gray)); }
 .group-cap::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+/* 乙1 平滑开关：贴 group-cap 行右端的轻量胶囊（开启态与 range-tabs 同族的蓝色弱底）。
+   order:2 让拉通 hairline（::after）排在按钮之前，按钮贴到行最右端 */
+.cap-toggle {
+  order: 2;
+  border: 1px solid var(--border);
+  background: var(--bg-soft);
+  color: var(--text-2);
+  border-radius: 999px;
+  padding: 2px 12px;
+  font-size: 11.5px;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: none;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.cap-toggle:hover { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.cap-toggle.on {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
 .detail-bar { width: 4px; height: 22px; border-radius: 2px; background: var(--accent); flex: none; }
 .detail-bar.public { background: var(--amber); }
 .detail-title { display: flex; flex-direction: column; min-width: 200px; }
