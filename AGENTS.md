@@ -1,7 +1,7 @@
 # AGENTS.md · my-homepage 项目交接记忆
 
 > 面向接手本项目的 AI Agent / 开发者：读完这一份即可上手，无需再翻聊天记录。
-> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；**外机/线上机 git 同步检查（含四处前端拷贝规则、重试与已知边界）见 §20 与 §7.3.1**，应用中心 ⇄ 监控中心双向同步/同步检查/按地址配对见 §17，**监控设置弹窗 UI 统一设计体系见 §8.7**，系统测试/优化见 §18，终端全量测试与交互加固见 §19，2026-11-10 的 UI/图表/目录设置记忆见 §16。
+> 最后更新：2026-11-11 · 文档随代码演进，改功能时请同步更新本文；**外机/线上机 git 同步检查（含四处前端拷贝规则、重试与已知边界）见 §20 与 §7.3.1**，**应用中心 ⇄ 监控中心当前同步策略的权威摘要见 §17.0**（双向同步/同步检查/按地址配对细节见 §17.1–17.5），**监控设置弹窗 UI 统一设计体系见 §8.7**，系统测试/优化见 §18，终端全量测试与交互加固见 §19，2026-11-10 的 UI/图表/目录设置记忆见 §16。
 
 ---
 
@@ -947,6 +947,53 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 ## 17. 2026-11-11 增量：应用中心 ⇄ 监控中心 双向同步
 
 用户需求：「应用中心手动添加应用时可选择同步到监控中心，自动同步应用信息并监测，反之亦然；运行期间因并发限制中断则过一段时间自动重试。」
+
+### 17.0 当前同步策略总览（2026-11-11，权威口径）
+
+**一句话**：本机应用靠「目录自动并入」单向进入监控；远程应用与监控主机靠显式配对做可选双向同步，事实源由配对方向决定；凭据、终端、删除永不自动同步。
+
+#### A. 本机应用 → 本机监控（自动、单向）
+
+| 项 | 规则 |
+|---|---|
+| 开启 | 无需勾选；`apps[]` 条目有 `directory` 且 `exclude` 不为 true 即自动生效 |
+| 写者 | `monitor-server.mjs` 读 `apps.config.json`，只写 `monitor.config.json` |
+| 生效 | `local` 主机 `effectiveDirs` 增加 `source:'homepage'` 目录；磁盘/进程/目录资源随之采集 |
+| 触发 | fs.watch `apps.config.json`（600ms 防抖）+ 配置热加载 + 网关启动；无需重启 |
+| 反向 | **不反向**：监控主机自己新增的目录/主机不会变成应用中心条目 |
+| 当前 | 本机 10 个应用目录全部并入（含离线 APP `shunfeng-ledger`）；本地小程序源码条目 `shunfeng-ledger-wxmp-local` 用 `exclude:true` 排除，不监控、不上主页 |
+
+#### B. 远程应用 ↔ 监控主机（显式、双向可选）
+
+| 方向 | 开关 | 写者 / 监听 | 产物 | 共享字段 |
+|---|---|---|---|---|
+| ① 应用 → 主机 | 应用 `monitorSync:true` | `monitor-server` 监听 `apps.config.json`，只写 `monitor.config.json` | 同 id（或同地址）SSH 主机；`syncSource:'apps'`、`credReady:false`、`note` 待配凭据；`gitDir` 预置为跟踪目录 | `name`、`group`（env 映射公网/内网）、`address` |
+| ② 主机 → 应用 | 主机 `appSync:true` | `settings-server` 监听 `monitor.config.json`，只写 `apps.config.json` | 同 id（或同地址）远程应用；`syncSource:'monitor'`；地址变化时重生成默认 healthUrl/url | `name`、`location`、`env`、`host` |
+
+**配对与事实源**
+
+- 先按同 id 配对，id 不存在再按地址配对（主机 `address` ↔ 应用 `host`）；`syncSource` 标记的条目不被其他地址抢占，一台主机每轮只被第一个 `monitorSync` 应用占用。
+- `sync-check` 返回 `pairs[].truth`：应用勾 `monitorSync` → `truth:'app'`（应用为主）；主机勾 `appSync` → `truth:'host'`（主机为主）；两者同时勾时方向二跳过，仍为应用为主。
+- 候选（同地址、两侧都没勾）可在「同步检查」里一键选择「应用为主 / 主机为主」；已配对但字段不一致会在 `diffs` 中列出，重同步或下次保存对齐。
+- 当前 3 对：`network-monitor ⇄ netwatch`（truth=app）、`StudyLog-云端 ⇄ aliyun`（truth=host）、`log-gpt-agent ⇄ lan-1103`（truth=host）；阿里云 `shunfeng-ledger-wxmp` 未配对，只展示健康与 git 状态。
+
+**永不自动同步 / 删除**
+
+- 不自动同步：SSH 密钥/密码、终端配置、采集方式、`port`、主机 `trackedDirs`（方向一创建时仅按 `gitDir` 预置一次）、应用自定义 `healthUrl/url`（仅地址变化时重生成）、`description/tags/languages/frontend/backend/github/kinds` 等展示字段。
+- 永不自动删除、也不复活：取消勾选或删除源条目后，对侧保留；要彻底移除先撤勾选，再手工删对侧。
+- 防回环：两侧都「无 diff 不写盘」，只有真写盘才触发对方 watcher；中断按 10s→30s→60s→120s 退避重试，最多 5 次，in-flight 触发合并补跑一次。
+- 写盘为原子写 + `.bak` 备份；方向一创建的 SSH 主机默认没有凭据，需用「自动部署」或监控设置补密钥后才开始采集。
+
+**编辑规则（避免“改了没生效”）**
+
+- `truth:'app'`：在应用中心改共享字段；监控主机的 name/group/address 会被方向一回写覆盖，改主机侧同名共享字段无效。
+- `truth:'host'`：在监控设置改共享字段；应用中心的 name/location/host 会被方向二覆盖。应用中心仍可改名——保存前会先 PUT `monitor.config` 更新 `host.name`，再提交应用配置；`位置`、`主机 IP` 在该模式下只读并显示蓝底提示。
+- 未配对：两侧独立，互不影响。
+
+**状态标志**
+
+- 应用中心「已同步监控」= 本机应用目录在 `local.effectiveDirs` 中（且未 exclude），或远程应用已在 `sync-check` 的 `pairs` 中（兜底 `monitorSync` / `syncSource==='monitor'`）。当前 10 个本机 + 3 个远程配对 = 13 个标志；本地隐藏源码 wxmp 与未配对的公网 wxmp 不带标志。
+- 监控主机编辑弹窗：已配对 / `syncSource==='apps'` / `appSync` 时显示只读「已同步应用中心」；仅同地址候选保留勾选框并提示可建立同步。
 
 ### 17.1 机制（文件级双向同步，各写各的文件）
 
