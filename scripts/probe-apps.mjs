@@ -51,8 +51,8 @@ const FETCH_CONCURRENCY = Math.max(1, Number(process.env.PROBE_FETCH_CONCURRENCY
 // 远程主机发现：每台一次 SSH（发现 + 端口归属 + 逐目录 git 一次跑完），并发默认 3；
 // 连接失败 / 超时 / 输出中断按退避自动重试，仍失败该主机本轮输出空并记录错误
 const REMOTE_HOST_CONCURRENCY = Math.max(1, Number(process.env.PROBE_REMOTE_GIT_CONCURRENCY) || 3)
-const REMOTE_DISCOVER_TIMEOUT_FETCH_MS = 90_000
-const REMOTE_DISCOVER_TIMEOUT_STATUS_MS = 30_000
+const REMOTE_DISCOVER_TIMEOUT_FETCH_MS = 45_000
+const REMOTE_DISCOVER_TIMEOUT_STATUS_MS = 20_000
 const REMOTE_RETRY_DELAYS = [4_000, 10_000]
 // 定时器可能同时触发"完整探测"和"快速探测"，用临时锁避免两个进程同时写 apps.json
 const LOCK_FILE = path.join(os.tmpdir(), 'my-homepage-probe.lock')
@@ -829,8 +829,9 @@ for (const sig of ['SIGINT', 'SIGTERM']) {
 
 async function main() {
   const NO_FETCH = process.argv.includes('--no-fetch')
-  // 快速探测（--no-fetch）遇到锁直接跳过；完整探测最多等 60 秒
-  const acquired = await acquireLock(NO_FETCH ? 0 : 60_000)
+  // 快速探测（--no-fetch）遇锁最多等 45 秒（设置面板保存触发的探测不应被一次长探测
+  // 静默吞掉——等待通常足以轮到；完整探测最多等 60 秒）。仍等不到才跳过，等下轮定时器。
+  const acquired = await acquireLock(NO_FETCH ? 45_000 : 60_000)
   if (!acquired) {
     console.log(`[probe] 另一个探测正在运行，跳过本次${NO_FETCH ? '（--no-fetch）' : ''}`)
     return
