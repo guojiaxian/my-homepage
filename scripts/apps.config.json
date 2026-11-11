@@ -197,7 +197,7 @@
         "告警"
       ],
       "icon": "🌐",
-      "location": "内网服务器",
+      "location": "远程",
       "host": "10.8.14.200",
       "languages": [
         "JavaScript"
