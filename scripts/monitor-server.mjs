@@ -1451,6 +1451,7 @@ function setupTerminal(ws, req) {
   const cmds = [];
   let counted = false, closed = false, shellStream = null;
   const pendingInput = []; // shell 就绪前到达的键盘输入（跨公网握手可达数秒），就绪后回放
+  let pendingResize = null; // 就绪前到达的 resize 控制帧：只记最新尺寸，就绪后应用（绝不当输入回放）
   ws.idleTs = Date.now();
 
   const cleanup = (reason) => {
@@ -1472,8 +1473,15 @@ function setupTerminal(ws, req) {
   ws.on('message', (data) => {
     ws.idleTs = Date.now();
     if (!shellStream) {
-      // shell 未就绪：缓冲输入（上限 8KB，防止异常连接撑爆内存）
+      // shell 未就绪：键盘输入缓冲（上限 8KB，防止异常连接撑爆内存）；
+      // resize 控制帧不入队——原样回放会被 shell 当输入回显（SSH 握手期前端连发 resize 会刷屏），只记最新尺寸
       const q = Buffer.from(data);
+      if (q.length && q[0] === 0x7b) {
+        try {
+          const m = JSON.parse(q.toString('utf8'));
+          if (m && m.type === 'resize') { pendingResize = { rows: +m.rows || 30, cols: +m.cols || 120 }; return; }
+        } catch { /* 普通键盘输入（以 { 开头） */ }
+      }
       if (q.length && pendingInput.length < 64 && pendingInput.reduce((a, b) => a + b.length, 0) < 8192) pendingInput.push(q);
       return;
     }
@@ -1510,6 +1518,7 @@ function setupTerminal(ws, req) {
       counted = true;
       termSessions.set(hostId, (termSessions.get(hostId) || 0) + 1);
       audit('session_open', { sid: sessId, host: hostId, user: creds.username, ip });
+      if (pendingResize) { try { stream.setWindow(pendingResize.rows, pendingResize.cols, 0, 0); } catch { /* 忽略 */ } pendingResize = null; }
       while (pendingInput.length) shellStream.write(pendingInput.shift()); // 回放就绪前的输入
       stream.on('data', (d) => { ws.idleTs = Date.now(); if (ws.readyState === 1) ws.send(d); });
       stream.stderr.on('data', () => {});

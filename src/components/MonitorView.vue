@@ -183,8 +183,11 @@ function endPane(key) {
 }
 function focusPane(key) { const r = paneRefs.get(key); r && r.focus() }
 function hideDrawer() { termOpen.value = false } // 仅隐藏：全部窗格与 shell 现场保留
-/* ✕ 关闭：结束全部窗格并清空（下次打开为全新单窗格）；遮罩/ESC 退出才保留现场 */
-function closeTermAll() {
+/* ✕ 关闭确认：清空动作不可恢复，弹窗确认后执行；遮罩/ESC 退出仍保留现场 */
+const closeConfirm = ref(false)
+function askCloseAll() { closeConfirm.value = true }
+function confirmCloseAll() {
+  closeConfirm.value = false
   clearTimeout(justAddedTimer)
   justAdded.value = ''
   for (const k of Object.keys(termStatus)) delete termStatus[k]
@@ -209,6 +212,7 @@ function onEsc(e) {
   if (e.key !== 'Escape') return // 只拦截 Esc；其余按键（含命令字符）必须放行
   if (!termOpen.value) return
   e.preventDefault(); e.stopPropagation()
+  if (closeConfirm.value) { closeConfirm.value = false; return } // 确认框打开时 ESC 只撤确认
   if (termFull.value) toggleTermFull(); else hideDrawer('esc')
 }
 window.addEventListener('keydown', onEsc, true)
@@ -513,7 +517,7 @@ function hostSubtitle(h) {
         <button class="mini-btn" :class="{ on: multiInput }" @click="multiInput = !multiInput">{{ multiInput ? '关闭同步' : '开启同步' }}</button>
         <span class="grow" />
         <button class="mini-btn" @click="toggleTermFull">{{ termFull ? '还原窗口' : '全屏' }}</button>
-        <button class="mini-btn" title="关闭并清空全部终端（下次打开为全新会话）" @click="closeTermAll()">✕ 关闭</button>
+        <button class="mini-btn" title="关闭并清空全部终端（下次打开为全新会话）" @click="askCloseAll()">✕ 关闭</button>
         <div class="host-chips">
           <span class="chips-hint">点击主机名新增终端窗格（同一主机可多开 · 最多 6 个）：</span>
           <button
@@ -547,6 +551,17 @@ function hostSubtitle(h) {
             @input="onPaneInput($event.from, $event.text)"
             @popout="popoutPane"
           />
+        </div>
+      </div>
+      <!-- ✕ 关闭确认：清空动作不可恢复，先确认再执行（取消 / ESC / 点遮罩均可撤销） -->
+      <div v-if="closeConfirm" class="tc-mask" @click.self="closeConfirm = false">
+        <div class="tc-box">
+          <p class="tc-title">关闭并清空全部终端？</p>
+          <p class="tc-desc">将断开当前 {{ termPanes.length }} 个终端会话，下次打开为全新会话。如需保留现场，请点抽屉外空白处或按 ESC 退出。</p>
+          <div class="tc-actions">
+            <button class="tc-btn" @click="closeConfirm = false">取消</button>
+            <button class="tc-btn danger" @click="confirmCloseAll()">关闭并清空</button>
+          </div>
         </div>
       </div>
     </div>
@@ -672,6 +687,20 @@ export default { name: 'MonitorView' }
   flex: none; padding: 10px 14px 0;
 }
 .t-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+/* ✕ 关闭确认框（抽屉内居中模态） */
+.tc-mask { position: absolute; inset: 0; z-index: 40; background: rgb(16 24 40 / 0.45); display: flex; align-items: center; justify-content: center; }
+.tc-box { width: 400px; max-width: calc(100% - 48px); background: var(--bg-soft); border: 1px solid var(--border); border-radius: 14px; box-shadow: -12px 0 40px rgb(16 24 40 / 0.18), 0 18px 50px rgb(16 24 40 / 0.25); padding: 18px 18px 14px; }
+.tc-title { margin: 0 0 6px; font-size: 14.5px; font-weight: 600; color: var(--text); }
+.tc-desc { margin: 0 0 14px; font-size: 12.5px; color: var(--text-2); line-height: 1.6; }
+.tc-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.tc-btn {
+  border: 1px solid var(--border-strong); background: var(--bg); color: var(--text);
+  border-radius: 999px; padding: 5px 16px; font-size: 12.5px; cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease;
+}
+.tc-btn:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-soft); }
+.tc-btn.danger { border: 0; background: var(--red); color: #fff; }
+.tc-btn.danger:hover { background: color-mix(in srgb, var(--red) 85%, #000); color: #fff; }
 .mon-term-drawer :deep(.t-multi) { font-size: 12px; padding: 1px 10px; border-radius: 999px; color: var(--text-2); border: 1px dashed var(--border-strong); }
 .mon-term-drawer :deep(.t-multi.on) { color: var(--accent); border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); background: var(--accent-soft); }
 .mon-term-drawer :deep(.mini-btn.on) { color: var(--accent); background: var(--accent-soft); }

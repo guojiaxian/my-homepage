@@ -688,6 +688,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 33. **UI 重构改根类名/入口位置后，E2E 选择器要同轮更新**
    da1db75 把监控设置弹窗对齐应用中心设计体系（根类 `.mon-modal` → `.settings-panel.mon`、入口从工具栏按钮移到顶栏常驻齿轮），但 e2e-spa / e2e-provision 仍按旧选择器找——表现为「设置弹窗打开」断言失败、后续点击被 `.settings-overlay` 拦截超时（2026-11-11 已同步更新，.verify 不入库故此记录留档）。教训：改组件根类名/挂载点时 grep 一遍 `.verify/` 下的测试脚本同步更新。
 
+34. **WS 控制帧与键盘输入共用一条通道时，「就绪前缓冲」必须先分拣控制帧**
+   终端 WS 里 resize 是 JSON 文本帧（`{"type":"resize",…}`），服务端对已就绪会话会解析并 `setWindow`；但 shell 未就绪（SSH 握手数百 ms~数秒）期间到达的消息被**原样**塞进 `pendingInput`，就绪后 `write()` 回放——SSH 远程窗格一打开就把 resize JSON 当键盘输入灌进 shell（终端里刷一屏 `{"type":"resize",…}`，bash 还会报 command not found）。本机 pty 就绪快、此前 resize 频次低，一直没暴露；ResizeObserver 让 fit 高频化后截图验收当场炸出。修复：缓冲前先分拣——resize 帧不入队、只记最新尺寸，就绪后先 `setWindow` 再回放输入（2026-11-11）。教训：① 复用输入通道的控制帧，任何「缓冲→回放」路径都要过同样的分拣；② 新增高频 resize 源（RO/动画）后，**截图验收和 E2E 要覆盖远程慢握手主机**——本机窗格永远测不出这类时序 bug。
+
 ---
 
 ## 12. 设计决策史（为什么是现在这样）
