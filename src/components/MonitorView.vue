@@ -1,5 +1,5 @@
 <script setup>
-import { computed, nextTick, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { monApi, fmtMbs, fmtPct, fmtUptime } from '../lib/monitor-api.js'
 import MonitorDetail from './MonitorDetail.vue'
 import MonitorSettings from './MonitorSettings.vue'
@@ -203,6 +203,19 @@ function onEsc(e) {
 }
 window.addEventListener('keydown', onEsc, true)
 onBeforeUnmount(() => window.removeEventListener('keydown', onEsc, true))
+/* 滚轮滚动链守卫：终端区滚到头后浏览器会把滚动交给底层文档（背后页面跟着滚），
+   在抽屉与遮罩上直接消费 wheel 默认行为。xterm 自身的回滚在其内部监听里已完成
+   （冒泡阶段先于本守卫），不受影响。 */
+const termMaskEl = ref(null), termDrawerEl = ref(null)
+function guardWheel(e) { e.preventDefault() }
+onMounted(() => {
+  termMaskEl.value?.addEventListener('wheel', guardWheel, { passive: false })
+  termDrawerEl.value?.addEventListener('wheel', guardWheel, { passive: false })
+})
+onBeforeUnmount(() => {
+  termMaskEl.value?.removeEventListener('wheel', guardWheel)
+  termDrawerEl.value?.removeEventListener('wheel', guardWheel)
+})
 function popoutPane(key, hostId) {
   flipLayout(() => {
     const i = termPanes.value.findIndex((t) => t.key === key)
@@ -480,8 +493,8 @@ function hostSubtitle(h) {
       @saved="onSaved"
     />
     <!-- 终端抽屉：多窗格布局，关闭仅隐藏（现场保留），重开不重连 -->
-    <div class="mon-term-mask" v-show="termOpen && !termFull" @click="hideDrawer()" />
-    <div class="mon-term-drawer" v-show="termOpen" :class="{ multi: termPanes.length > 1, full: termFull }">
+    <div ref="termMaskEl" class="mon-term-mask" v-show="termOpen && !termFull" @click="hideDrawer()" />
+    <div ref="termDrawerEl" class="mon-term-drawer" v-show="termOpen" :class="{ multi: termPanes.length > 1, full: termFull }">
       <div class="mon-term-head">
         <span class="t-title">终端</span>
         <span class="t-multi" :class="{ on: multiInput }" title="任一窗格键入的指令将同步到其他窗格">

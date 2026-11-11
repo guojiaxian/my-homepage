@@ -532,3 +532,6 @@ html[data-theme='light'] .gv-bt-picker-box { background: rgba(244, 248, 254, 0.9
 .gv-bt-picker-row input { accent-color: var(--gv-accent); }
 @media (max-width: 900px) { .gv-bt-panes { grid-template-columns: 1fr !important; } }
 @media (prefers-reduced-motion: reduce) { .gv-bt-pane, .gv-minibtn { transition: none !important; } }
+/* 终端回滚到边界后不外溢滚动底层页面（滚动链 containment） */
+.gv-term-drawer .xterm-viewport,
+.gv-bt-pane-term .xterm-viewport { overscroll-behavior: contain; }

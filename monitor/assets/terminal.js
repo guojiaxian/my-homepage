@@ -43,6 +43,9 @@
     term.onResize(({ cols, rows }) => { if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'resize', cols, rows })); });
   }
   window.addEventListener('resize', () => { if (fit) { try { fit.fit(); } catch {} } });
+  /* 滚轮滚动链守卫：整页即终端，wheel 不应触发浏览器级滚动/链式外溢；
+     xterm 回滚在其内部监听（冒泡更早）中已完成，不受影响 */
+  document.querySelector('.term-page').addEventListener('wheel', (e) => e.preventDefault(), { passive: false });
   document.getElementById('term-reconnect').addEventListener('click', connect);
   document.getElementById('term-close').addEventListener('click', () => { try { ws && ws.close(); } catch {}; window.close(); });
   connect();

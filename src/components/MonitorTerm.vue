@@ -195,6 +195,7 @@ export default { name: 'MonitorTermPane' }
   scrollbar-width: thin;
   scrollbar-color: #3b4654 transparent;
   scrollbar-gutter: stable;
+  overscroll-behavior: contain; /* 滚到回滚边界后不再外溢滚动底层页面 */
 }
 .mtp-body :deep(.xterm-viewport::-webkit-scrollbar) { width: 9px; }
 .mtp-body :deep(.xterm-viewport::-webkit-scrollbar-track) { background: transparent; }

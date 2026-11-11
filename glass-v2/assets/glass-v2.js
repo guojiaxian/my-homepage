@@ -1383,6 +1383,12 @@
 
   function refitAll() { for (const pane of bt.panes) { try { pane.fit && pane.fit.fit() } catch {} } }
 
+  /* 滚轮滚动链守卫：终端遮罩/抽屉/批量层上直接消费 wheel 默认行为，
+     防止终端滚到头后背后页面跟着滚；xterm 回滚在其内部监听（冒泡更早）中已完成 */
+  for (const id of ['gv-term-mask', 'gv-term-drawer', 'gv-bt']) {
+    $b(id).addEventListener('wheel', (e) => e.preventDefault(), { passive: false })
+  }
+
   $b('gv-m-open-batch').addEventListener('click', openPicker)
   $b('gv-bt-pick-cancel').addEventListener('click', () => { $b('gv-bt-picker').hidden = true })
   $b('gv-bt-pick-ok').addEventListener('click', openBatch)

@@ -142,9 +142,19 @@ function onKeydown(e) {
 }
 window.addEventListener('keydown', onKeydown, true)
 window.addEventListener('resize', refitAll)
+/* 滚轮滚动链守卫：批量层是全屏覆盖层，wheel 不应再滚动背后的页面；
+   xterm 回滚在其内部监听（冒泡更早）中已完成，不受影响 */
+const maskEl = ref(null), boxEl = ref(null)
+function guardWheel(e) { e.preventDefault() }
+onMounted(() => {
+  maskEl.value?.addEventListener('wheel', guardWheel, { passive: false })
+  boxEl.value?.addEventListener('wheel', guardWheel, { passive: false })
+})
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onKeydown, true)
   window.removeEventListener('resize', refitAll)
+  maskEl.value?.removeEventListener('wheel', guardWheel)
+  boxEl.value?.removeEventListener('wheel', guardWheel)
   for (const pane of panes) {
     try { pane.ws && pane.ws.close() } catch { /* 已关 */ }
     try { pane.term && pane.term.dispose() } catch { /* 已释放 */ }
@@ -156,8 +166,8 @@ onMounted(openAll)
 
 <template>
   <Teleport to="body">
-    <div class="mbt-mask" @click.self="emit('close')" />
-    <div class="mbt" :class="[rowsCls, { full }]">
+    <div ref="maskEl" class="mbt-mask" @click.self="emit('close')" />
+    <div ref="boxEl" class="mbt" :class="[rowsCls, { full }]">
       <div class="mbt-head">
         <span class="mbt-title">批量终端 · {{ panes.length }} 台</span>
         <span class="mbt-mode" :class="{ solo: !!solo }">
@@ -264,6 +274,7 @@ export default { name: 'MonitorBatchTerm' }
   scrollbar-width: thin;
   scrollbar-color: #3b4654 transparent;
   scrollbar-gutter: stable;
+  overscroll-behavior: contain; /* 滚到回滚边界后不再外溢滚动底层页面 */
 }
 .pane-term :deep(.xterm-viewport::-webkit-scrollbar) { width: 9px; }
 .pane-term :deep(.xterm-viewport::-webkit-scrollbar-track) { background: transparent; }
