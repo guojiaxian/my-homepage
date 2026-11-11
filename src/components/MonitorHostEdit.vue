@@ -9,6 +9,7 @@ const props = defineProps({
   open: { type: Boolean, default: false },
   host: { type: Object, required: true },
   direct: { type: Boolean, default: false }, // true = 弹窗内直接保存；false = 草稿（返回面板再保存）
+  isNew: { type: Boolean, default: false }, // 新增主机允许编辑 id；已存在主机 id 只读
   deletable: { type: Boolean, default: false },
   saving: { type: Boolean, default: false },
   err: { type: String, default: '' },
@@ -43,6 +44,35 @@ async function doProvision() {
   } finally { provBusy.value = false }
 }
 
+/* 分组下拉：保留历史自定义值，避免选择后丢失 */
+const groupOptions = computed(() => {
+  const base = ['内网', '公网']
+  const g = String(props.host?.group || '').trim()
+  return g && !base.includes(g) ? [...base, g] : base
+})
+
+/* 已同步状态：sync-check 的配对结果优先；接口不可用时退回同步标记 */
+const syncPair = ref(null)
+const syncCandidate = ref(null)
+async function loadSyncPair() {
+  syncPair.value = null
+  syncCandidate.value = null
+  try {
+    const d = await monApi('/api/monitor/sync-check')
+    const id = props.host?.id
+    syncPair.value = (d.pairs || []).find((p) => p.hostId === id) || null
+    syncCandidate.value = (d.candidates || []).find((c) => c.hostId === id) || null
+  } catch { /* 接口不可用时仅按标记判断 */ }
+}
+const syncInfo = computed(() => {
+  const h = props.host
+  if (!h) return null
+  if (syncPair.value) return { desc: `与「${syncPair.value.appName || syncPair.value.appId}」配对，主机信息变更自动跟随` }
+  if (h.syncSource === 'apps') return { desc: '由应用中心创建，名称 / 分组 / 地址自动跟随' }
+  if (h.appSync) return { desc: '主机信息变更会自动同步到应用中心' }
+  return null
+})
+
 /* 兜底：本机主机必须有 terminal 子对象（表单直接绑定其字段） */
 watch(
   () => props.open,
@@ -51,6 +81,7 @@ watch(
       props.host.terminal = { host: '127.0.0.1', port: 22, username: 'root', authType: 'key', keyPath: '' }
     }
     if (v && props.host?.type === 'ssh' && !props.host.mode) props.host.mode = 'ssh'
+    if (v) loadSyncPair()
   },
   { immediate: true },
 )
@@ -118,17 +149,33 @@ function onDelete() {
         </div>
         <div class="mhe-body">
           <div class="form-grid">
-            <label class="fitem"><span>主机标识 id（密钥/审计用，创建后勿改）</span><input v-model="host.id" type="text" spellcheck="false" style="font-family:var(--mono)" /></label>
-            <label class="fitem"><span>名称</span><input v-model="host.name" type="text" /></label>
-            <label class="fitem"><span>分组（内网=蓝 / 公网=橙）</span><input v-model="host.group" type="text" /></label>
+            <label class="fitem">
+              <span>主机标识 id{{ isNew ? '' : '（不可修改）' }}</span>
+              <input
+                v-model="host.id"
+                type="text"
+                class="mono"
+                spellcheck="false"
+                placeholder="如 my-server"
+                :readonly="!isNew"
+                :title="isNew ? '建议使用目录名或短标识，创建后不可修改' : '密钥与审计依赖此 id，创建后不可修改'"
+              />
+            </label>
+            <label class="fitem"><span>名称</span><input v-model="host.name" placeholder="显示名称" /></label>
+            <label class="fitem"><span>分组</span>
+              <select v-model="host.group" title="内网 = 外机（绿）/ 公网（橙）；本机固定蓝色">
+                <option v-for="g in groupOptions" :key="g" :value="g">{{ g }}</option>
+              </select>
+            </label>
             <template v-if="host.type === 'ssh'">
-              <label class="fitem"><span>地址</span><input v-model="host.address" type="text" /></label>
-              <label class="fitem"><span>SSH 端口</span><input v-model.number="host.port" type="number" /></label>
-              <label class="fitem"><span>用户名</span><input v-model="host.username" type="text" /></label>
+              <label class="fitem"><span>地址</span><input v-model="host.address" class="mono" placeholder="IP 或域名" /></label>
+              <label class="fitem"><span>SSH 端口</span><input v-model.number="host.port" type="number" min="1" max="65535" /></label>
+              <label class="fitem"><span>用户名</span><input v-model="host.username" placeholder="root" /></label>
               <label class="fitem"><span>认证</span>
                 <select v-model="host.authType"><option value="key">密钥</option><option value="password">密码</option></select>
               </label>
-              <label class="fitem span2"><span>私钥路径（0600）</span><input v-model="host.keyPath" type="text" /></label>
+              <label v-if="host.authType === 'key'" class="fitem span2"><span>私钥路径（0600）</span><input v-model="host.keyPath" class="mono" placeholder="/root/.ssh/id_rsa" /></label>
+              <div v-else class="fitem span2"><span>密码凭据</span><div class="cred-box">密码由「自动部署」或 CLI 加密保存，此处不显示明文。</div></div>
               <label class="fitem span2"><span>采集方式</span>
                 <select v-model="host.mode">
                   <option value="ssh">SSH 拉取（中心每 20s 短连接采集，需密钥/凭据）</option>
@@ -137,25 +184,38 @@ function onDelete() {
               </label>
             </template>
             <template v-else>
-              <label class="fitem"><span>展示地址</span><input v-model="host.address" type="text" /></label>
-              <label class="fitem"><span>终端主机</span><input v-model="host.terminal.host" type="text" /></label>
-              <label class="fitem"><span>终端端口</span><input v-model.number="host.terminal.port" type="number" /></label>
-              <label class="fitem"><span>终端用户</span><input v-model="host.terminal.username" type="text" /></label>
+              <label class="fitem"><span>展示地址</span><input v-model="host.address" class="mono" placeholder="10.8.11.4" /></label>
+              <label class="fitem"><span>终端主机</span><input v-model="host.terminal.host" class="mono" placeholder="127.0.0.1" /></label>
+              <label class="fitem"><span>终端端口</span><input v-model.number="host.terminal.port" type="number" min="1" max="65535" /></label>
+              <label class="fitem"><span>终端用户</span><input v-model="host.terminal.username" placeholder="root" /></label>
               <label class="fitem"><span>认证</span>
                 <select v-model="host.terminal.authType"><option value="key">密钥</option><option value="password">密码</option></select>
               </label>
-              <label class="fitem span2"><span>私钥路径</span><input v-model="host.terminal.keyPath" type="text" /></label>
+              <label v-if="host.terminal.authType === 'key'" class="fitem span2"><span>私钥路径</span><input v-model="host.terminal.keyPath" class="mono" placeholder="/root/.ssh/id_rsa" /></label>
+              <div v-else class="fitem span2"><span>密码凭据</span><div class="cred-box">密码由「自动部署」或 CLI 加密保存，此处不显示明文。</div></div>
             </template>
           </div>
 
           <div v-if="host.type === 'ssh'" class="he-dirs">
-            <label class="sync-chk">
-              <input v-model="host.appSync" type="checkbox" />
-              <span>同步到应用中心</span>
-            </label>
-            <p class="sub" style="margin:4px 0 0">
-              勾选后在应用中心自动创建/更新同名远程应用（健康接口默认 http://地址/，分组按公网/内网映射，主机信息变更自动跟随）；取消勾选不会删除已创建的条目，需在应用设置中手动删除。
-            </p>
+            <template v-if="syncInfo">
+              <div class="sync-status">
+                <span class="sync-dot">✓</span>
+                <b>已同步应用中心</b>
+                <span class="sub">{{ syncInfo.desc }}</span>
+              </div>
+            </template>
+            <template v-else>
+              <label class="sync-chk">
+                <input v-model="host.appSync" type="checkbox" />
+                <span>同步到应用中心</span>
+              </label>
+              <p class="sub" style="margin:4px 0 0">
+                勾选后在应用中心自动创建/更新同名远程应用（健康接口默认 http://地址/，分组按公网/内网映射，主机信息变更自动跟随）；取消勾选不会删除已创建的条目，需在应用设置中手动删除。
+              </p>
+              <p v-if="syncCandidate" class="sync-cand">
+                应用中心已有同地址应用「{{ syncCandidate.appName || syncCandidate.appId }}」，勾选并保存即可建立同步。
+              </p>
+            </template>
           </div>
 
           <div v-if="host.type === 'ssh'" class="he-dirs">
@@ -243,14 +303,41 @@ export default { name: 'MonitorHostEdit' }
 .mhe-head h2 { margin: 0; font-size: 15px; }
 .mhe-head code { font-family: var(--mono); font-size: 11.5px; color: var(--text-2); background: var(--bg-hover); border-radius: 4px; padding: 1px 6px; }
 .mhe-body { padding: 14px 16px 6px; flex: 1 1 auto; min-height: 0; overflow: auto; }
-.form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
-.fitem { display: flex; flex-direction: column; gap: 3px; font-size: 13px; }
-.fitem span { font-size: 12px; color: var(--text-2); }
-.fitem input, .fitem select { width: 100%; }
-.fitem.span2 { grid-column: span 2; }
+.form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px 14px; }
+.fitem { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--text-2); min-width: 0; }
+.fitem > span { font-size: 12px; color: var(--text-2); }
+.fitem input, .fitem select {
+  font: inherit; font-size: 13.5px; color: var(--text);
+  background-color: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+  padding: 7px 10px; outline: none; width: 100%; min-width: 0;
+  transition: border-color 0.15s ease;
+}
+.fitem input:focus, .fitem select:focus { border-color: var(--accent); }
+.fitem input:read-only { background: var(--bg-hover); color: var(--text-2); cursor: default; }
+.fitem input::placeholder { color: var(--text-2); opacity: 0.55; }
+.fitem select {
+  appearance: none; cursor: pointer; padding-right: 30px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' fill='none' stroke='%236b7280' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 10px center; background-size: 10px;
+}
+.fitem.span2 { grid-column: 1 / -1; }
+.cred-box { font-size: 12.5px; color: var(--text-2); line-height: 1.55; background: var(--bg-hover); border: 1px dashed var(--border); border-radius: 8px; padding: 7px 10px; }
 .he-dirs { margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border); }
 .sync-chk { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; font-weight: 500; cursor: pointer; }
 .sync-chk input { width: 14px; height: 14px; margin: 0; accent-color: var(--accent); cursor: pointer; }
+.sync-status {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 11px; border: 1px solid color-mix(in srgb, var(--green) 35%, var(--border));
+  background: var(--green-soft); border-radius: 8px;
+}
+.sync-dot {
+  width: 18px; height: 18px; border-radius: 50%; flex: none;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--green); color: #fff; font-size: 11px; font-weight: 700;
+}
+.sync-status b { font-size: 13px; color: var(--green); }
+.sync-status .sub { font-size: 12px; }
+.sync-cand { margin: 6px 0 0; font-size: 12px; color: var(--accent); }
 .prov-steps { margin: 8px 0 4px; padding-left: 20px; color: var(--text-2); font-size: 12px; }
 .prov-steps li { margin: 2px 0; }
 .dir-row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; margin-bottom: 6px; background: var(--bg); }
@@ -272,4 +359,8 @@ code { font-family: var(--mono); font-size: 11.5px; background: var(--bg-hover);
 .primary-btn { border: 1px solid var(--accent); background: var(--accent); color: #fff; border-radius: 8px; padding: 6px 16px; font-size: 13.5px; cursor: pointer; }
 .primary-btn:hover { filter: brightness(1.06); }
 .primary-btn:disabled { opacity: 0.6; cursor: default; }
+@media (max-width: 560px) {
+  .form-grid { grid-template-columns: 1fr; }
+  .fitem.span2 { grid-column: auto; }
+}
 </style>

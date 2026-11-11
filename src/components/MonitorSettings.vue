@@ -44,7 +44,7 @@ async function load() {
 watch(() => props.open, (v) => { if (v) load() })
 
 function addHost() {
-  cfg.hosts.push({ id: 'host-' + Math.random().toString(36).slice(2, 6), name: '新主机', type: 'ssh', group: '内网', address: '', port: 22, username: 'root', authType: 'key', keyPath: '', trackedDirs: [] })
+  cfg.hosts.push({ id: 'host-' + Math.random().toString(36).slice(2, 6), name: '新主机', type: 'ssh', group: '内网', address: '', port: 22, username: 'root', authType: 'key', keyPath: '', trackedDirs: [], _isNew: true })
   editIdx.value = cfg.hosts.length - 1 // 创建后立即打开编辑弹窗
 }
 function delHost(i) { cfg.hosts.splice(i, 1) }
@@ -253,6 +253,7 @@ function evCls(ev) {
     <MonitorHostEdit
       :open="editIdx >= 0"
       :host="editIdx >= 0 ? cfg.hosts[editIdx] : { type: 'ssh' }"
+      :is-new="!!(editIdx >= 0 && cfg.hosts[editIdx]?._isNew)"
       :deletable="editIdx >= 0 && cfg.hosts[editIdx]?.type === 'ssh'"
       @close="editIdx = -1"
       @del="delHost(editIdx); editIdx = -1"

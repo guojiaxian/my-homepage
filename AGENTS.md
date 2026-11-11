@@ -484,6 +484,8 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **主机归属配色与排序（2026-11-11）**：主机卡与终端抽屉主机 chips 复用应用中心三色——本机蓝 `--accent` / 外机绿 `--green` / 公网橙 `--amber`，标签同步为「本机 / 外机 / 公网」（`hostScope()` 按 `type==='local'` 与 `group` 判定，class 沿用 `lan/ext/net`）；卡片左色边 3px，hover/selected 时仍保留类型色。监控设置「纳管主机」列表提供 ↑/↓ 排序（`moveHost`），顺序即 `monitor.config.json` 的 `hosts[]` 顺序，保存后主页主机卡与终端主机 chips 同步。原「批量终端」工具栏入口已移除，由多窗格终端的「多端输入」承接。
 
+**主机编辑表单（2026-11-11，`MonitorHostEdit.vue`）**：表单改固定 2 列 grid（≤560px 单列），输入/下拉统一 13.5px、8px 圆角、focus 蓝边，下拉自绘箭头；「分组」由文本框改为 `内网/公网` 下拉（保留历史自定义值）；已存在主机的 `id` 只读（新增主机可编辑，草稿用 `_isNew` 标记，PUT 时被 `normalizeHost` 丢弃）；认证为密钥时显示私钥路径，为密码时显示「凭据由自动部署/CLI 加密保存」说明；端口限制 1–65535。**同步状态只读化**：编辑弹窗打开时请求 `/api/monitor/sync-check`，若该主机已在 `pairs` 中（或 `syncSource==='apps'` / `appSync===true`），显示绿色「已同步应用中心」状态条与配对的 app 名，不再渲染可点击复选框；若仅是同地址候选（`candidates`），保留复选框并提示「应用中心已有同地址应用 X，勾选并保存即可建立同步」。
+
 **架构**：`monitor-server.mjs`（systemd 常驻，`127.0.0.1:8301`，依赖 ssh2+ws）同时承载 HTTP API 与终端 WebSocket；nginx **两处 server 块**各加三个 location：`/monitor/`（静态 stub+终端页）、`/api/monitor/`（反代）、`/api/terminal`（WS 升级，read_timeout 3600s）。备份 `*.bak-monitor-20261110`。echarts/@xterm 已移入 dependencies（SPA 打包需要），主站「前端零第三方运行时依赖」的说法仅对**首屏主包**成立。
 
 **采集与目录归属**：
