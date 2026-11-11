@@ -62,6 +62,25 @@
       ]
     },
     {
+      "id": "lan-1103",
+      "name": "网络自动运维系统",
+      "type": "ssh",
+      "group": "内网",
+      "mode": "agent",
+      "address": "10.8.11.3",
+      "port": 22,
+      "username": "root",
+      "authType": "key",
+      "keyPath": "/root/applications/my-homepage/data/monitor/keys/lan-1103",
+      "trackedDirs": [
+        {
+          "path": "/root/log_gpt_agent",
+          "name": "log_gpt_agent",
+          "source": "host"
+        }
+      ]
+    },
+    {
       "id": "aliyun",
       "name": "阿里云 · 公网版",
       "type": "ssh",
@@ -86,25 +105,6 @@
         {
           "path": "/root/applications/shunfeng-ledger/server",
           "name": "shunfeng-ledger/server",
-          "source": "host"
-        }
-      ]
-    },
-    {
-      "id": "lan-1103",
-      "name": "内网节点 · 113",
-      "type": "ssh",
-      "group": "内网",
-      "mode": "agent",
-      "address": "10.8.11.3",
-      "port": 22,
-      "username": "root",
-      "authType": "key",
-      "keyPath": "/root/applications/my-homepage/data/monitor/keys/lan-1103",
-      "trackedDirs": [
-        {
-          "path": "/root/log_gpt_agent",
-          "name": "log_gpt_agent",
           "source": "host"
         }
       ]
