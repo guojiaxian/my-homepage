@@ -158,31 +158,55 @@ const SORTS = {
 const sortKey = ref('default')
 const sortDir = ref(1)
 
-/* ---------- 手动排序：拖拽 / 上下移动，保存在本浏览器（localStorage） ---------- */
-const ORDER_STORAGE_KEY = 'my-homepage:appOrder'
-const customOrder = ref([])
-try {
-  customOrder.value = JSON.parse(localStorage.getItem(ORDER_STORAGE_KEY)) ?? []
-} catch {
-  customOrder.value = []
-}
+/* ---------- 手动排序：拖拽 / 上下移动，写入服务端（所有浏览器一致） ----------
+   2026-11-12 起不再存 localStorage：手动顺序 = apps.config.json 顶层 order
+   （POST /api/order），探测按其排序 apps.json，任何浏览器 / 静态端点看到的
+   都是同一顺序。pendingOrder 仅作保存飞行中的乐观回显（拖拽立即生效，探测
+   落地后清空，此后顺序完全由 apps.json 承载，其他浏览器的改动随轮询流入）。 */
+const serverOrder = ref([]) // 服务端当前生效的全局顺序（↺ 的显示依据）
+const pendingOrder = ref(null)
+let orderSeq = 0
 
 function saveOrder(ids) {
-  customOrder.value = ids
-  try {
-    localStorage.setItem(ORDER_STORAGE_KEY, JSON.stringify(ids))
-  } catch {
-    /* localStorage 不可用时仅本次会话生效 */
-  }
+  pendingOrder.value = ids
+  const seq = ++orderSeq
+  fetch('/api/order', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+    body: JSON.stringify({ order: ids }),
+  })
+    .then(async (res) => {
+      const data = await res.json().catch(() => ({}))
+      if (!res.ok || !data.ok) throw new Error(data.error || `HTTP ${res.status}`)
+      // 轮询到服务端按新顺序重排 apps.json（probedAt 越过本次保存时刻，服务端时钟）
+      const savedAt = Number.isFinite(data.serverTime) ? data.serverTime : Date.now()
+      for (let tries = 0; tries < 40; tries++) {
+        await new Promise((r) => setTimeout(r, 1000))
+        if (seq !== orderSeq) return // 期间又有新拖拽，由新一轮负责收尾
+        try {
+          const r = await fetch(`./apps.json?t=${Date.now()}`, { cache: 'no-store' })
+          const d = await r.json()
+          if (d.probedAt && new Date(d.probedAt).getTime() > savedAt) {
+            if (seq === orderSeq) {
+              serverOrder.value = [...ids]
+              pendingOrder.value = null
+              fetchApps(true)
+            }
+            return
+          }
+        } catch {
+          /* 下一轮再试 */
+        }
+      }
+      if (seq === orderSeq) fetchApps(true) // 超时兜底：保留乐观顺序，仅刷新
+    })
+    .catch(() => {
+      /* 保存失败：保留本地乐观顺序，下次操作重试 */
+    })
 }
 
 function resetOrder() {
-  customOrder.value = []
-  try {
-    localStorage.removeItem(ORDER_STORAGE_KEY)
-  } catch {
-    /* 同上 */
-  }
+  saveOrder([]) // 空数组 = 清除服务端 order，恢复默认顺序
 }
 
 function moveApp(id, delta) {
@@ -310,9 +334,9 @@ const displayApps = computed(() => {
   let list = [...apps.value]
   if (sortKey.value !== 'default') {
     list.sort((a, b) => compareApps(a, b) * sortDir.value)
-  } else if (customOrder.value.length) {
-    // 手动顺序优先于 apps.json 的原始顺序，新发现的应用排在最后
-    const rank = new Map(customOrder.value.map((id, i) => [id, i]))
+  } else if (pendingOrder.value?.length) {
+    // 保存飞行中的乐观顺序；探测落地后 apps.json 已按服务端顺序返回，无需再排
+    const rank = new Map(pendingOrder.value.map((id, i) => [id, i]))
     list.sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity))
   }
   return list
@@ -340,6 +364,19 @@ onMounted(() => {
   mql.addEventListener('change', applyTheme)
   siteAuthCheck()
   fetchApps()
+  // 全局手动顺序：开机从服务端取一次（↺ 的显示依据；顺序本体由 apps.json 承载）
+  // 旧版本存过 localStorage 的 my-homepage:appOrder 已废弃，顺手清掉避免误导
+  fetch('/api/config', { cache: 'no-store' })
+    .then((r) => r.json())
+    .then((cfg) => {
+      if (Array.isArray(cfg.order)) serverOrder.value = cfg.order
+    })
+    .catch(() => {})
+  try {
+    localStorage.removeItem('my-homepage:appOrder')
+  } catch {
+    /* 忽略 */
+  }
   pollTimer = setInterval(() => fetchApps(true), POLL_MS)
   // 从后台切回页面时立即刷新一次
   document.addEventListener('visibilitychange', () => {
@@ -449,9 +486,9 @@ onBeforeUnmount(() => {
           {{ sortDir === 1 ? '↑' : '↓' }}
         </button>
         <button
-          v-if="sortKey === 'default' && customOrder.length"
+          v-if="sortKey === 'default' && (serverOrder.length || pendingOrder?.length)"
           class="icon-btn"
-          title="清除手动排序，恢复默认顺序"
+          title="清除手动排序，恢复默认顺序（对所有浏览器生效）"
           @click="resetOrder"
         >
           ↺

@@ -278,13 +278,13 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 }
 ```
 
-### 6.4 `order` — 可选，全局默认顺序
+### 6.4 `order` — 全局手动顺序（2026-11-12 起由 UI 写入，所有浏览器一致）
 
 ```json
 "order": ["study-log", "cloud-monitor", "…"]
 ```
 
-未列出的应用按原相对顺序排在后面。**优先级**：浏览器手动排序（localStorage）> `order` > 配置文件数组顺序。当前未设置 `order`。
+应用中心的手动排序（表格拖拽 / 卡片 ↑↓）**直接写入本字段**（`POST /api/order`，settings-server 校验 + `.bak` 备份 + 防抖 400ms 后台探测），探测按其排序 `apps.json` —— 任何浏览器、任何前端端点看到的都是同一顺序。未列出的应用按原相对顺序排在后面。工具栏 ↺ = 清空本字段恢复默认。手工编辑后 `npm run probe` 同样生效。**localStorage 手动排序已废弃**（旧键 `my-homepage:appOrder` / `fluxglass:*` / `unslop:*` / `gv2:*` 启动时自动清除）。
 
 ---
 
@@ -407,10 +407,12 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 | 机制 | 入口 | 存储 |
 |---|---|---|
-| **手动排序**（`sortKey === 'default'` 时可用） | 表格行首 ⠿ 手柄拖拽 / 卡片左侧手柄拖拽 / 卡片 ↑↓ 按钮 | localStorage `my-homepage:appOrder`（**仅本浏览器**；新应用自动排末尾；工具栏 ↺ 清除） |
+| **手动排序**（`sortKey === 'default'` 时可用） | 表格行首 ⠿ 手柄拖拽 / 卡片左侧手柄拖拽 / 卡片 ↑↓ 按钮 | **服务端 `order`**（POST `/api/order`，2026-11-12 起全浏览器一致；见 §6.4） |
 | **自动排序** | 表格表头点击（状态/应用/访问地址/同步，再点切方向）/ 工具栏下拉 | 不持久化 |
 
 自动排序键：`name`（中文拼音 `localeCompare('zh-Hans-CN')`）、`port`（升序，未监听排后）、`status`（运行中 → 未运行 → 离线应用）、`git`（按问题严重度：dirty → no-repo → ahead → behind → untracked → error → no-upstream → synced）。
+
+**手动排序的落地链路（2026-11-12）**：拖拽/↑↓ → `POST /api/order`（服务端写 `order` + 400ms 防抖探测）→ 前端轮询 `probedAt` 落地后清空乐观顺序 → 顺序完全由 `apps.json` 承载。保存飞行中用内存 `pendingOrder` 乐观回显（拖拽立即生效），不再写 localStorage —— 因此任何浏览器（含 glass / unslop / glass-v2 三个静态端点）都会在 ≤1 个探测周期内看到同一顺序；其他浏览器的后续改动也随 60s 轮询自然流入。四个前端已同步此逻辑；旧 localStorage 排序键在各端点启动时清除。
 
 **拖拽只从手柄触发**（`draggable` 只加在手柄元素上，行/卡片本身不可拖）——用户明确要求过，点击卡片不该出现拖拽效果。
 
@@ -550,6 +552,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 | GET | `/api/config` | 返回 `apps.config.json` 内容（含 `$comment`） |
 | POST | `/api/config` | 校验 → 原子写入（原文件备份 `.bak`）→ **后台** `probe --no-fetch` → 立即 `{ok:true}` |
 | POST | `/api/probe` | 「立刻同步」：后台执行**完整**探测（含 git fetch），立即返回 `{ok:true, startedAt}`；前端据 `startedAt` 轮询 `probedAt` |
+| POST | `/api/order` | 手动排序全局化（2026-11-12）：`{order:[id…]}` 写入顶层 `order`（空数组清除）→ 防抖 400ms 后台 `probe --no-fetch`；需 `X-Requested-With`；返回 `{ok:true, serverTime}` |
 | GET | `/api/healthz` | 存活检查 |
 
 **校验规则**（`sanitizeConfig`）：`id` 必填且全局唯一；远程应用 `healthUrl` 必须是合法 http/https URL；`expectedPort` 非法值置 `null`；`tags` 支持数组或逗号分隔字符串；只保留已知字段（白名单）。
@@ -784,6 +787,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 终端渐进宽度 1/3→2/3→近全屏（2026-11-11） | 用户要求「1 个占 1/3 屏、2 个占 2/3、3 个几乎占满（左侧留空白退出）」：按窗格数切 `w1/w2/w3` 三档而非让抽屉固定全宽——每格恒约 1/3 屏，增减窗格时已有终端内容不跳变；`:not(.full)` 与全屏档解耦 |
 | 终端关闭确认弹窗 + 遮罩保留（2026-11-11） | 用户要求「点击关闭加弹窗确定」：清空全部会话不可恢复，✕ 需二次确认（取消/ESC/点遮罩三路径可撤销）；而点抽屉外空白/ESC 仍是「保留现场」的轻退出——两种退出语义分离，日常切换不误清 shell |
 | 设置类弹窗点遮罩不关闭（2026-11-12） | 用户要求「点击空白处不得直接退出，必须从按钮退出」：应用设置面板 / 应用编辑弹窗 / 监控设置 / 主机编辑（草稿+直连两模式）/ glass-v2 监控设置共 5 处移除遮罩 click 关闭——防误触丢草稿，退出只走 ✕ / 取消 / 完成 按钮；终端类弹窗（抽屉遮罩、关闭确认、超限提示、批量层）不在此列，保留原有遮罩语义。验证 `.verify/e2e-mask-close.mjs`（13 断言） |
+| 手动排序全局化（2026-11-12） | 用户要求「排序之后在所有浏览器界面均适用」：手动排序从 localStorage 改为 `POST /api/order` 写 `apps.config.json` 顶层 `order`（防抖探测重排 apps.json），四个前端（主站+glass/unslop/glass-v2）同步——保存飞行中仅内存乐观回显，落地后顺序完全由 apps.json 承载，其他浏览器改动随轮询流入；服务端「每浏览器一份」的排序语义不存在了，↺ 清除也对所有浏览器生效。验证 `.verify/e2e-global-order.mjs`（7 断言，含双浏览器上下文与四端点一致性） |
 
 ---
 
@@ -836,7 +840,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 
 **改页面文案 / 顶栏名称** → 设置面板「页面信息」→ 保存（改 `page` 段，无需重新构建）。
 
-**调整默认显示顺序（对所有访客生效）** → 在 `apps.config.json` 顶层加 `"order": ["id1","id2",…]` → `npm run probe`。注意浏览器手动排序优先于此。
+**调整默认显示顺序（对所有浏览器生效）** → 直接在应用中心拖拽 / 卡片 ↑↓（自动写入 `order` 并全局生效，↺ 可清除）；或手工在 `apps.config.json` 顶层加 `"order": ["id1","id2",…]` → `npm run probe`。
 
 **迁移项目目录**（换了源目录后，systemd 的 `ExecStart` 仍指向旧路径，必须同步改）
 

@@ -11,7 +11,7 @@
   var reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
   var narrowMql = window.matchMedia('(max-width: 760px)');
 
-  var STORE = { theme: 'fluxglass:theme', order: 'fluxglass:appOrder' };
+  var STORE = { theme: 'fluxglass:theme' };
   var POLL_MS = 60000;
 
   var KIND_LABELS = { web: 'Web', app: 'APP', miniapp: '小程序', tv: '电视', cli: 'CLI' };
@@ -35,7 +35,8 @@
     sortDir: 1,
     view: 'table',
     viewPicked: false,
-    customOrder: loadOrder(),
+    customOrder: loadOrder(), // 保存飞行中的乐观顺序；全局顺序见 state.serverOrder
+    serverOrder: [],
     syncing: false,
     syncError: '',
     dragId: '',
@@ -64,10 +65,8 @@
     try { localStorage.setItem(key, typeof value === 'string' ? value : JSON.stringify(value)); } catch (e) {}
   }
 
-  function loadOrder() {
-    var saved = readStore(STORE.order, null);
-    return Array.isArray(saved) ? saved : [];
-  }
+  /* 2026-11-12 起手动排序写入服务端 /api/order（所有浏览器一致），不再读 localStorage */
+  function loadOrder() { return []; }
 
   /* ---------------- 数据展示纯函数（与主站 app-utils 对齐） ---------------- */
   function isPublic(app) {
@@ -432,7 +431,7 @@
       dir.title = state.sortDir === 1 ? '正序（点击切换倒序）' : '倒序（点击切换正序）';
     }
     var reset = $('#fg-reset-order');
-    if (reset) reset.hidden = !(state.sortKey === 'default' && state.customOrder.length);
+    if (reset) reset.hidden = !(state.sortKey === 'default' && (state.serverOrder.length || state.customOrder.length));
     $all('.fg-segmented button').forEach(function (b) {
       var active = b.getAttribute('data-view') === state.view;
       b.classList.toggle('is-active', active);
@@ -943,11 +942,32 @@
     return buildFact('源码', wrap);
   }
 
-  /* ---------------- 手动排序 ---------------- */
-  function saveOrder(ids) {
+  /* ---------------- 手动排序 ----------------
+     2026-11-12 起写入服务端 /api/order（apps.config.json 顶层 order，探测按其排序
+     apps.json）—— 所有浏览器与端点同一顺序。customOrder 仅作保存飞行中的乐观回显，
+     落地后清空；serverOrder 记录服务端当前全局顺序（↺ 的显示依据）。 */
+  function persistOrder(ids) {
     state.customOrder = ids;
-    writeStore(STORE.order, ids);
     renderAll();
+    fetch('/api/order', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+      body: JSON.stringify({ order: ids })
+    })
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(new Error('HTTP ' + r.status)); })
+      .then(function (d) {
+        var savedAt = d && typeof d.serverTime === 'number' ? d.serverTime : Date.now();
+        return waitForProbe(savedAt).then(function () {
+          state.serverOrder = ids;
+          state.customOrder = [];
+          return fetchApps(true);
+        });
+      })
+      .catch(function () { /* 保存失败：保留本地乐观顺序，下次操作重试 */ });
+  }
+
+  function saveOrder(ids) {
+    persistOrder(ids);
   }
 
   function moveApp(id, delta) {
@@ -973,9 +993,7 @@
   }
 
   function resetOrder() {
-    state.customOrder = [];
-    try { localStorage.removeItem(STORE.order); } catch (e) {}
-    renderAll();
+    persistOrder([]); // 空数组 = 清除服务端 order，恢复默认顺序
   }
 
   /* ---------------- 立刻同步 ---------------- */
@@ -1080,6 +1098,17 @@
   applyTheme(currentTheme());
   applyDefaultView();
   onScroll();
+  // 全局手动顺序：开机从服务端取一次（↺ 的显示依据）；旧版 localStorage 键已废弃，顺手清掉
+  try { localStorage.removeItem('fluxglass:appOrder'); } catch (e) {}
+  fetch('/api/config', { cache: 'no-store' })
+    .then(function (r) { return r.json(); })
+    .then(function (cfg) {
+      if (Array.isArray(cfg.order)) {
+        state.serverOrder = cfg.order;
+        renderToolbarState();
+      }
+    })
+    .catch(function () { /* 离线时忽略 */ });
   fetchApps();
   window.setInterval(function () { fetchApps(true); }, POLL_MS);
   doc.addEventListener('visibilitychange', function () {

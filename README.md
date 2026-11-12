@@ -170,9 +170,9 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer
 
 - **表格视图**：按住行首的 ⠿ 手柄拖拽到目标位置；
 - **卡片视图**：卡片右上角 ↑ / ↓ 按钮上下移动，或直接拖拽卡片；
-- 手动顺序保存在**本浏览器**（localStorage），跨会话保留，新发现的应用自动排在最后；工具栏出现 ↺ 按钮可一键清除、恢复默认。
+- 手动顺序**保存在服务端**（写入 `scripts/apps.config.json` 的 `order` 字段），**对所有浏览器、所有前端页面一致生效**：任意一台设备上排好序，其他浏览器约一个探测周期内自动跟随；新发现的应用自动排在最后；工具栏出现 ↺ 按钮可一键清除、恢复默认（同样全局生效）。
 
-**全局默认顺序**：编辑 `scripts/apps.config.json`，在顶层加 `"order": ["study-log", "cloud-monitor", …]`（id 数组），跑一次 `npm run probe` 即对所有访客生效；未列出的应用按原相对顺序排在后面。浏览器里的手动排序优先于该全局顺序。
+也可以手工编辑 `scripts/apps.config.json` 顶层 `"order": ["study-log", "cloud-monitor", …]`（id 数组）后跑一次 `npm run probe`，效果相同；未列出的应用按原相对顺序排在后面。
 
 ### 自动排序
 

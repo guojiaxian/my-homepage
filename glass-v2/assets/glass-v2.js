@@ -98,7 +98,6 @@
      模块 A：我的应用（逻辑与主站一致，来自 /unslop/ 成熟实现）
      ============================================================ */
   const apps = (() => {
-    const ORDER_KEY = 'gv2:appOrder'
     const POLL_MS = 60_000
 
     function buildAppUrl(app) {
@@ -195,7 +194,8 @@
       page: { siteName: '我的应用导航', heroTitle: '应用中心', heroSubtitle: '部署在这台服务器上的个人项目，端口与运行状态由服务端定时自动探测。' },
       probedAt: '', loading: true, loadError: '',
       sortKey: 'default', sortDir: 1,
-      customOrder: load(ORDER_KEY),
+      customOrder: [], // 保存飞行中的乐观顺序；全局顺序见 state.serverOrder
+      serverOrder: [],
       view: 'table', viewPicked: false,
       syncing: false, dragId: '', dragIdx: -1,
     }
@@ -226,14 +226,42 @@
       else { state.sortKey = key; state.sortDir = 1 }
       render()
     }
+    /* ---------- 手动排序（2026-11-12 起写入服务端 /api/order，所有浏览器一致） ----------
+       customOrder 仅作保存飞行中的乐观回显，探测落地后清空；
+       serverOrder 记录服务端当前全局顺序（↺ 的显示依据）。 */
+    async function persistOrder(ids) {
+      state.customOrder = ids
+      render()
+      try {
+        const res = await fetch('/api/order', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+          body: JSON.stringify({ order: ids }),
+        })
+        const d = await res.json().catch(() => ({}))
+        if (!res.ok || !d.ok) return
+        const savedAt = Number.isFinite(d.serverTime) ? d.serverTime : Date.now()
+        for (let n = 0; n < 40; n++) {
+          await new Promise((r) => setTimeout(r, 1200))
+          try {
+            const data = await fetch(`/apps.json?t=${Date.now()}`, { cache: 'no-store' }).then((r2) => r2.json())
+            if (data.probedAt && new Date(data.probedAt).getTime() > savedAt) {
+              state.serverOrder = ids
+              state.customOrder = []
+              await fetchApps(true)
+              return
+            }
+          } catch { /* 下一轮再试 */ }
+        }
+        await fetchApps(true) // 超时兜底
+      } catch { /* 保存失败：保留本地乐观顺序，下次操作重试 */ }
+    }
     function moveApp(id, delta) {
       const ids = displayApps().map((a) => a.id)
       const i = ids.indexOf(id), j = i + delta
       if (i < 0 || j < 0 || j >= ids.length) return
       ;[ids[i], ids[j]] = [ids[j], ids[i]]
-      state.customOrder = ids
-      store(ORDER_KEY, ids)
-      render()
+      persistOrder(ids)
     }
     function onDropRow(fromId, targetId) {
       if (!fromId || fromId === targetId) return
@@ -242,9 +270,7 @@
       if (fi < 0 || ids.indexOf(targetId) < 0) return
       ids.splice(fi, 1)
       ids.splice(ids.indexOf(targetId), 0, fromId)
-      state.customOrder = ids
-      store(ORDER_KEY, ids)
-      render()
+      persistOrder(ids)
     }
     function onDropCard(fromIdx, targetIdx) {
       const list = displayApps()
@@ -252,9 +278,7 @@
       const ids = list.map((a) => a.id)
       const [movedId] = ids.splice(fromIdx, 1)
       ids.splice(targetIdx > fromIdx ? targetIdx - 1 : targetIdx, 0, movedId)
-      state.customOrder = ids
-      store(ORDER_KEY, ids)
-      render()
+      persistOrder(ids)
     }
 
     async function fetchApps(silent = false) {
@@ -472,12 +496,12 @@
       $('#gv-sort').value = state.sortKey
       $('#gv-sort-dir').hidden = state.sortKey === 'default'
       $('#gv-sort-dir').textContent = state.sortDir === 1 ? '↑' : '↓'
-      $('#gv-reset-order').hidden = !(state.sortKey === 'default' && state.customOrder.length)
+      $('#gv-reset-order').hidden = !(state.sortKey === 'default' && (state.serverOrder.length || state.customOrder.length))
     }
 
     $('#gv-sort').addEventListener('change', (e) => setSort(e.target.value))
     $('#gv-sort-dir').addEventListener('click', () => { state.sortDir = -state.sortDir; render() })
-    $('#gv-reset-order').addEventListener('click', () => { state.customOrder = []; store(ORDER_KEY, []); render() })
+    $('#gv-reset-order').addEventListener('click', () => persistOrder([])) // 空数组 = 清除服务端 order
     $$('.gv-segmented button').forEach((btn) => btn.addEventListener('click', () => {
       state.view = btn.dataset.view
       state.viewPicked = true
@@ -539,7 +563,22 @@
     function startPoll() { if (pollTimer) return; pollTimer = setInterval(() => fetchApps(true), POLL_MS) }
 
     return {
-      boot() { applyDefaultView(); fetchApps(); startPoll() },
+      boot() {
+        applyDefaultView()
+        // 全局手动顺序：开机从服务端取一次（↺ 的显示依据）；旧版 localStorage 键已废弃，顺手清掉
+        try { localStorage.removeItem('gv2:appOrder') } catch { /* 忽略 */ }
+        fetch('/api/config', { cache: 'no-store' })
+          .then((r) => r.json())
+          .then((cfg) => {
+            if (Array.isArray(cfg.order)) {
+              state.serverOrder = cfg.order
+              render()
+            }
+          })
+          .catch(() => { /* 离线时忽略 */ })
+        fetchApps()
+        startPoll()
+      },
       refresh() { return fetchApps(true) },
     }
   })()

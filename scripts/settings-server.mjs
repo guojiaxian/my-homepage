@@ -209,6 +209,23 @@ function setAppHidden(body) {
   return { id: entry.id, hidden }
 }
 
+/* 手动排序全局化（2026-11-12）：把浏览器里的拖拽/上下移动结果写入顶层 order，
+   探测按其排序 apps.json —— 所有浏览器与静态端点看到同一顺序。
+   order=[] / 缺省即清除（恢复探测默认顺序）；其余顶层键原样保留。 */
+let orderProbeTimer = null
+function setAppOrder(body) {
+  const list = Array.isArray(body?.order) ? body.order.map(str).filter(Boolean) : null
+  if (list === null) throw new Error('order 必须是应用 id 数组（空数组表示清除自定义顺序）')
+  const raw = JSON.parse(readFileSync(CONFIG_FILE, 'utf8'))
+  if (list.length) raw.order = [...new Set(list)]
+  else delete raw.order
+  writeConfig(raw)
+  // 连续拖拽会触发多次 POST：防抖后探测一次，保证读到的必然是最终顺序
+  clearTimeout(orderProbeTimer)
+  orderProbeTimer = setTimeout(() => runProbe({ noFetch: true }), 400)
+  return { count: list.length }
+}
+
 function send(res, code, body) {
   const text = typeof body === 'string' ? body : JSON.stringify(body)
   res.writeHead(code, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' })
@@ -271,6 +288,17 @@ const server = createServer(async (req, res) => {
       const body = JSON.parse(await readBody(req))
       const r = setAppHidden(body)
       send(res, 200, { ok: true, ...r })
+      return
+    }
+    if (req.method === 'POST' && url === '/api/order') {
+      // 手动排序写入全局 order（所有浏览器一致）；X-Requested-With 与 /api/appmeta 同款 CSRF 守卫
+      if (req.headers['x-requested-with'] !== 'XMLHttpRequest') {
+        send(res, 403, { ok: false, error: 'missing X-Requested-With' })
+        return
+      }
+      const body = JSON.parse(await readBody(req))
+      const r = setAppOrder(body)
+      send(res, 200, { ok: true, serverTime: Date.now(), ...r })
       return
     }
     if (req.method === 'POST' && url === '/api/probe') {

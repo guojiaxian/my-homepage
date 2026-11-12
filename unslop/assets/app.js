@@ -180,7 +180,6 @@
   }
 
   /* ---------- 状态 ---------- */
-  const ORDER_KEY = 'unslop:appOrder'
   const POLL_MS = 60_000
 
   const state = {
@@ -195,7 +194,8 @@
     loadError: '',
     sortKey: 'default',
     sortDir: 1,
-    customOrder: load(ORDER_KEY),
+    customOrder: [], // 保存飞行中的乐观顺序；全局顺序见 state.serverOrder
+    serverOrder: [],
     view: 'table',
     viewPicked: false,
     syncing: false,
@@ -239,15 +239,35 @@
     render()
   }
 
+  /* ---------- 手动排序（2026-11-12 起写入服务端 /api/order，所有浏览器一致） ----------
+     customOrder 仅作保存飞行中的乐观回显，探测落地后清空；
+     serverOrder 记录服务端当前全局顺序（↺ 的显示依据）。 */
+  async function persistOrder(ids) {
+    state.customOrder = ids
+    render()
+    try {
+      const res = await fetch('/api/order', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+        body: JSON.stringify({ order: ids }),
+      })
+      const d = await res.json().catch(() => ({}))
+      if (!res.ok || !d.ok) return
+      const savedAt = Number.isFinite(d.serverTime) ? d.serverTime : Date.now()
+      await waitForProbe(savedAt)
+      state.serverOrder = ids
+      state.customOrder = []
+      await fetchApps(true)
+    } catch { /* 保存失败：保留本地乐观顺序，下次操作重试 */ }
+  }
+
   function moveApp(id, delta) {
     const ids = displayApps().map((a) => a.id)
     const i = ids.indexOf(id)
     const j = i + delta
     if (i < 0 || j < 0 || j >= ids.length) return
     ;[ids[i], ids[j]] = [ids[j], ids[i]]
-    state.customOrder = ids
-    store(ORDER_KEY, ids)
-    render()
+    persistOrder(ids)
   }
 
   function onDropRow(fromId, targetId) {
@@ -257,9 +277,7 @@
     if (fi < 0 || ids.indexOf(targetId) < 0) return
     ids.splice(fi, 1)
     ids.splice(ids.indexOf(targetId), 0, fromId)
-    state.customOrder = ids
-    store(ORDER_KEY, ids)
-    render()
+    persistOrder(ids)
   }
 
   function onDropCard(fromIdx, targetIdx) {
@@ -268,9 +286,7 @@
     const ids = apps.map((a) => a.id)
     const [movedId] = ids.splice(fromIdx, 1)
     ids.splice(targetIdx > fromIdx ? targetIdx - 1 : targetIdx, 0, movedId)
-    state.customOrder = ids
-    store(ORDER_KEY, ids)
-    render()
+    persistOrder(ids)
   }
 
   /* ---------- 数据获取 ---------- */
@@ -577,7 +593,7 @@
     $('#u-dirBtn').hidden = state.sortKey === 'default'
     $('#u-dirBtn').textContent = state.sortDir === 1 ? '↑' : '↓'
     $('#u-dirBtn').title = state.sortDir === 1 ? '正序（点击切换倒序）' : '倒序（点击切换正序）'
-    $('#u-resetBtn').hidden = !(state.sortKey === 'default' && state.customOrder.length)
+    $('#u-resetBtn').hidden = !(state.sortKey === 'default' && (state.serverOrder.length || state.customOrder.length))
 
     document.querySelectorAll('.segmented button').forEach((b) => {
       b.classList.toggle('active', b.dataset.view === state.view)
@@ -678,11 +694,7 @@
   })
 
   $('#u-resetBtn').addEventListener('click', () => {
-    state.customOrder = []
-    try {
-      localStorage.removeItem(ORDER_KEY)
-    } catch { /* 忽略 */ }
-    render()
+    persistOrder([]) // 空数组 = 清除服务端 order，恢复默认顺序
   })
 
   document.querySelectorAll('.segmented button').forEach((btn) => {
@@ -757,6 +769,17 @@
   narrowMql.addEventListener('change', applyDefaultView)
   renderPageText()
   render()
+  // 全局手动顺序：开机从服务端取一次（↺ 的显示依据）；旧版 localStorage 键已废弃，顺手清掉
+  try { localStorage.removeItem('unslop:appOrder') } catch { /* 忽略 */ }
+  fetch('/api/config', { cache: 'no-store' })
+    .then((r) => r.json())
+    .then((cfg) => {
+      if (Array.isArray(cfg.order)) {
+        state.serverOrder = cfg.order
+        render()
+      }
+    })
+    .catch(() => { /* 离线时忽略 */ })
   fetchApps()
 
   setInterval(() => fetchApps(true), POLL_MS)
