@@ -181,7 +181,7 @@ function endPane(key) {
 }
 function focusPane(key) { const r = paneRefs.get(key); r && r.focus() }
 function hideDrawer() { termOpen.value = false } // 仅隐藏：全部窗格与 shell 现场保留
-/* ✕ 关闭确认：清空动作不可恢复，弹窗确认后执行；遮罩/ESC 退出仍保留现场 */
+/* ✕ 关闭确认：清空动作不可恢复，弹窗确认后执行；点遮罩退出仍保留现场（ESC 不拦截） */
 const closeConfirm = ref(false)
 function askCloseAll() { closeConfirm.value = true }
 function confirmCloseAll() {
@@ -204,17 +204,8 @@ function toggleTermFull() {
   setTimeout(refitAll, 80)
 }
 function refitAll() { for (const r of paneRefs.values()) r.refit() }
-/* ESC：全屏时还原窗口，否则收起抽屉（窗格保留） */
-function onEsc(e) {
-  if (e.key !== 'Escape') return // 只拦截 Esc；其余按键（含命令字符）必须放行
-  if (!termOpen.value) return
-  e.preventDefault(); e.stopPropagation()
-  if (limitTip.value) { limitTip.value = false; return } // 超限提示打开时 ESC 只关提示
-  if (closeConfirm.value) { closeConfirm.value = false; return } // 确认框打开时 ESC 只撤确认
-  if (termFull.value) toggleTermFull(); else hideDrawer('esc')
-}
-window.addEventListener('keydown', onEsc, true)
-onBeforeUnmount(() => window.removeEventListener('keydown', onEsc, true))
+/* 终端打开后不再拦截 ESC：ESC 必须原样交给 xterm，否则 vim/less 等无法退出编辑模式。
+   抽屉退出只走遮罩点击，全屏退出只走「还原窗口」按钮，关闭清空只走 ✕ 确认框。 */
 /* 滚轮滚动链守卫：终端区滚到头后浏览器会把滚动交给底层文档（背后页面跟着滚），
    在抽屉与遮罩上直接消费 wheel 默认行为。xterm 自身的回滚在其内部监听里已完成
    （冒泡阶段先于本守卫），不受影响。 */
@@ -565,18 +556,18 @@ function hostSubtitle(h) {
           />
         </div>
       </div>
-      <!-- ✕ 关闭确认：清空动作不可恢复，先确认再执行（取消 / ESC / 点遮罩均可撤销） -->
+      <!-- ✕ 关闭确认：清空动作不可恢复，先确认再执行（取消 / 点遮罩可撤销；ESC 留给终端） -->
       <div v-if="closeConfirm" class="tc-mask" @click.self="closeConfirm = false">
         <div class="tc-box">
           <p class="tc-title">关闭并清空全部终端？</p>
-          <p class="tc-desc">将断开当前 {{ termPanes.length }} 个终端会话，下次打开为全新会话。如需保留现场，请点抽屉外空白处或按 ESC 退出。</p>
+          <p class="tc-desc">将断开当前 {{ termPanes.length }} 个终端会话，下次打开为全新会话。如需保留现场，请点抽屉外空白处退出（ESC 会发送给终端）。</p>
           <div class="tc-actions">
             <button class="tc-btn" @click="closeConfirm = false">取消</button>
             <button class="tc-btn danger" @click="confirmCloseAll()">关闭并清空</button>
           </div>
         </div>
       </div>
-      <!-- 窗格数超限：已达 PANES_MAX 时点击主机 chips 的居中提示（ESC / 点遮罩 / 知道了 均可关闭） -->
+      <!-- 窗格数超限：已达 PANES_MAX 时点击主机 chips 的居中提示（点遮罩 / 知道了 关闭；ESC 留给终端） -->
       <div v-if="limitTip" class="tc-mask" @click.self="limitTip = false">
         <div class="tc-box">
           <p class="tc-title">终端窗格已达上限</p>

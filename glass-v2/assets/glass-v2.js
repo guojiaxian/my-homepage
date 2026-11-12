@@ -1063,13 +1063,7 @@
       term.focus()
     }
     $('#gv-term-close').addEventListener('click', closeTerm)
-    window.addEventListener('keydown', (e) => {
-      // 捕获阶段：全屏时 ESC 还原窗口（xterm textarea 会吞冒泡阶段的 Escape）
-      if (e.key === 'Escape' && e.target && $('#gv-term-drawer') && !$('#gv-term-drawer').hidden && $('#gv-term-drawer').classList.contains('is-full')) {
-        e.preventDefault(); e.stopPropagation()
-        $('#gv-term-full').click()
-      }
-    }, true)
+    // ESC 不拦截：必须原样交给 xterm（vim/less 退出编辑模式依赖 ESC）；全屏退出走「还原窗口」按钮
     $('#gv-term-full').addEventListener('click', () => {
       const d = $('#gv-term-drawer')
       const full = d.classList.toggle('is-full')
@@ -1443,10 +1437,7 @@
     $b('gv-bt-full').textContent = bt.full ? '还原窗口' : '全屏'
     setTimeout(refitAll, 60); setTimeout(refitAll, 180)
   })
-  window.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape' || !bt.open) return
-    if (bt.full) { e.preventDefault(); e.stopPropagation(); $b('gv-bt-full').click() }
-  }, true)
+  // ESC 不拦截：批量终端窗格同样需要把 ESC 交给 xterm；全屏退出走「还原窗口」按钮
   window.addEventListener('resize', () => { if (bt.open) refitAll() })
   // 窗格点击 → 单机交互
   $b('gv-bt-panes').addEventListener('click', (e) => {

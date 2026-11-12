@@ -468,9 +468,9 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **批量终端（2026-11-10）**：`MonitorBatchTerm.vue`——监控工具栏「批量终端」→ 主机多选器（仅 credReady 主机，**最多 6 台**）→ 多窗格并排；**命令栏一条输入广播到全部窗格**（`text+\r` 逐 WS 下发），点击某窗格进入**单机交互**（密码/交互式提示，命令栏同步切单机语义），「返回广播」切回；布局规则：≤3 台一行并排、≥4 台两行×3 列（`gridTemplateColumns` 动态）；支持全屏切换、每窗格独立重连/状态点。主机多选器为居中模态（遮罩 + 可选行卡片 + 选中蓝底 + 主按钮；`.batch-picker*` 样式在 MonitorView scoped 内，曾因只有结构没有样式退化成页面底部一排裸控件，2026-11-10 补齐）。翻页：滚轮原生可用；PageUp/PageDown 在普通缓冲区下拦截为 `term.scrollPages()`（命令栏聚焦时广播翻全部窗格，点击某窗格后只翻该窗格；vim/less 等备用屏不拦截、交还应用）；xterm viewport 加 `scrollbar-gutter: stable` + 细滚动条样式（默认 overlay 滚动条宽度 0、无法拖拽）。每窗格即一条普通 WS 会话（走既有网关，审计天然覆盖，注意 `maxSessionsPerHost`（当前 10）的并发上限）。glass-v2 同款（vanilla 实现，xterm 用 vendor 全局 `Terminal`/`FitAddon.FitAddon`）。
 
-**终端多窗格（2026-11-11，已取代早期 8 页签版）**：`MonitorView` 用 `termPanes[]` 缓存最多 **6 个窗格**（`PANES_MAX`；**同一主机可多开**，抽屉顶部主机 chips 点击即新增；窗格 key 为 `hostId:seq`，`ordinal` 稳定编号），1–3 个横排、4–6 个第二行（`panePos`），布局变化走 FLIP 动画；抽屉宽度随窗格数渐进 1/3 → 2/3 → 近全屏，另有全屏档。**超限提示（2026-11-12，用户要求）**：hint 文案不再写「最多 6 个」，开满 6 格后再点主机 chips 改为**居中弹窗**（复用 `.tc-mask/.tc-box`，「超过上限，请先关闭其他的」；ESC / 点遮罩 / 知道了 均可关，可重复触发；注意 `.tc-mask` 是抽屉内 `inset:0` 而非全视口，E2E 点遮罩要落在抽屉坐标内，见 `.verify/e2e-pane-limit.mjs` 10 断言）。多端输入开关把任一窗格键入广播到其他窗格；`MonitorTerm` 暴露 `send/focus/refit`，`ResizeObserver` 自动重排。关闭语义分离：遮罩 / ESC 仅隐藏、保留全部 shell 现场；✕ 需二次确认后清空全部（卸载组件 → 关 WS / 释放 xterm）。并发受限（4029）20 秒自动重连，最多 30 次；服务端输出也计入活跃。弹出窗口由父级统一 `window.open`，并移除对应窗格避免双开。glass-v2 仍为单会话。
+**终端多窗格（2026-11-11，已取代早期 8 页签版）**：`MonitorView` 用 `termPanes[]` 缓存最多 **6 个窗格**（`PANES_MAX`；**同一主机可多开**，抽屉顶部主机 chips 点击即新增；窗格 key 为 `hostId:seq`，`ordinal` 稳定编号），1–3 个横排、4–6 个第二行（`panePos`），布局变化走 FLIP 动画；抽屉宽度随窗格数渐进 1/3 → 2/3 → 近全屏，另有全屏档。**超限提示（2026-11-12，用户要求）**：hint 文案不再写「最多 6 个」，开满 6 格后再点主机 chips 改为**居中弹窗**（复用 `.tc-mask/.tc-box`，「超过上限，请先关闭其他的」；点遮罩 / 知道了 关闭，可重复触发；ESC 不拦截、留给终端；注意 `.tc-mask` 是抽屉内 `inset:0` 而非全视口，E2E 点遮罩要落在抽屉坐标内，见 `.verify/e2e-pane-limit.mjs` 10 断言）。多端输入开关把任一窗格键入广播到其他窗格；`MonitorTerm` 暴露 `send/focus/refit`，`ResizeObserver` 自动重排。关闭语义分离：点遮罩仅隐藏、保留全部 shell 现场；**ESC 不再被 UI 拦截，原样交给 xterm**（vim/less 退出编辑模式依赖 ESC）；全屏退出只走「还原窗口」按钮；✕ 需二次确认后清空全部（卸载组件 → 关 WS / 释放 xterm）。并发受限（4029）20 秒自动重连，最多 30 次；服务端输出也计入活跃。弹出窗口由父级统一 `window.open`，并移除对应窗格避免双开。glass-v2 仍为单会话。
 
-**终端交互打磨（2026-11-11，用户五条反馈）**：① **渐进宽度**——抽屉按窗格数 `w1/w2/w3` 三档：1 格 `clamp(420px, 33.33vw, 720px)`、2 格 `clamp(780px, 66.66vw, 1440px)`、3 格及以上 `calc(100vw - 56px)`（左侧留遮罩空白可点击退出），`transition: width 300ms` 与窗格 FLIP 叠加；`:not(.full)` 防止覆盖全屏档。② 标题栏 `.mon-term-head` 补齐 flex-wrap + `padding: 10px 14px 0`（此前完全无样式，标题贴边被裁），`.host-chips` 改 `flex-basis:100%` 独占第二行。③ **关闭语义拆分（含确认）**——✕ 按钮 → `askCloseAll()` 弹居中确认框（`.tc-mask/.tc-box`，红色「关闭并清空」），确认后才 `confirmCloseAll()` 清空全部窗格/状态/提示（下次打开为全新单窗格）；**取消按钮 / ESC / 点确认框外遮罩**三条撤销路径均不影响现场；点抽屉外遮罩 / ESC（无确认框时）→ `hideDrawer()` 保留现场。④ `MonitorTerm` 加 **ResizeObserver**（rAF 节流、`props.visible` 门控）→ 容器尺寸变化自动 `fit()` 并经 `onResize` 同步 pty 列行数，窗口缩放/抽屉变宽时内容重排跟手。⑤ `endPane` 聚焦修正为相邻幸存窗格（原实现在窗格删除后聚焦已删 key）。**滚轮 4+ 窗格「失效」未复现**：4/6 窗格窗口态+全屏态、批量 4 台实测 scrollTop 均正常变化（1083→283 等），判定为浏览器缓存旧版 JS，强刷即可。验证：`.verify/e2e-term-ux5.mjs`（17 断言）；e2e-multipane 步骤 6 改 ESC 验保留、新增步骤 10 验三路径确认（25 断言）。
+**终端交互打磨（2026-11-11，用户五条反馈）**：① **渐进宽度**——抽屉按窗格数 `w1/w2/w3` 三档：1 格 `clamp(420px, 33.33vw, 720px)`、2 格 `clamp(780px, 66.66vw, 1440px)`、3 格及以上 `calc(100vw - 56px)`（左侧留遮罩空白可点击退出），`transition: width 300ms` 与窗格 FLIP 叠加；`:not(.full)` 防止覆盖全屏档。② 标题栏 `.mon-term-head` 补齐 flex-wrap + `padding: 10px 14px 0`（此前完全无样式，标题贴边被裁），`.host-chips` 改 `flex-basis:100%` 独占第二行。③ **关闭语义拆分（含确认）**——✕ 按钮 → `askCloseAll()` 弹居中确认框（`.tc-mask/.tc-box`，红色「关闭并清空」），确认后才 `confirmCloseAll()` 清空全部窗格/状态/提示（下次打开为全新单窗格）；**取消按钮 / 点确认框外遮罩**两条撤销路径均不影响现场；点抽屉外遮罩 → `hideDrawer()` 保留现场。**ESC 在终端打开时完全不被 UI 拦截**（2026-11-12 用户反馈：vim 需要 ESC 退出编辑模式，原「全屏还原 / 收起抽屉 / 撤确认」全部取消），确认框与超限提示只走按钮或遮罩关闭。④ `MonitorTerm` 加 **ResizeObserver**（rAF 节流、`props.visible` 门控）→ 容器尺寸变化自动 `fit()` 并经 `onResize` 同步 pty 列行数，窗口缩放/抽屉变宽时内容重排跟手。⑤ `endPane` 聚焦修正为相邻幸存窗格（原实现在窗格删除后聚焦已删 key）。**滚轮 4+ 窗格「失效」未复现**：4/6 窗格窗口态+全屏态、批量 4 台实测 scrollTop 均正常变化（1083→283 等），判定为浏览器缓存旧版 JS，强刷即可。验证：`.verify/e2e-term-ux5.mjs`（17 断言）；e2e-multipane 步骤 6 改为点遮罩验保留、步骤 10 用取消按钮验确认（ESC 已改为留给终端，2026-11-12）。
 
 > ⚠️ 本轮 ResizeObserver 高频 resize 立刻炸出踩坑 #34（SSH 远端窗格握手期 resize 帧被当输入回放刷屏）——凡是「提高某类事件频次」的改动，必须同时检查该事件在**慢路径（远程握手/重连）**下的处理。
 
@@ -498,7 +498,7 @@ systemctl restart my-homepage-monitor            # 改了 monitor-server.mjs 后
 
 **形态（2026-11-10 用户反馈后定稿）**：监控看板**不再是独立页面**——主站顶栏是双标题「应用中心 / 监控中心」（`.brand-tabs`，active 高亮胶囊，点击切换 `topView`，localStorage `my-homepage:topView` 持久化 + `#monitor` hash 直达；2026-11-10 由「我的应用」改名——标签 1 即 `page.heroTitle`，改名改该配置字段即可，glass-v2 标签为硬编码需同步）。active 高亮胶囊，点击切换 `topView`，localStorage `my-homepage:topView` 持久化 + `#monitor` hash 直达）。两视图均**常驻 `v-show`**（不用 KeepAlive，原因见踩坑 #17），`MonitorView` 接收 `active` prop 自管「boot / 轮询启停」。首版独立静态页已退役：`monitor/index.html` 只剩重定向 stub，`monitor/terminal.html`（终端弹窗放大页）保留。
 
-**组件结构**：`MonitorView.vue`（hero 统计胶囊 + 告警横幅 + 主机卡 grid；登录层已上移至 App.vue 全站门禁）→ `MonitorDetail.vue`（点卡片**内联展开**：4 趋势图一行 / 目录占比 + 目录对比 / 进程明细全宽，独立加载 history+procs，15s 自刷；详情头部 ⚙ 打开该主机的设置弹窗；**目录历史对比默认全选**——`seededDirs` 记录已补勾路径，只补新目录、自刷不重置用户手动取消项，标题旁有全选/清空按钮）→ `MonitorSettings.vue`（设置弹窗，**纳管主机为紧凑列表**：点击行弹出嵌套 `MonitorHostEdit.vue` 编辑弹窗）与 `MonitorTerm.vue`（终端抽屉 + 弹窗放大 + **全屏/还原切换**：原地铺满视口并同步 pty 列数，ESC 先还原窗口再关闭——捕获阶段监听，因 xterm textarea 会吞冒泡阶段的 Escape）。图表走 `src/lib/monitor-charts.js`（**echarts/core 按需注册**，动态 import → 独立 chunk 180KB gz，不占首屏；主包 56KB gz 基本不变）；xterm 同样动态分包（73KB gz）。
+**组件结构**：`MonitorView.vue`（hero 统计胶囊 + 告警横幅 + 主机卡 grid；登录层已上移至 App.vue 全站门禁）→ `MonitorDetail.vue`（点卡片**内联展开**：4 趋势图一行 / 目录占比 + 目录对比 / 进程明细全宽，独立加载 history+procs，15s 自刷；详情头部 ⚙ 打开该主机的设置弹窗；**目录历史对比默认全选**——`seededDirs` 记录已补勾路径，只补新目录、自刷不重置用户手动取消项，标题旁有全选/清空按钮）→ `MonitorSettings.vue`（设置弹窗，**纳管主机为紧凑列表**：点击行弹出嵌套 `MonitorHostEdit.vue` 编辑弹窗）与 `MonitorTerm.vue`（终端抽屉 + 弹窗放大 + **全屏/还原切换**：原地铺满视口并同步 pty 列数；**ESC 不拦截，原样交给 xterm**，全屏退出只走「还原窗口」按钮）。图表走 `src/lib/monitor-charts.js`（**echarts/core 按需注册**，动态 import → 独立 chunk 180KB gz，不占首屏；主包 56KB gz 基本不变）；xterm 同样动态分包（73KB gz）。
 
 **主机设置双通道**（2026-11-10）：`MonitorHostEdit.vue` 是单主机编辑弹窗的共享组件（表单 + 该主机跟踪目录 + 凭据提示），两种模式：① **草稿模式**（设置面板进入）——面板「纳管主机」区为紧凑列表（图标 + 名称 + mono id + 摘要行「类型 · 分组 · 地址:端口 · N 个跟踪目录」+ 本机标「内置」），点击行弹嵌套弹窗（z-index 80 > 面板 70），修改直接改 cfg 里的响应式对象，仍由面板底部「保存配置」统一 PUT；「＋添加主机」创建空条目并立即打开弹窗。② **直连模式**（详情页 ⚙ 进入）——`MonitorView` 拉全量配置深拷贝出目标主机，弹窗底部「保存」直接 PUT 整份配置（其余段原样带回），成功后刷新 summary；服务端校验错误（如 SSH 缺 address）就地显示在弹窗内，不改配置。删除主机只在草稿模式弹窗提供（confirm 后删草稿行，保存生效）；本机主机不可删。**跟踪目录展示（2026-11-10 用户反馈「本机显示空、全局区重复」）**：`GET /api/monitor/config` 给每台主机附带只读 `effectiveDirs`（`effectiveTrackedDirsFor`：全局 + 本机主页登记 + 该主机自有，**再追加运行时自动发现的容器目录 `source:'container'`**；PUT 时 `normalizeHost` 丢弃不落盘）；主机弹窗把「自动并入」目录以虚线行 + 「主页登记 / 全局 / 自动发现」chip 只读展示（容器行显示 `name` 如「容器 open-webui」，title 放原始 path），自有目录可增删；添加时若路径已在 `effectiveDirs` 中会拦截重复。本机因此显示 9 个主页登记 + 1 个容器 = 10，与主机卡/图表一致。设置面板的全局「跟踪目录」区改为 **仅当 `cfg.trackedDirs` 非空时显示**，标题「全局自定义目录（对所有主机生效）」并注明通常无需在此添加，避免与每主机目录重复。
 
@@ -787,7 +787,7 @@ systemctl enable --now my-homepage-probe.timer my-homepage-probe-quick.timer my-
 | 同步检查面板 + 按地址配对（2026-11-11） | 既有真实不同步（应用 id 与主机 id 不同，如 network-monitor ⇄ netwatch）暴露「只按 id 配对会建重复条目」：改为同 id 优先、其次同地址，并在设置页给出可读检查视图（配对/异常/候选 + 一键配对 + 强制重同步），让「有没有不同步」可自查而非靠日志（详见 §17.3） |
 | 监控设置弹窗对齐应用中心设计体系（2026-11-11） | 用户反馈「窗口非常丑，保持和应用中心一致风格」：两处弹窗与 `SettingsPanel` 共用同一套类名（settings-overlay/panel/head/foot + fitem + mini-btn/primary-btn），视觉语言一套、后续改一处同步（详见 §8.7 该段） |
 | 终端渐进宽度 1/3→2/3→近全屏（2026-11-11） | 用户要求「1 个占 1/3 屏、2 个占 2/3、3 个几乎占满（左侧留空白退出）」：按窗格数切 `w1/w2/w3` 三档而非让抽屉固定全宽——每格恒约 1/3 屏，增减窗格时已有终端内容不跳变；`:not(.full)` 与全屏档解耦 |
-| 终端关闭确认弹窗 + 遮罩保留（2026-11-11） | 用户要求「点击关闭加弹窗确定」：清空全部会话不可恢复，✕ 需二次确认（取消/ESC/点遮罩三路径可撤销）；而点抽屉外空白/ESC 仍是「保留现场」的轻退出——两种退出语义分离，日常切换不误清 shell |
+| 终端关闭确认弹窗 + 遮罩保留（2026-11-11） | 用户要求「点击关闭加弹窗确定」：清空全部会话不可恢复，✕ 需二次确认（取消/点遮罩可撤销）；点抽屉外空白是「保留现场」的轻退出——两种退出语义分离，日常切换不误清 shell。**2026-11-12 修订：ESC 不再参与任何终端 UI 退出**——vim/less 需要 ESC 退出编辑模式，ESC 必须原样交给 xterm；全屏退出改走「还原窗口」按钮，确认框/超限提示只走按钮或遮罩 |
 | 设置类弹窗点遮罩不关闭（2026-11-12） | 用户要求「点击空白处不得直接退出，必须从按钮退出」：应用设置面板 / 应用编辑弹窗 / 监控设置 / 主机编辑（草稿+直连两模式）/ glass-v2 监控设置共 5 处移除遮罩 click 关闭——防误触丢草稿，退出只走 ✕ / 取消 / 完成 按钮；终端类弹窗（抽屉遮罩、关闭确认、超限提示、批量层）不在此列，保留原有遮罩语义。验证 `.verify/e2e-mask-close.mjs`（13 断言） |
 | 手动排序全局化（2026-11-12） | 用户要求「排序之后在所有浏览器界面均适用」：手动排序从 localStorage 改为 `POST /api/order` 写 `apps.config.json` 顶层 `order`（防抖探测重排 apps.json），四个前端（主站+glass/unslop/glass-v2）同步——保存飞行中仅内存乐观回显，落地后顺序完全由 apps.json 承载，其他浏览器改动随轮询流入；服务端「每浏览器一份」的排序语义不存在了，↺ 清除也对所有浏览器生效。验证 `.verify/e2e-global-order.mjs`（7 断言，含双浏览器上下文与四端点一致性） |
 
@@ -900,7 +900,7 @@ tail -5 data/monitor/alerts.jsonl
 # 终端端到端自检（需要已登录会话；脚本自动登录）
 node .verify/term-test.mjs
 # 终端专项 E2E（详见 §19.4；.verify 不入库，缺失时按 §19 描述重建）
-node .verify/e2e-multipane.mjs     # 多窗格布局/多端输入/ESC 保留/✕ 三路径确认
+node .verify/e2e-multipane.mjs     # 多窗格布局/多端输入/点遮罩保留/✕ 确认清空
 node .verify/e2e-term-ux5.mjs      # 渐进宽度/标题栏留白/滚轮/ResizeObserver/关闭语义
 node .verify/e2e-wheel-guard.mjs   # 滚轮滚动链守卫（背后页面不跟滚）
 node .verify/e2e-batch.mjs         # 批量终端
@@ -1123,7 +1123,7 @@ node .verify/shot-cmpall.cjs     # 目录对比默认全选 + 自刷不勾回 + 
 
 | 脚本 | 覆盖 |
 |---|---|
-| `e2e-multipane.mjs` | 多窗格布局/FLIP/多端输入/ESC 保留/全屏/底部留白/✕ 三路径确认清空（25） |
+| `e2e-multipane.mjs` | 多窗格布局/FLIP/多端输入/点遮罩保留/全屏/底部留白/✕ 确认清空；ESC 原样输入（2026-11-12 调整） |
 | `e2e-term-ux5.mjs` | 渐进宽度（640/1280/1864px）/标题栏留白/4 窗格+全屏滚轮/ResizeObserver 重排/关闭语义（17） |
 | `e2e-wheel-guard.mjs` | 五处覆盖层滚动链 + xterm 自身滚动（8） |
 | `e2e-batch.mjs` | 批量终端选择器/广播/单机/全屏/两行布局（13） |
