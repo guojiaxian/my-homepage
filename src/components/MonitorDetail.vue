@@ -123,13 +123,7 @@ function renderTrends() {
   const { baseOption, lineSeries, legendStyle, cssVar } = mod()
   const t = (p) => p.t
   const data = trendPts()
-  /* 纵轴单位：轴名放顶部，避免数值标签加单位后挤压绘图区 */
-  const unit = (text) => ({
-    name: text,
-    nameLocation: 'end',
-    nameGap: 8,
-    nameTextStyle: { color: cssVar('--text-2'), fontSize: 10, align: 'left' },
-  })
+  /* 单位只在图例与 tooltip 中标注（「下行 Mbps」「读 MB/s」）：y 轴顶部再放轴名会与图例重叠 */
   const c = inst('cpu', elCpu.value)
   const cpuBase = baseOption('{value}%', range.value)
   c.setOption({
@@ -159,7 +153,6 @@ function renderTrends() {
     legend: legendStyle(),
     grid: { ...netBase.grid, top: 30 },
     tooltip: { ...netBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v} Mbps`) },
-    yAxis: { ...netBase.yAxis, ...unit('Mbps') },
     series: [
       lineSeries('下行 Mbps', data.map((p) => [t(p), p.netI]), cssVar('--accent')),
       lineSeries('上行 Mbps', data.map((p) => [t(p), p.netO]), cssVar('--green')),
@@ -172,7 +165,6 @@ function renderTrends() {
     legend: legendStyle(),
     grid: { ...dioBase.grid, top: 30 },
     tooltip: { ...dioBase.tooltip, valueFormatter: (v) => (v == null ? '-' : `${v} MB/s`) },
-    yAxis: { ...dioBase.yAxis, ...unit('MB/s') },
     series: [
       lineSeries('读 MB/s', data.map((p) => [t(p), p.dioR]), cssVar('--teal')),
       lineSeries('写 MB/s', data.map((p) => [t(p), p.dioW]), cssVar('--amber')),
