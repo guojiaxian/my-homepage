@@ -1,34 +1,38 @@
 {
   "apps": [
     {
-      "id": "cli_app",
-      "directory": "/root/applications/cli_app",
-      "expectedPort": null,
+      "id": "my-homepage",
+      "directory": "/root/applications/my-homepage",
+      "expectedPort": 80,
       "kinds": [
         "web"
       ],
       "env": "lan",
       "github": "",
-      "tags": [],
-      "icon": "📦",
-      "name": "cli_app"
+      "tags": [
+        "导航",
+        "本站"
+      ],
+      "icon": "🏠",
+      "name": "我的应用空间（本站）",
+      "description": "本页自身：个人应用展示主页。定时探测各应用端口与运行状态、源码同步情况，并提供首页设置面板维护应用信息。"
     },
     {
-      "id": "cloud-monitor",
-      "directory": "/root/applications/cloud-monitor",
-      "expectedPort": 18001,
+      "id": "tv-show",
+      "directory": "/root/applications/tv-show",
+      "expectedPort": 18000,
       "kinds": [
-        "web"
+        "web",
+        "tv"
       ],
       "env": "lan",
-      "github": "https://github.com/guojiaxian/cloud-monitor",
+      "github": "https://github.com/guojiaxian/tv-show",
       "tags": [
-        "监控",
         "大屏"
       ],
-      "icon": "📊",
-      "name": "云计算监控大屏",
-      "description": "面向中控大屏的统一监控系统：汇聚高性能计算（HPC）集群、虚拟化集群、存储集群三类底层资源的运行状态，采用定时拉取 + 页面解析 + 同步上屏方式。含大屏展示与管理后台。"
+      "icon": "📺",
+      "name": "数智资源中心大屏聚合平台",
+      "description": "TV Show Center：面向小米电视等安卓大屏的聚合应用，服务端聚合多个大屏入口，支持轮询播放、2×2 分屏与多设备互控控制台。"
     },
     {
       "id": "expense-assistant",
@@ -48,37 +52,89 @@
       "description": "报销前一键重命名附件的内部 Web 服务：上传发票/凭证等材料，识别类别与要素，生成合规文件名，确认后打包 ZIP 下载。"
     },
     {
-      "id": "jianji-ledger",
-      "directory": "/root/applications/jianji-ledger",
-      "expectedPort": null,
-      "kinds": [
-        "app"
-      ],
-      "env": "lan",
-      "github": "",
-      "tags": [
-        "记账"
-      ],
-      "icon": "📒",
-      "name": "简记 · 账本",
-      "description": "记账 Web 应用（含 Capacitor 打包的安卓 APK）。"
-    },
-    {
-      "id": "my-homepage",
-      "directory": "/root/applications/my-homepage",
-      "expectedPort": 80,
+      "id": "cloud-monitor",
+      "directory": "/root/applications/cloud-monitor",
+      "expectedPort": 18001,
       "kinds": [
         "web"
       ],
       "env": "lan",
-      "github": "",
+      "github": "https://github.com/guojiaxian/cloud-monitor",
       "tags": [
-        "导航",
-        "本站"
+        "监控",
+        "大屏"
       ],
-      "icon": "🏠",
-      "name": "我的应用空间（本站）",
-      "description": "本页自身：个人应用展示主页。定时探测各应用端口与运行状态、源码同步情况，并提供首页设置面板维护应用信息。"
+      "icon": "📊",
+      "name": "云计算监控大屏",
+      "description": "面向中控大屏的统一监控系统：汇聚高性能计算（HPC）集群、虚拟化集群、存储集群三类底层资源的运行状态，采用定时拉取 + 页面解析 + 同步上屏方式。含大屏展示与管理后台。"
+    },
+    {
+      "id": "storage-monitor",
+      "directory": "/root/applications/storage-monitor",
+      "expectedPort": 18002,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/storage-monitor",
+      "tags": [
+        "监控",
+        "大屏",
+        "存储"
+      ],
+      "icon": "💾",
+      "name": "存储集群监控大屏",
+      "description": "面向存储集群资源的大屏展示：4 个存储集群的架构参数、节点数量、容量水位与分区占比图形化呈现，支持编辑模式与界面文案配置（SSE 实时生效）。零运行时依赖。"
+    },
+    {
+      "id": "time-logger",
+      "directory": "/root/applications/time-logger",
+      "expectedPort": 19001,
+      "kinds": [
+        "web",
+        "app"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/Time-Logger",
+      "tags": [
+        "Web Audio"
+      ],
+      "icon": "⏱️",
+      "https": true,
+      "name": "时间记录器 Time Logger",
+      "description": "地震密集台阵设备一致性检测的锤击时刻记录工具：Web Audio API 自动检测敲击并记录高精度北京时间，含 Web 前端与安卓离线 APK。"
+    },
+    {
+      "id": "wedding-plan",
+      "directory": "/root/applications/wedding-plan",
+      "expectedPort": 19002,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/wedding-plan",
+      "tags": [
+        "生活"
+      ],
+      "icon": "💒",
+      "name": "备婚计划",
+      "description": "新人的专属备婚工具网站：婚礼倒计时、预算规划、物品清单、筹备任务、当天流程、座位排布与宾客礼金管理，电脑 / 手机 / 平板均可使用。"
+    },
+    {
+      "id": "study-log",
+      "directory": "/root/applications/study-log",
+      "expectedPort": 3000,
+      "kinds": [
+        "web"
+      ],
+      "env": "lan",
+      "github": "https://github.com/guojiaxian/Study-log",
+      "tags": [
+        "AI"
+      ],
+      "icon": "📚",
+      "name": "StudyLog 成绩记录",
+      "description": "家庭自用的初中生学习成绩管理系统：录入考试分数后自动计算得分率、排名进退与目标院校差距，提供趋势图表与 AI 学情分析。"
     },
     {
       "id": "shunfeng-ledger",
@@ -106,6 +162,20 @@
       "description": "面向顺风车司机的离线记账 Android 应用，拍照识别订单、一键入账并统计经营数据；纯本地存储，不上传服务器。"
     },
     {
+      "id": "study-log-wxmp",
+      "directory": "/root/applications/study-log-wxmp",
+      "expectedPort": null,
+      "kinds": [
+        "miniapp"
+      ],
+      "env": "lan",
+      "github": "",
+      "tags": [],
+      "icon": "📦",
+      "name": "StudyLog-微信小程序",
+      "description": "学习记录微信小程序版"
+    },
+    {
       "id": "shunfeng-ledger-wxmp-local",
       "directory": "/root/applications/shunfeng-ledger-wxmp",
       "expectedPort": null,
@@ -123,101 +193,34 @@
       "description": "微信小程序源码仓，仅用于本地开发；应用中心只展示阿里云公网的同步服务。"
     },
     {
-      "id": "storage-monitor",
-      "directory": "/root/applications/storage-monitor",
-      "expectedPort": 18002,
-      "kinds": [
-        "web"
-      ],
-      "env": "lan",
-      "github": "https://github.com/guojiaxian/storage-monitor",
-      "tags": [
-        "监控",
-        "大屏",
-        "存储"
-      ],
-      "icon": "💾",
-      "name": "存储集群监控大屏",
-      "description": "面向存储集群资源的大屏展示：4 个存储集群的架构参数、节点数量、容量水位与分区占比图形化呈现，支持编辑模式与界面文案配置（SSE 实时生效）。零运行时依赖。"
-    },
-    {
-      "id": "study-log",
-      "directory": "/root/applications/study-log",
-      "expectedPort": 3000,
-      "kinds": [
-        "web"
-      ],
-      "env": "lan",
-      "github": "https://github.com/guojiaxian/Study-log",
-      "tags": [
-        "AI"
-      ],
-      "icon": "📚",
-      "name": "StudyLog 成绩记录",
-      "description": "家庭自用的初中生学习成绩管理系统：录入考试分数后自动计算得分率、排名进退与目标院校差距，提供趋势图表与 AI 学情分析。"
-    },
-    {
-      "id": "study-log-wxmp",
-      "directory": "/root/applications/study-log-wxmp",
+      "id": "cli_app",
+      "directory": "/root/applications/cli_app",
       "expectedPort": null,
       "kinds": [
-        "web"
+        "cli"
       ],
       "env": "lan",
       "github": "",
       "tags": [],
-      "icon": "📦"
+      "icon": "📦",
+      "name": "NLCMD",
+      "description": "允许以自然语言来生成Linux指令"
     },
     {
-      "id": "time-logger",
-      "directory": "/root/applications/time-logger",
-      "expectedPort": 19001,
+      "id": "jianji-ledger",
+      "directory": "/root/applications/jianji-ledger",
+      "expectedPort": null,
       "kinds": [
-        "web",
         "app"
       ],
       "env": "lan",
-      "github": "https://github.com/guojiaxian/Time-Logger",
+      "github": "",
       "tags": [
-        "Web Audio"
+        "记账"
       ],
-      "icon": "⏱️",
-      "https": true,
-      "name": "时间记录器 Time Logger",
-      "description": "地震密集台阵设备一致性检测的锤击时刻记录工具：Web Audio API 自动检测敲击并记录高精度北京时间，含 Web 前端与安卓离线 APK。"
-    },
-    {
-      "id": "tv-show",
-      "directory": "/root/applications/tv-show",
-      "expectedPort": 18000,
-      "kinds": [
-        "web",
-        "tv"
-      ],
-      "env": "lan",
-      "github": "https://github.com/guojiaxian/tv-show",
-      "tags": [
-        "大屏"
-      ],
-      "icon": "📺",
-      "name": "数智中心大屏聚合平台",
-      "description": "TV Show Center：面向小米电视等安卓大屏的聚合应用，服务端聚合多个大屏入口，支持轮询播放、2×2 分屏与多设备互控控制台。"
-    },
-    {
-      "id": "wedding-plan",
-      "directory": "/root/applications/wedding-plan",
-      "expectedPort": 19002,
-      "kinds": [
-        "web"
-      ],
-      "env": "lan",
-      "github": "https://github.com/guojiaxian/wedding-plan",
-      "tags": [
-        "生活"
-      ],
-      "icon": "💒",
-      "name": "备婚计划",
-      "description": "新人的专属备婚工具网站：婚礼倒计时、预算规划、物品清单、筹备任务、当天流程、座位排布与宾客礼金管理，电脑 / 手机 / 平板均可使用。"
+      "icon": "📒",
+      "name": "简记 · 账本",
+      "description": "记账 Web 应用（含 Capacitor 打包的安卓 APK）。"
     }
   ],
   "remoteApps": [
@@ -277,16 +280,46 @@
       "description": "多智能体网络安全监控与自动化运维平台（log_gpt_agent），部署在内网另一台服务器 10.8.11.3，提供安全事件监控、研判告警与自动化处置。"
     },
     {
-      "id": "aliyun-shunfeng-ledger",
+      "id": "study-log-cloud",
       "kinds": [
         "web"
+      ],
+      "env": "public",
+      "github": "https://github.com/guojiaxian/Study-log",
+      "tags": [
+        "公网",
+        "云服务器"
+      ],
+      "icon": "☁️",
+      "host": "47.95.140.199",
+      "languages": [
+        "JavaScript/Node.js"
+      ],
+      "frontend": [
+        "Vue 3"
+      ],
+      "backend": [
+        "Fastify"
+      ],
+      "url": "http://47.95.140.199:3000",
+      "directory": "/root/applications/studylog",
+      "location": "公网",
+      "name": "StudyLog-云端",
+      "description": "部署在阿里云服务器上的公网版 StudyLog 学习成绩记录系统，面向外网提供访问，数据与内网版本相互独立。"
+    },
+    {
+      "id": "aliyun-shunfeng-ledger",
+      "kinds": [
+        "miniapp"
       ],
       "env": "public",
       "github": "",
       "tags": [],
       "icon": "☁️",
       "host": "47.95.140.199",
-      "directory": "/root/applications/shunfeng-ledger"
+      "directory": "/root/applications/shunfeng-ledger",
+      "name": "顺风·账本-云端后端",
+      "description": "顺风账本APP，云上承载后端数据库"
     },
     {
       "id": "shunfeng-ledger-wxmp",
@@ -314,36 +347,8 @@
       ],
       "directory": "/root/applications/shunfeng-ledger-wxmp",
       "location": "公网",
-      "name": "顺风·账本（微信小程序）",
+      "name": "顺风·账本-微信小程序",
       "description": "顺风·账本微信小程序版，云端同步服务部署在阿里云公网 8788；小程序端基于 openid 多用户隔离与 rev 乐观锁同步。"
-    },
-    {
-      "id": "study-log-cloud",
-      "kinds": [
-        "web"
-      ],
-      "env": "public",
-      "github": "https://github.com/guojiaxian/Study-log",
-      "tags": [
-        "公网",
-        "云服务器"
-      ],
-      "icon": "☁️",
-      "host": "47.95.140.199",
-      "languages": [
-        "JavaScript/Node.js"
-      ],
-      "frontend": [
-        "Vue 3"
-      ],
-      "backend": [
-        "Fastify"
-      ],
-      "url": "http://47.95.140.199:3000",
-      "directory": "/root/applications/studylog",
-      "location": "公网",
-      "name": "StudyLog-云端",
-      "description": "部署在阿里云服务器上的公网版 StudyLog 学习成绩记录系统，面向外网提供访问，数据与内网版本相互独立。"
     }
   ],
   "page": {
@@ -351,5 +356,25 @@
     "heroTitle": "应用中心",
     "heroSubtitle": "部署在这台服务器上的个人项目，端口与运行状态每 3 分钟自动探测，源码同步每 5 分钟。"
   },
-  "$comment": "应用展示注解（手工/设置面板维护）。应用清单的唯一来源是 probe-apps.mjs 的统一目录自动发现（探测根目录在 monitor.config.json 的 hosts[].appRoot，每台服务器各自设置）：扫描目录下每个子目录 = 一个应用，目录自身含 .git/package.json 等标记时视为单一应用；新应用自动同时出现在应用中心与监控中心并纳入监控。本文件只提供展示注解：本机应用按 directory、远程应用按 directory/gitDir+host 匹配合并（name/description/icon/github/tags/kinds/https/url/expectedPort/languages/frontend/backend）；\"hidden\": true 表示在前端隐藏（后端照常探测与监控）。可选：顶层 order 数组定义全局默认显示顺序。本机应用可加 https:true；技术栈留空时本机自动识别、远程需手填；healthUrl 已不再参与探测，仅为兼容保留。"
+  "$comment": "应用展示注解（手工/设置面板维护）。应用清单的唯一来源是 probe-apps.mjs 的统一目录自动发现（探测根目录在 monitor.config.json 的 hosts[].appRoot，每台服务器各自设置）：扫描目录下每个子目录 = 一个应用，目录自身含 .git/package.json 等标记时视为单一应用；新应用自动同时出现在应用中心与监控中心并纳入监控。本文件只提供展示注解：本机应用按 directory、远程应用按 directory/gitDir+host 匹配合并（name/description/icon/github/tags/kinds/https/url/expectedPort/languages/frontend/backend）；\"hidden\": true 表示在前端隐藏（后端照常探测与监控）。可选：顶层 order 数组定义全局默认显示顺序。本机应用可加 https:true；技术栈留空时本机自动识别、远程需手填；healthUrl 已不再参与探测，仅为兼容保留。",
+  "order": [
+    "my-homepage",
+    "tv-show",
+    "network-monitor",
+    "expense-assistant",
+    "cloud-monitor",
+    "storage-monitor",
+    "log-gpt-agent",
+    "time-logger",
+    "wedding-plan",
+    "study-log-cloud",
+    "study-log",
+    "shunfeng-ledger",
+    "study-log-wxmp",
+    "shunfeng-ledger-wxmp-local",
+    "cli_app",
+    "jianji-ledger",
+    "aliyun-shunfeng-ledger",
+    "shunfeng-ledger-wxmp"
+  ]
 }
