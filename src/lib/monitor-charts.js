@@ -39,7 +39,9 @@ export function baseOption(yFmt, range = '1h') {
     animationDurationUpdate: reducedMotion ? 0 : 300,
     animationEasingUpdate: 'cubicOut',
     backgroundColor: 'transparent',
-    grid: { left: 44, right: 14, top: 26, bottom: 26 },
+    /* containLabel：网格自动容纳 y 轴标签宽度——内存等窄区间刻度（如 61.85%）比
+       固定 left:44 更宽，曾把标签挤出容器左缘被裁 */
+    grid: { left: 8, right: 14, top: 26, bottom: 26, containLabel: true },
     tooltip: {
       trigger: 'axis',
       axisPointer: { type: 'line' },
