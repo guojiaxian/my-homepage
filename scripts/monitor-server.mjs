@@ -1019,6 +1019,53 @@ async function notifyWebhook(payload) {
 /* ============================ 采集调度 ============================ */
 const hostState = new Map(); // hostId -> {prev, lastSnap, online, error, lastOk, probing}
 const procDetailCache = new Map(); // hostId -> {procs, dirs, procsTotal}
+
+/* ============================ 目录占用（按需 du，5 分钟缓存） ============================ */
+const dirSizeCache = new Map(); // hostId -> { t, sizes: { [path]: bytes } }
+const dirSizeInflight = new Map(); // hostId -> Promise
+const DIR_SIZE_TTL_MS = 5 * 60_000;
+
+function shQuote(s) { return "'" + String(s).replace(/'/g, "'\\''") + "'" }
+function parseDuOutput(out) {
+  const sizes = {};
+  for (const line of String(out).split('\n')) {
+    const i = line.indexOf('\t');
+    if (i <= 0) continue;
+    const bytes = Number(line.slice(0, i));
+    const p = line.slice(i + 1).trim();
+    if (p && Number.isFinite(bytes)) sizes[p] = bytes;
+  }
+  return sizes;
+}
+async function computeDirSizes(host) {
+  const cached = dirSizeCache.get(host.id);
+  if (cached && Date.now() - cached.t < DIR_SIZE_TTL_MS) return { ...cached, cached: true };
+  if (dirSizeInflight.has(host.id)) return dirSizeInflight.get(host.id);
+  const dirs = [...new Set(effectiveTrackedDirsFor(host).map(d => d.path))];
+  const job = (async () => {
+    if (!dirs.length) return { t: Date.now(), sizes: {} };
+    if (host.type === 'local') {
+      const out = await new Promise((resolve) => {
+        execFile('du', ['-sb', '--', ...dirs], { timeout: 30_000, maxBuffer: 4 * 1024 * 1024 }, (err, stdout) => resolve(stdout || ''));
+      });
+      return { t: Date.now(), sizes: parseDuOutput(out) };
+    }
+    /* 远程：一次 SSH 串行 du；路径来自配置，逐条单引号转义，避免注入 */
+    const script = dirs.map((d) => {
+      const q = shQuote(d);
+      return `p=${q}; if [ -e "$p" ]; then b=$(du -sb -- "$p" 2>/dev/null | cut -f1); echo "SIZE \${b:-0} $p"; else echo "SIZE 0 $p"; fi`;
+    }).join('\n');
+    const raw = await sshExecScript(getConnCreds(host), script, 40_000);
+    const sizes = {};
+    for (const line of raw.split('\n')) {
+      const m = /^SIZE (\d+) (.*)$/.exec(line.trim());
+      if (m) sizes[m[2]] = Number(m[1]);
+    }
+    return { t: Date.now(), sizes };
+  })().then((r) => { dirSizeCache.set(host.id, r); return r }).finally(() => dirSizeInflight.delete(host.id));
+  dirSizeInflight.set(host.id, job);
+  return job;
+}
 function stateOf(id) {
   if (!hostState.has(id)) hostState.set(id, { prev: null, lastSnap: null, online: false, error: '尚未探测', lastOk: 0, probing: false });
   return hostState.get(id);
@@ -1634,6 +1681,14 @@ async function route(req, res) {
       if (!st.online || !detail) return sendJson(res, 200, { hostId: host.id, online: !!st.online, procs: [], dirs: [], error: st.error });
       const procs = dirFilter ? detail.procs.filter(x => x.dir === dirFilter) : detail.procs;
       return sendJson(res, 200, { hostId: host.id, online: true, t: st.lastSnap?.t, dirs: detail.dirs, procs, procsTotal: detail.procsTotal });
+    }
+    if (sub === '/dir-sizes' && req.method === 'GET') {
+      try {
+        const r = await computeDirSizes(host);
+        return sendJson(res, 200, { hostId: host.id, t: r.t, cached: !!r.cached, sizes: r.sizes });
+      } catch (e) {
+        return sendJson(res, 500, { error: '目录占用统计失败：' + String(e.message || e) });
+      }
     }
     if (sub === '/agent-install' && req.method === 'GET') {
       const interval = Math.min(300, Math.max(5, +u.searchParams.get('interval') || 20));

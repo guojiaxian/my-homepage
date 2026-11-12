@@ -35,9 +35,44 @@ const METRICS = [
   { v: 'ioW', label: 'IO 写 MB/s' },
   { v: 'threads', label: '线程数' },
   { v: 'fds', label: '句柄数' },
+  { v: 'size', label: '存储占用' },
 ]
 // API 目录对象字段名与指标 key 的映射
-const DIR_FIELD = { cpu: 'cpuPct', mem: 'memMb', ioR: 'ioReadMbs', ioW: 'ioWriteMbs', threads: 'threads', fds: 'fds' }
+const DIR_FIELD = { cpu: 'cpuPct', mem: 'memMb', ioR: 'ioReadMbs', ioW: 'ioWriteMbs', threads: 'threads', fds: 'fds', size: 'sizeMb' }
+
+/* 目录占用按需查询（后端 du -sb，5 分钟缓存）；结果按 path 缓存，自动刷新后重新贴回 dirsList */
+const dirSizeMap = ref(new Map()) // path -> bytes
+const dirSizeLoading = ref(false)
+const dirSizeErr = ref('')
+
+function fmtDirSizeMb(mb) {
+  const v = Number(mb)
+  if (!Number.isFinite(v)) return '-'
+  if (v >= 1024 * 1024) return (v / 1024 / 1024).toFixed(2) + ' TB'
+  if (v >= 1024) return (v / 1024).toFixed(1) + ' GB'
+  return Math.max(0, Math.round(v)) + ' MB'
+}
+function applyDirSizes() {
+  for (const d of dirsList.value) {
+    const bytes = dirSizeMap.value.get(d.path)
+    d.sizeMb = bytes == null ? null : +(bytes / 1048576).toFixed(2)
+  }
+}
+async function loadDirSizes() {
+  if (dirSizeLoading.value) return
+  dirSizeLoading.value = true
+  dirSizeErr.value = ''
+  try {
+    const r = await monApi(`/api/monitor/hosts/${encodeURIComponent(props.host.id)}/dir-sizes`)
+    dirSizeMap.value = new Map(Object.entries(r.sizes || {}))
+    applyDirSizes()
+    await renderDirs()
+  } catch (e) {
+    dirSizeErr.value = e.message
+  } finally {
+    dirSizeLoading.value = false
+  }
+}
 
 async function loadCharts() {
   if (charts) return charts
@@ -63,6 +98,7 @@ async function load() {
     procsList.value = p.procs || []
     procsTotal.value = p.procsTotal || 0
     dirsList.value = p.dirs || []
+    applyDirSizes()
     /* 目录历史对比默认全选：新目录补勾（首载即全选），用户手动取消的不会被自刷勾回 */
     for (const d of dirsList.value) {
       if (!seededDirs.has(d.path)) { seededDirs.add(d.path); compareSet.add(d.path) }
@@ -176,6 +212,7 @@ function renderDirs() {
   if (!dirsList.value.length || !elDirs.value) return // 无目录主机：占位文案已替代图表
   const { hBarOption, cssVar } = mod()
   const field = DIR_FIELD[dirMetric.value] || dirMetric.value
+  const isSize = dirMetric.value === 'size'
   const top = [...dirsList.value].sort((a, b) => (b[field] || 0) - (a[field] || 0)).slice(0, 10)
   inst('dirs', elDirs.value).setOption(hBarOption(
     top.map((d) => d.name),
@@ -184,7 +221,14 @@ function renderDirs() {
       dirPath: d.path,
       itemStyle: { color: cssVar('--accent') },
     })),
-    { labelWidth: 150 },
+    {
+      labelWidth: 150,
+      ...(isSize ? {
+        xFmt: (v) => fmtDirSizeMb(v),
+        labelFmt: (p) => fmtDirSizeMb(p.value),
+        valueFmt: (v) => fmtDirSizeMb(v),
+      } : {}),
+    },
   ), { notMerge: true })
   const c = inst('dirs', elDirs.value)
   c.off('click')
@@ -283,10 +327,15 @@ watch(() => props.host?.id, () => {
   dirFilter.value = ''
   compareSet.clear()
   seededDirs.clear() // 换主机：目录集不同，重新默认全选
+  dirSizeMap.value = new Map()
+  dirSizeErr.value = ''
   loading.value = true
   load()
 })
-watch(dirMetric, () => renderDirs())
+watch(dirMetric, async (v) => {
+  if (v === 'size' && !dirSizeMap.value.size) await loadDirSizes()
+  renderDirs()
+})
 
 let timer = null
 onMounted(() => {
@@ -346,6 +395,7 @@ onBeforeUnmount(() => {
         <select v-model="dirMetric" class="mini-select">
           <option v-for="m in METRICS" :key="m.v" :value="m.v">{{ m.label }}</option>
         </select>
+        <span v-if="dirMetric === 'size'" class="hint">{{ dirSizeLoading ? '统计目录占用…' : dirSizeErr ? '统计失败' : '按目录递归统计' }}</span>
         <span class="hint">点击条目过滤下方进程</span>
       </h4>
       <div v-if="dirsList.length" ref="elDirs" class="chart wide-tall" />

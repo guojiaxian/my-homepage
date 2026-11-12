@@ -97,6 +97,7 @@ export function hBarOption(cats, values, opts = {}) {
       backgroundColor: cssVar('--bg-soft'),
       borderColor: cssVar('--border'),
       textStyle: { color: cssVar('--text'), fontSize: 12 },
+      ...(opts.valueFmt ? { valueFormatter: opts.valueFmt } : {}),
     },
     xAxis: {
       type: 'value',
